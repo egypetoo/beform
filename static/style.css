@@ -1,0 +1,251 @@
+:root {
+    --bg: #070707;
+    --card: #121212;
+    --text: #f7f7f7;
+    --muted: #b5b5b5;
+    --orange: #f58220;
+    --orange-soft: #ff9a3c;
+    --danger: #ff6b6b;
+    --border: rgba(255, 255, 255, 0.08);
+    --input: #1a1a1a;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "Inter", "Segoe UI", Tahoma, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+
+.glow {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 50% -10%, rgba(245, 130, 32, 0.22), transparent 42%),
+        radial-gradient(circle at 90% 90%, rgba(245, 130, 32, 0.08), transparent 30%);
+}
+
+.page {
+    position: relative;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 36px 16px 64px;
+}
+
+.hero,
+.form-shell,
+.errors {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.hero {
+    text-align: center;
+    padding: 28px 24px 24px;
+    margin-bottom: 18px;
+    background: #000;
+}
+
+.logo {
+    display: block;
+    width: min(280px, 70%);
+    margin: 0 auto 18px;
+}
+
+.eyebrow {
+    margin: 0 0 6px;
+    color: var(--orange);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-family: "Inter", sans-serif;
+}
+
+h1 {
+    margin: 0 0 8px;
+    font-size: 30px;
+    font-weight: 800;
+}
+
+.subtitle,
+.muted,
+.success p {
+    color: var(--muted);
+    margin: 0;
+}
+
+.date-badge {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 18px;
+    padding: 10px 18px;
+    border: 1px solid rgba(245, 130, 32, 0.35);
+    border-radius: 999px;
+    background: rgba(245, 130, 32, 0.08);
+}
+
+.date-badge span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.date-badge strong {
+    color: var(--orange-soft);
+    font-size: 16px;
+}
+
+.form-shell {
+    padding: 28px 24px;
+}
+
+.field {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+label span {
+    color: var(--orange);
+}
+
+input[type="text"],
+input[type="date"],
+input[type="time"],
+select,
+textarea {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 13px 14px;
+    font-size: 16px;
+    outline: none;
+    background: var(--input);
+    color: var(--text);
+    font-family: inherit;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: #7d7d7d;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--orange);
+    box-shadow: 0 0 0 3px rgba(245, 130, 32, 0.18);
+}
+
+select,
+input[type="date"],
+input[type="time"] {
+    color-scheme: dark;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 96px;
+}
+
+.time-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+button,
+.success a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    background: linear-gradient(135deg, var(--orange), #ff7a00);
+    color: #111;
+    border: none;
+    border-radius: 14px;
+    padding: 14px 24px;
+    font-size: 17px;
+    font-weight: 800;
+    cursor: pointer;
+    text-decoration: none;
+    font-family: inherit;
+    box-shadow: 0 10px 24px rgba(245, 130, 32, 0.28);
+}
+
+button:hover,
+.success a:hover {
+    filter: brightness(1.05);
+}
+
+.excel-link {
+    display: inline-block;
+    margin-top: 16px;
+    color: var(--orange);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.actions {
+    display: grid;
+    gap: 12px;
+    margin-top: 22px;
+}
+
+.success a.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    box-shadow: none;
+}
+
+.success a {
+    margin-top: 22px;
+}
+
+.errors {
+    color: var(--danger);
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    border-color: rgba(255, 107, 107, 0.35);
+}
+
+.errors p {
+    margin: 4px 0;
+}
+
+.hidden {
+    display: none;
+}
+
+.success {
+    text-align: center;
+    padding: 42px 28px;
+}
+
+.success h1 {
+    margin-bottom: 10px;
+}
+
+@media (max-width: 640px) {
+    h1 {
+        font-size: 24px;
+    }
+
+    .time-grid {
+        grid-template-columns: 1fr;
+    }
+}

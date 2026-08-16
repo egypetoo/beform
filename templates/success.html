@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BE GROUP | Submitted</title>
+    <link rel="icon" href="{{ url_for('static', filename='logo.webp') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page">
+        <section class="form-shell success">
+            <img class="logo" src="{{ url_for('static', filename='logo.webp') }}" alt="BE GROUP">
+            <h1>Request submitted successfully</h1>
+            <p>Your request has been sent to HR.</p>
+            <a href="{{ url_for('index') }}">Submit another request</a>
+        </section>
+    </main>
+</body>
+</html>

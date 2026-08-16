@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BE GROUP | HR Request Form</title>
+    <link rel="icon" href="{{ url_for('static', filename='logo.webp') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page">
+        <header class="hero">
+            <img class="logo" src="{{ url_for('static', filename='logo.webp') }}" alt="BE GROUP">
+            <p class="eyebrow">Human Resources</p>
+            <h1>HR Request Form</h1>
+            <p class="subtitle">Please fill in the details carefully. Fields marked with * are required.</p>
+            <div class="date-badge">
+                <span>Today</span>
+                <strong>{{ today_display }}</strong>
+            </div>
+            <input type="hidden" name="request_date" value="{{ today }}" form="hr-form">
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="card errors">
+                    {% for category, message in messages %}
+                        <p>{{ message }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <form id="hr-form" class="form-shell" method="post" novalidate>
+            <section class="field">
+                <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
+                <input id="fingerprint_id" name="fingerprint_id" type="text" required
+                       inputmode="numeric" pattern="[0-9]+" maxlength="20"
+                       value="{{ form.get('fingerprint_id', '') }}" placeholder="Enter fingerprint number">
+            </section>
+
+            <section class="field">
+                <label for="name">Name <span>*</span></label>
+                <input id="name" name="name" type="text" required
+                       value="{{ form.get('name', '') }}" placeholder="Enter full name">
+            </section>
+
+            <section class="field">
+                <label for="department">Department <span>*</span></label>
+                <select id="department" name="department" required>
+                    <option value="" disabled {% if not form.get('department') %}selected{% endif %}>Select department</option>
+                    {% for dept in departments %}
+                        <option value="{{ dept.value }}"
+                                {% if form.get('department') == dept.value %}selected{% endif %}>
+                            {{ dept.label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </section>
+
+            <section class="field">
+                <label for="request_type">Request Type <span>*</span></label>
+                <select id="request_type" name="request_type" required>
+                    <option value="" disabled {% if not form.get('request_type') %}selected{% endif %}>Select request type</option>
+                    {% for group in leave_groups %}
+                        <optgroup label="{{ group.title }}">
+                            {% for option in group.options %}
+                                <option value="{{ option.value }}"
+                                        {% if form.get('request_type') == option.value %}selected{% endif %}>
+                                    {{ option.en }}
+                                </option>
+                            {% endfor %}
+                        </optgroup>
+                    {% endfor %}
+                </select>
+            </section>
+
+            <section class="field leave-dates" id="leave-dates-card">
+                <div class="time-grid">
+                    <div>
+                        <label for="start_date">From Date <span>*</span></label>
+                        <input id="start_date" name="start_date" type="date"
+                               value="{{ form.get('start_date') or today }}">
+                    </div>
+                    <div>
+                        <label for="end_date">To Date <span>*</span></label>
+                        <input id="end_date" name="end_date" type="date"
+                               value="{{ form.get('end_date') or today }}">
+                    </div>
+                </div>
+            </section>
+
+            <section class="field time-range" id="time-range-card">
+                <div class="time-grid">
+                    <div>
+                        <label for="from_time">From Time <span>*</span></label>
+                        <input id="from_time" name="from_time" type="time"
+                               value="{{ form.get('from_time', '') }}">
+                    </div>
+                    <div>
+                        <label for="to_time">To Time <span>*</span></label>
+                        <input id="to_time" name="to_time" type="time"
+                               value="{{ form.get('to_time', '') }}">
+                    </div>
+                </div>
+            </section>
+
+            <section class="field punch-field" id="punch-in-card">
+                <label for="punch_in_time">Actual Punch-in Time <span>*</span></label>
+                <input id="punch_in_time" name="punch_in_time" type="time"
+                       value="{{ form.get('punch_in_time', '') }}">
+            </section>
+
+            <section class="field punch-field" id="punch-out-card">
+                <label for="punch_out_time">Actual Punch-out Time <span>*</span></label>
+                <input id="punch_out_time" name="punch_out_time" type="time"
+                       value="{{ form.get('punch_out_time', '') }}">
+            </section>
+
+            <section class="field">
+                <label for="notes">Notes</label>
+                <textarea id="notes" name="notes" rows="3" placeholder="Optional">{{ form.get('notes', '') }}</textarea>
+            </section>
+
+            <button type="submit">Submit Request</button>
+        </form>
+    </main>
+
+    <script>
+        const requestType = document.getElementById('request_type');
+        const punchIn = document.getElementById('punch-in-card');
+        const punchOut = document.getElementById('punch-out-card');
+        const leaveDates = document.getElementById('leave-dates-card');
+        const timeRange = document.getElementById('time-range-card');
+        const timeRangeTypes = ['business_mission', 'personal_excuse'];
+
+        function updateFields() {
+            const value = requestType.value;
+
+            punchIn.classList.toggle('hidden', value !== 'missing_punch_in');
+            punchOut.classList.toggle('hidden', value !== 'missing_punch_out');
+            timeRange.classList.toggle('hidden', !timeRangeTypes.includes(value));
+            leaveDates.classList.toggle('hidden', !value || value === 'missing_punch_in' || value === 'missing_punch_out');
+        }
+
+        requestType.addEventListener('change', updateFields);
+        updateFields();
+
+        const fingerprint = document.getElementById('fingerprint_id');
+        fingerprint.addEventListener('input', () => {
+            fingerprint.value = fingerprint.value.replace(/\D/g, '');
+        });
+    </script>
+</body>
+</html>
