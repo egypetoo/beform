@@ -75,6 +75,7 @@
                                         {% if current_status == 'Pending' and row.get('Request ID') %}
                                             <form class="inline-actions" method="post" action="{{ url_for('update_status') }}">
                                                 <input type="hidden" name="request_id" value="{{ row.get('Request ID') }}">
+                                                <input type="hidden" name="department" value="{{ row.get('Department', '') }}">
                                                 <button class="btn-sm btn-approve" name="status" value="Approved" type="submit">Approve</button>
                                                 <button class="btn-sm btn-reject" name="status" value="Rejected" type="submit">Reject</button>
                                             </form>

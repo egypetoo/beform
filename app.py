@@ -3,6 +3,7 @@ from functools import wraps
 from pathlib import Path
 import json
 import os
+import time
 import uuid
 
 from dotenv import load_dotenv
@@ -15,6 +16,9 @@ GOOGLE_SHEET_WEBHOOK = os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "hrform-secret-key")
+
+ROWS_CACHE = {}
+CACHE_SECONDS = 60
 
 
 def today_values():
@@ -108,8 +112,7 @@ def option_lookup():
 
 
 def webhook_url():
-    load_dotenv(BASE_DIR / ".env", override=True)
-    return os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
+    return os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip() or GOOGLE_SHEET_WEBHOOK
 
 
 def sheet_api(payload: dict) -> dict:
@@ -117,7 +120,7 @@ def sheet_api(payload: dict) -> dict:
     if not webhook:
         raise RuntimeError("Google Sheet is not connected")
 
-    response = requests.post(webhook, json=payload, timeout=25)
+    response = requests.post(webhook, json=payload, timeout=20)
     response.raise_for_status()
     try:
         data = json.loads(response.text or "{}")
@@ -132,22 +135,32 @@ def save_submission(row: dict) -> None:
     payload = dict(row)
     payload["action"] = "create"
     sheet_api(payload)
+    ROWS_CACHE.clear()
 
 
 def list_requests(department: str) -> list:
+    now = time.time()
+    cached = ROWS_CACHE.get(department)
+    if cached and now - cached["at"] < CACHE_SECONDS:
+        return cached["rows"]
+
     data = sheet_api({"action": "list", "department": department})
-    return data.get("rows", [])
+    rows = data.get("rows", [])
+    ROWS_CACHE[department] = {"at": now, "rows": rows}
+    return rows
 
 
-def set_request_status(request_id: str, status: str, reviewed_by: str) -> None:
+def set_request_status(request_id: str, status: str, reviewed_by: str, department: str) -> None:
     sheet_api(
         {
             "action": "set_status",
             "request_id": request_id,
             "status": status,
             "reviewed_by": reviewed_by,
+            "department": department,
         }
     )
+    ROWS_CACHE.clear()
 
 
 def login_required(view):
@@ -324,12 +337,13 @@ def update_status():
     manager = session["manager"]
     request_id = request.form.get("request_id", "").strip()
     status = request.form.get("status", "").strip()
+    department = request.form.get("department", "").strip() or manager["department"]
     if status not in {"Approved", "Rejected"} or not request_id:
         flash("Invalid review action.", "error")
         return redirect(url_for("dashboard"))
 
     try:
-        set_request_status(request_id, status, manager["name"])
+        set_request_status(request_id, status, manager["name"], department)
         flash(f"Request {status.lower()} successfully.", "success")
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")

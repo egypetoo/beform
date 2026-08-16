@@ -3,13 +3,14 @@ function doPost(e) {
   const action = data.action || "create";
 
   if (action === "list") {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheetName = !data.department || data.department === "ALL" ? "All" : data.department;
-    const rows = sheetToObjects(getSheetByName(sheetName));
-    return jsonResponse({ ok: true, rows: rows });
+    const sheet = ss.getSheetByName(sheetName);
+    return jsonResponse({ ok: true, rows: sheet ? sheetToObjects(sheet) : [] });
   }
 
   if (action === "set_status") {
-    updateStatus(data.request_id, data.status, data.reviewed_by || "");
+    updateStatus(data.request_id, data.status, data.reviewed_by || "", data.department || "");
     return jsonResponse({ ok: true });
   }
 
@@ -92,9 +93,12 @@ function ensureHeaders(sheet) {
   }
 
   let headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
-  if (headers[0] !== "Request ID") {
+  let changed = false;
+
+  if (String(headers[0]).trim() !== "Request ID") {
     sheet.insertColumnBefore(1);
     sheet.getRange(1, 1).setValue("Request ID");
+    changed = true;
   }
 
   headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -102,10 +106,13 @@ function ensureHeaders(sheet) {
     if (headers.indexOf(name) === -1) {
       sheet.getRange(1, sheet.getLastColumn() + 1).setValue(name);
       headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      changed = true;
     }
   });
 
-  formatHeader(sheet);
+  if (changed) {
+    formatHeader(sheet);
+  }
 }
 
 function formatHeader(sheet) {
@@ -115,7 +122,6 @@ function formatHeader(sheet) {
 }
 
 function sheetToObjects(sheet) {
-  ensureHeaders(sheet);
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
   if (lastRow < 2) {
@@ -147,14 +153,22 @@ function stringifyValue(value) {
   return value == null ? "" : String(value);
 }
 
-function updateStatus(requestId, status, reviewedBy) {
+function updateStatus(requestId, status, reviewedBy, department) {
   if (!requestId) {
     throw new Error("Missing request id");
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  ss.getSheets().forEach(function (sheet) {
-    updateSheetStatus(sheet, requestId, status, reviewedBy);
+  const names = ["All"];
+  if (department && department !== "ALL") {
+    names.push(department);
+  }
+
+  names.forEach(function (name) {
+    const sheet = ss.getSheetByName(name);
+    if (sheet) {
+      updateSheetStatus(sheet, requestId, status, reviewedBy);
+    }
   });
 }
 
@@ -163,7 +177,6 @@ function updateSheetStatus(sheet, requestId, status, reviewedBy) {
     return;
   }
 
-  ensureHeaders(sheet);
   const lastCol = sheet.getLastColumn();
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const idCol = headers.indexOf("Request ID") + 1;
