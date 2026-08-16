@@ -1,6 +1,7 @@
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
+from threading import Lock, Thread
 import json
 import os
 import time
@@ -19,6 +20,9 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "hrform-secret-key")
 
 ROWS_CACHE = {}
 CACHE_SECONDS = 60
+RECENT_SUBMISSIONS = {}
+RECENT_LOCK = Lock()
+DEDUP_SECONDS = 90
 
 
 def today_values():
@@ -138,6 +142,39 @@ def save_submission(row: dict) -> None:
     ROWS_CACHE.clear()
 
 
+def save_submission_later(row: dict) -> None:
+    try:
+        save_submission(row)
+    except Exception as exc:
+        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+
+
+def submission_fingerprint(row: dict) -> str:
+    return "|".join([
+        str(row.get("fingerprint_id") or ""),
+        str(row.get("department") or ""),
+        str(row.get("request_type") or ""),
+        str(row.get("start_date") or ""),
+        str(row.get("end_date") or ""),
+        str(row.get("from_time") or ""),
+        str(row.get("to_time") or ""),
+        str(row.get("punch_in_time") or ""),
+        str(row.get("punch_out_time") or ""),
+    ])
+
+
+def claim_submission(key: str) -> bool:
+    now = time.time()
+    with RECENT_LOCK:
+        expired = [item for item, stamp in RECENT_SUBMISSIONS.items() if now - stamp > DEDUP_SECONDS]
+        for item in expired:
+            RECENT_SUBMISSIONS.pop(item, None)
+        if key in RECENT_SUBMISSIONS:
+            return False
+        RECENT_SUBMISSIONS[key] = now
+        return True
+
+
 def list_requests(department: str) -> list:
     now = time.time()
     cached = ROWS_CACHE.get(department)
@@ -231,36 +268,27 @@ def index():
 
         selected = options[request_type]
         department_label = next(item["label"] for item in DEPARTMENTS if item["value"] == department)
-        try:
-            save_submission(
-                {
-                    "request_id": uuid.uuid4().hex[:12].upper(),
-                    "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "fingerprint_id": fingerprint_id,
-                    "name": name,
-                    "department": department_label,
-                    "request_type": selected["en"],
-                    "request_date": request_date,
-                    "punch_in_time": punch_in_time if request_type == "missing_punch_in" else "",
-                    "punch_out_time": punch_out_time if request_type == "missing_punch_out" else "",
-                    "from_time": from_time if request_type in TIME_RANGE_TYPES else "",
-                    "to_time": to_time if request_type in TIME_RANGE_TYPES else "",
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "notes": notes,
-                    "status": "Pending",
-                }
-            )
-        except Exception as exc:
-            (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-            flash("Could not save the request to the HR sheet. Please try again.", "error")
-            return render_template(
-                "index.html",
-                leave_groups=LEAVE_GROUPS,
-                departments=DEPARTMENTS,
-                form=request.form,
-                **today_values(),
-            )
+        row = {
+            "request_id": uuid.uuid4().hex[:12].upper(),
+            "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "fingerprint_id": fingerprint_id,
+            "name": name,
+            "department": department_label,
+            "request_type": selected["en"],
+            "request_date": request_date,
+            "punch_in_time": punch_in_time if request_type == "missing_punch_in" else "",
+            "punch_out_time": punch_out_time if request_type == "missing_punch_out" else "",
+            "from_time": from_time if request_type in TIME_RANGE_TYPES else "",
+            "to_time": to_time if request_type in TIME_RANGE_TYPES else "",
+            "start_date": start_date,
+            "end_date": end_date,
+            "notes": notes,
+            "status": "Pending",
+        }
+        if not claim_submission(submission_fingerprint(row)):
+            return redirect(url_for("success"))
+
+        Thread(target=save_submission_later, args=(row,), daemon=True).start()
         return redirect(url_for("success"))
 
     return render_template(

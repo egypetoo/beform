@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
 </head>
 <body>
     <div class="glow"></div>
@@ -126,7 +126,7 @@
                 <textarea id="notes" name="notes" rows="3" placeholder="Optional">{{ form.get('notes', '') }}</textarea>
             </section>
 
-            <button type="submit">Submit Request</button>
+            <button type="submit" id="submit-btn">Submit Request</button>
             <a class="excel-link" href="{{ url_for('login') }}">Manager login</a>
         </form>
     </main>
@@ -154,6 +154,19 @@
         const fingerprint = document.getElementById('fingerprint_id');
         fingerprint.addEventListener('input', () => {
             fingerprint.value = fingerprint.value.replace(/\D/g, '');
+        });
+
+        const form = document.getElementById('hr-form');
+        const submitBtn = document.getElementById('submit-btn');
+        let sending = false;
+        form.addEventListener('submit', (event) => {
+            if (sending) {
+                event.preventDefault();
+                return;
+            }
+            sending = true;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Sending...';
         });
     </script>
 </body>

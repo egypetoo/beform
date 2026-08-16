@@ -187,9 +187,10 @@ button,
     box-shadow: 0 10px 24px rgba(245, 130, 32, 0.28);
 }
 
-button:hover,
-.success a:hover {
-    filter: brightness(1.05);
+button:disabled {
+    opacity: 0.7;
+    cursor: wait;
+    pointer-events: none;
 }
 
 .excel-link {
