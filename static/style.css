@@ -246,7 +246,7 @@ button:hover,
         font-size: 24px;
     }
 
-    .time-grid {
+    .filter-bar {
         grid-template-columns: 1fr;
     }
 }
@@ -259,7 +259,41 @@ button:hover,
     margin-bottom: 18px;
 }
 
-.filters {
+.filter-bar {
+    display: grid;
+    grid-template-columns: 1fr 220px auto;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.filter-bar button {
+    width: auto;
+    padding: 12px 18px;
+}
+
+.bulk-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.select-all-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.row-check,
+#select-all {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--orange);
+}
     display: flex;
     flex-wrap: wrap;
     gap: 8px;

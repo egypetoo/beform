@@ -150,14 +150,13 @@ def list_requests(department: str) -> list:
     return rows
 
 
-def set_request_status(request_id: str, status: str, reviewed_by: str, department: str) -> None:
+def set_request_status(items: list, status: str, reviewed_by: str) -> None:
     sheet_api(
         {
             "action": "set_status",
-            "request_id": request_id,
+            "items": items,
             "status": status,
             "reviewed_by": reviewed_by,
-            "department": department,
         }
     )
     ROWS_CACHE.clear()
@@ -312,6 +311,8 @@ def logout():
 def dashboard():
     manager = session["manager"]
     status_filter = request.args.get("status", "Pending")
+    search_query = request.args.get("q", "").strip()
+    type_filter = request.args.get("type", "").strip()
     try:
         rows = list_requests(manager["department"])
     except Exception as exc:
@@ -319,14 +320,37 @@ def dashboard():
         rows = []
         flash("Could not load requests from the HR sheet.", "error")
 
+    request_types = sorted({
+        str(row.get("Request Type") or "").strip()
+        for row in rows
+        if row.get("Request Type")
+    })
+
     if status_filter and status_filter != "All":
         rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
+    if type_filter:
+        rows = [row for row in rows if (row.get("Request Type") or "") == type_filter]
+    if search_query:
+        needle = search_query.lower()
+        rows = [
+            row for row in rows
+            if needle in " ".join([
+                str(row.get("Name") or ""),
+                str(row.get("Fingerprint Number") or ""),
+                str(row.get("Department") or ""),
+                str(row.get("Request Type") or ""),
+                str(row.get("Notes") or ""),
+            ]).lower()
+        ]
 
     return render_template(
         "dashboard.html",
         manager=manager,
         rows=rows,
         status_filter=status_filter,
+        search_query=search_query,
+        type_filter=type_filter,
+        request_types=request_types,
         statuses=["Pending", "Approved", "Rejected", "All"],
     )
 
@@ -335,21 +359,40 @@ def dashboard():
 @login_required
 def update_status():
     manager = session["manager"]
-    request_id = request.form.get("request_id", "").strip()
     status = request.form.get("status", "").strip()
+    selected = request.form.getlist("selected")
+    request_id = request.form.get("request_id", "").strip()
     department = request.form.get("department", "").strip() or manager["department"]
-    if status not in {"Approved", "Rejected"} or not request_id:
-        flash("Invalid review action.", "error")
-        return redirect(url_for("dashboard"))
+
+    items = []
+    if selected:
+        for value in selected:
+            request_id_value, _, dept_value = value.partition("||")
+            if request_id_value:
+                items.append({
+                    "request_id": request_id_value.strip(),
+                    "department": dept_value.strip() or department,
+                })
+    elif request_id:
+        items.append({"request_id": request_id, "department": department})
+
+    if status not in {"Approved", "Rejected"} or not items:
+        flash("Select at least one request first.", "error")
+        return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
 
     try:
-        set_request_status(request_id, status, manager["name"], department)
-        flash(f"Request {status.lower()} successfully.", "success")
+        set_request_status(items, status, manager["name"])
+        flash(f"{len(items)} request(s) {status.lower()} successfully.", "success")
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
         flash("Could not update the request status.", "error")
 
-    return redirect(url_for("dashboard", status=request.args.get("status", "Pending")))
+    return redirect(url_for(
+        "dashboard",
+        status=request.form.get("status_filter", "Pending"),
+        q=request.form.get("q", ""),
+        type=request.form.get("type_filter", ""),
+    ))
 
 
 if __name__ == "__main__":

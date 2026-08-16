@@ -32,66 +32,124 @@
         {% endwith %}
 
         <section class="form-shell">
+            <form class="filter-bar" method="get">
+                <input type="hidden" name="status" value="{{ status_filter }}">
+                <input type="search" name="q" value="{{ search_query }}" placeholder="Search name, fingerprint, type...">
+                <select name="type">
+                    <option value="">All types</option>
+                    {% for request_type in request_types %}
+                        <option value="{{ request_type }}" {% if type_filter == request_type %}selected{% endif %}>{{ request_type }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit">Filter</button>
+            </form>
+
             <div class="filters">
                 {% for status in statuses %}
                     <a class="filter-chip {% if status_filter == status %}active{% endif %}"
-                       href="{{ url_for('dashboard', status=status) }}">{{ status }}</a>
+                       href="{{ url_for('dashboard', status=status, q=search_query, type=type_filter) }}">{{ status }}</a>
                 {% endfor %}
             </div>
 
             {% if rows %}
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Submitted</th>
-                                <th>Name</th>
-                                <th>Fingerprint</th>
-                                <th>Department</th>
-                                <th>Type</th>
-                                <th>Dates</th>
-                                <th>Time</th>
-                                <th>Notes</th>
-                                <th>Status</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for row in rows %}
-                                {% set current_status = row.get('Status') or 'Pending' %}
+                <form method="post" action="{{ url_for('update_status') }}" id="bulk-form">
+                    <input type="hidden" name="status_filter" value="{{ status_filter }}">
+                    <input type="hidden" name="q" value="{{ search_query }}">
+                    <input type="hidden" name="type_filter" value="{{ type_filter }}">
+                    <input type="hidden" name="request_id" id="single-id" value="">
+                    <input type="hidden" name="department" id="single-dept" value="">
+
+                    <div class="bulk-bar">
+                        <label class="select-all-label">
+                            <input type="checkbox" id="select-all">
+                            Select all
+                        </label>
+                        <button class="btn-sm btn-approve" name="status" value="Approved" type="submit">Approve selected</button>
+                        <button class="btn-sm btn-reject" name="status" value="Rejected" type="submit">Reject selected</button>
+                    </div>
+
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
                                 <tr>
-                                    <td>{{ row.get('Submitted At', '') }}</td>
-                                    <td>{{ row.get('Name', '') }}</td>
-                                    <td>{{ row.get('Fingerprint Number', '') }}</td>
-                                    <td>{{ row.get('Department', '') }}</td>
-                                    <td>{{ row.get('Request Type', '') }}</td>
-                                    <td>{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</td>
-                                    <td>{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') or '-' }}</td>
-                                    <td>{{ row.get('Notes', '') }}</td>
-                                    <td>
-                                        <span class="badge badge-{{ current_status|lower }}">{{ current_status }}</span>
-                                    </td>
-                                    <td>
-                                        {% if current_status == 'Pending' and row.get('Request ID') %}
-                                            <form class="inline-actions" method="post" action="{{ url_for('update_status') }}">
-                                                <input type="hidden" name="request_id" value="{{ row.get('Request ID') }}">
-                                                <input type="hidden" name="department" value="{{ row.get('Department', '') }}">
-                                                <button class="btn-sm btn-approve" name="status" value="Approved" type="submit">Approve</button>
-                                                <button class="btn-sm btn-reject" name="status" value="Rejected" type="submit">Reject</button>
-                                            </form>
-                                        {% else %}
-                                            <span class="muted">{{ row.get('Reviewed By', '') }}</span>
-                                        {% endif %}
-                                    </td>
+                                    <th></th>
+                                    <th>Submitted</th>
+                                    <th>Name</th>
+                                    <th>Fingerprint</th>
+                                    <th>Department</th>
+                                    <th>Type</th>
+                                    <th>Dates</th>
+                                    <th>Time</th>
+                                    <th>Notes</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
                                 </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody>
+                                {% for row in rows %}
+                                    {% set current_status = row.get('Status') or 'Pending' %}
+                                    <tr>
+                                        <td>
+                                            {% if current_status == 'Pending' and row.get('Request ID') %}
+                                                <input class="row-check" type="checkbox" name="selected"
+                                                       value="{{ row.get('Request ID') }}||{{ row.get('Department', '') }}">
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ row.get('Submitted At', '') }}</td>
+                                        <td>{{ row.get('Name', '') }}</td>
+                                        <td>{{ row.get('Fingerprint Number', '') }}</td>
+                                        <td>{{ row.get('Department', '') }}</td>
+                                        <td>{{ row.get('Request Type', '') }}</td>
+                                        <td>{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</td>
+                                        <td>{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') or '-' }}</td>
+                                        <td>{{ row.get('Notes', '') }}</td>
+                                        <td>
+                                            <span class="badge badge-{{ current_status|lower }}">{{ current_status }}</span>
+                                        </td>
+                                        <td>
+                                            {% if current_status == 'Pending' and row.get('Request ID') %}
+                                                <div class="inline-actions">
+                                                    <button class="btn-sm btn-approve" name="status" value="Approved" type="submit"
+                                                            data-id="{{ row.get('Request ID') }}"
+                                                            data-dept="{{ row.get('Department', '') }}"
+                                                            onclick="setSingle(this)">Approve</button>
+                                                    <button class="btn-sm btn-reject" name="status" value="Rejected" type="submit"
+                                                            data-id="{{ row.get('Request ID') }}"
+                                                            data-dept="{{ row.get('Department', '') }}"
+                                                            onclick="setSingle(this)">Reject</button>
+                                                </div>
+                                            {% else %}
+                                                <span class="muted">{{ row.get('Reviewed By', '') }}</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </form>
             {% else %}
                 <p class="empty-state">No requests found for this filter.</p>
             {% endif %}
         </section>
     </main>
+    <script>
+        const selectAll = document.getElementById('select-all');
+        if (selectAll) {
+            selectAll.addEventListener('change', () => {
+                document.querySelectorAll('.row-check').forEach((checkbox) => {
+                    checkbox.checked = selectAll.checked;
+                });
+            });
+        }
+
+        function setSingle(button) {
+            document.querySelectorAll('.row-check').forEach((checkbox) => {
+                checkbox.checked = false;
+            });
+            document.getElementById('single-id').value = button.dataset.id || '';
+            document.getElementById('single-dept').value = button.dataset.dept || '';
+        }
+    </script>
 </body>
 </html>

@@ -10,7 +10,10 @@ function doPost(e) {
   }
 
   if (action === "set_status") {
-    updateStatus(data.request_id, data.status, data.reviewed_by || "", data.department || "");
+    const items = data.items && data.items.length
+      ? data.items
+      : [{ request_id: data.request_id, department: data.department || "" }];
+    updateStatuses(items, data.status, data.reviewed_by || "");
     return jsonResponse({ ok: true });
   }
 
@@ -202,26 +205,33 @@ function stringifyValue(value) {
   return value == null ? "" : String(value);
 }
 
-function updateStatus(requestId, status, reviewedBy, department) {
-  if (!requestId) {
+function updateStatuses(items, status, reviewedBy) {
+  const ids = [];
+  const names = { All: true };
+
+  (items || []).forEach(function (item) {
+    if (item && item.request_id) {
+      ids.push(String(item.request_id));
+      if (item.department && item.department !== "ALL") {
+        names[item.department] = true;
+      }
+    }
+  });
+
+  if (!ids.length) {
     throw new Error("Missing request id");
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const names = ["All"];
-  if (department && department !== "ALL") {
-    names.push(department);
-  }
-
-  names.forEach(function (name) {
+  Object.keys(names).forEach(function (name) {
     const sheet = ss.getSheetByName(name);
     if (sheet) {
-      updateSheetStatus(sheet, requestId, status, reviewedBy);
+      updateSheetStatuses(sheet, ids, status, reviewedBy);
     }
   });
 }
 
-function updateSheetStatus(sheet, requestId, status, reviewedBy) {
+function updateSheetStatuses(sheet, requestIds, status, reviewedBy) {
   if (sheet.getLastRow() < 2) {
     return;
   }
@@ -239,9 +249,13 @@ function updateSheetStatus(sheet, requestId, status, reviewedBy) {
 
   const ids = sheet.getRange(2, idCol, sheet.getLastRow() - 1, 1).getValues();
   const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+  const wanted = {};
+  requestIds.forEach(function (id) {
+    wanted[String(id)] = true;
+  });
 
   for (let i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]) === String(requestId)) {
+    if (wanted[String(ids[i][0])]) {
       const row = i + 2;
       sheet.getRange(row, statusCol).setValue(status);
       if (reviewedByCol) {
