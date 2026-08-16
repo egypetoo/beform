@@ -261,14 +261,21 @@ button:hover,
 
 .filter-bar {
     display: grid;
-    grid-template-columns: 1fr 220px auto;
+    grid-template-columns: minmax(0, 1fr) 200px 120px;
     gap: 10px;
     margin-bottom: 16px;
+    align-items: stretch;
+}
+
+.filter-bar input,
+.filter-bar select {
+    min-width: 0;
 }
 
 .filter-bar button {
-    width: auto;
-    padding: 12px 18px;
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 15px;
 }
 
 .bulk-bar {
@@ -294,23 +301,37 @@ button:hover,
     height: 18px;
     accent-color: var(--orange);
 }
+
+.filters {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 18px;
+    margin: 0 0 20px;
 }
 
-.filter-chip {
-    color: var(--muted);
+a.filter-chip,
+a.filter-chip:link,
+a.filter-chip:visited {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #f7f7f7;
+    background: #1a1a1a;
     text-decoration: none;
-    border: 1px solid var(--border);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 999px;
-    padding: 8px 14px;
+    padding: 8px 16px;
     font-weight: 700;
     font-size: 14px;
 }
 
-.filter-chip.active {
+a.filter-chip:hover {
+    border-color: var(--orange);
+    color: #fff;
+}
+
+a.filter-chip.active,
+a.filter-chip.active:visited {
     color: #111;
     background: var(--orange);
     border-color: var(--orange);
@@ -397,5 +418,6 @@ th {
 
 .empty-state {
     color: var(--muted);
-    margin: 12px 0 0;
+    margin: 8px 0 4px;
+    padding: 18px 4px;
 }
