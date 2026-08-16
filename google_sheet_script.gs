@@ -1,5 +1,15 @@
 const SHEET_SECRET = "HNCAHozrrkIAst0M1O_ZMqO9eY9XB4fILazhfu79ka0";
 
+// Run this once from the Apps Script editor (Run ▶) and click Allow.
+// Deploying a new version is not enough until mail permission is granted.
+function authorizeMail() {
+  MailApp.sendEmail(
+    Session.getActiveUser().getEmail() || "authorize@example.com",
+    "[BE GROUP] Mail permission enabled",
+    "Google Mail access is working. You can return to the dashboard and save your notification email."
+  );
+}
+
 function doPost(e) {
   const data = parseData(e);
   if (!SHEET_SECRET || data.secret !== SHEET_SECRET) {
