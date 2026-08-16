@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=7">
 </head>
 <body>
     <div class="glow"></div>
@@ -66,6 +66,8 @@
                             <input type="checkbox" id="select-all">
                             Select all
                         </label>
+                        <input class="reason-field" type="text" name="rejection_reason" id="rejection-reason"
+                               maxlength="300" placeholder="Rejection reason (required to reject)">
                         <button class="btn-sm btn-approve" type="submit" data-action="Approved">Approve selected</button>
                         <button class="btn-sm btn-reject" type="submit" data-action="Rejected">Reject selected</button>
                     </div>
@@ -84,6 +86,7 @@
                                     <th>Time</th>
                                     <th>Notes</th>
                                     <th>Status</th>
+                                    <th>Reason</th>
                                     <th>Action</th>
                                 </tr>
                             </thead>
@@ -104,10 +107,11 @@
                                         <td>{{ row.get('Request Type', '') }}</td>
                                         <td>{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</td>
                                         <td>{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') or '-' }}</td>
-                                        <td>{{ row.get('Notes', '') }}</td>
+                                        <td class="wrap-cell">{{ row.get('Notes', '') }}</td>
                                         <td>
                                             <span class="badge badge-{{ current_status|lower }}">{{ current_status }}</span>
                                         </td>
+                                        <td class="wrap-cell">{{ row.get('Rejection Reason', '') if current_status == 'Rejected' else '' }}</td>
                                         <td>
                                             {% if current_status == 'Pending' and row.get('Request ID') %}
                                                 <div class="inline-actions">
@@ -170,6 +174,19 @@
                 if (sending) {
                     event.preventDefault();
                     return;
+                }
+                if (actionStatus.value === 'Rejected') {
+                    const reasonInput = document.getElementById('rejection-reason');
+                    let reason = (reasonInput.value || '').trim();
+                    if (!reason) {
+                        reason = (window.prompt('Please enter a rejection reason:') || '').trim();
+                        reasonInput.value = reason;
+                    }
+                    if (!reason) {
+                        event.preventDefault();
+                        alert('A rejection reason is required.');
+                        return;
+                    }
                 }
                 sending = true;
             });

@@ -14,11 +14,15 @@ function doPost(e) {
     return jsonResponse({ ok: true, rows: sheet ? sheetToObjects(sheet) : [] });
   }
 
+  if (action === "lookup") {
+    return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "") });
+  }
+
   if (action === "set_status") {
     const items = data.items && data.items.length
       ? data.items
       : [{ request_id: data.request_id, department: data.department || "" }];
-    updateStatuses(items, data.status, data.reviewed_by || "");
+    updateStatuses(items, data.status, data.reviewed_by || "", data.reason || "");
     return jsonResponse({ ok: true });
   }
 
@@ -48,11 +52,13 @@ function doPost(e) {
     data.status || "Pending",
     "",
     "",
+    "",
   ];
 
   const allSheet = getSheetByName("All");
   deptSheet.appendRow(row);
   allSheet.appendRow(row);
+  notifyManagers(data);
 
   return jsonResponse({ ok: true, duplicate: false });
 }
@@ -251,6 +257,7 @@ function headerList() {
     "Status",
     "Reviewed By",
     "Reviewed At",
+    "Rejection Reason",
   ];
 }
 
@@ -271,7 +278,7 @@ function ensureHeaders(sheet) {
   }
 
   headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  ["Status", "Reviewed By", "Reviewed At"].forEach(function (name) {
+  ["Status", "Reviewed By", "Reviewed At", "Rejection Reason"].forEach(function (name) {
     if (headers.indexOf(name) === -1) {
       sheet.getRange(1, sheet.getLastColumn() + 1).setValue(name);
       headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -367,7 +374,70 @@ function stringifyValue(value) {
   return value == null ? "" : String(value);
 }
 
-function updateStatuses(items, status, reviewedBy) {
+function lookupByFingerprint(fingerprint) {
+  const fp = normalizeText(fingerprint);
+  if (!fp) {
+    return [];
+  }
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("All");
+  if (!sheet) {
+    return [];
+  }
+
+  return sheetToObjects(sheet)
+    .filter(function (row) {
+      return normalizeText(row["Fingerprint Number"]) === fp;
+    })
+    .slice(0, 20);
+}
+
+function notifyManagers(data) {
+  const emails = [];
+  const seen = {};
+  (data.notify_emails || []).forEach(function (email) {
+    const value = String(email || "").trim();
+    const key = value.toLowerCase();
+    if (value && value.indexOf("@") > 0 && !seen[key]) {
+      seen[key] = true;
+      emails.push(value);
+    }
+  });
+  if (!emails.length) {
+    return;
+  }
+
+  const name = data.name || "An employee";
+  const department = data.department || "";
+  const type = data.request_type || "HR request";
+  const dates = [data.start_date || "", data.end_date || ""].filter(Boolean).join(" → ");
+  const dashboard = data.dashboard_url || "";
+  const lines = [
+    "A new HR request is waiting for review.",
+    "",
+    "Name: " + name,
+    "Fingerprint: " + (data.fingerprint_id || ""),
+    "Department: " + department,
+    "Type: " + type,
+    "Dates: " + (dates || "-"),
+    "Notes: " + (data.notes || "-"),
+  ];
+  if (dashboard) {
+    lines.push("", "Review it here: " + dashboard);
+  }
+
+  try {
+    MailApp.sendEmail({
+      to: emails.join(","),
+      subject: "[BE GROUP] New HR request — " + (department || "Team") + " — " + type,
+      body: lines.join("\n"),
+    });
+  } catch (error) {
+    // Saving the request should not fail if email is unavailable.
+  }
+}
+
+function updateStatuses(items, status, reviewedBy, reason) {
   const ids = [];
   const names = { All: true };
 
@@ -388,22 +458,24 @@ function updateStatuses(items, status, reviewedBy) {
   Object.keys(names).forEach(function (name) {
     const sheet = ss.getSheetByName(name);
     if (sheet) {
-      updateSheetStatuses(sheet, ids, status, reviewedBy);
+      updateSheetStatuses(sheet, ids, status, reviewedBy, reason || "");
     }
   });
 }
 
-function updateSheetStatuses(sheet, requestIds, status, reviewedBy) {
+function updateSheetStatuses(sheet, requestIds, status, reviewedBy, reason) {
   if (sheet.getLastRow() < 2) {
     return;
   }
 
+  ensureHeaders(sheet);
   const lastCol = sheet.getLastColumn();
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const idCol = headers.indexOf("Request ID") + 1;
   const statusCol = headers.indexOf("Status") + 1;
   const reviewedByCol = headers.indexOf("Reviewed By") + 1;
   const reviewedAtCol = headers.indexOf("Reviewed At") + 1;
+  const reasonCol = headers.indexOf("Rejection Reason") + 1;
 
   if (!idCol || !statusCol) {
     return;
@@ -425,6 +497,9 @@ function updateSheetStatuses(sheet, requestIds, status, reviewedBy) {
       }
       if (reviewedAtCol) {
         sheet.getRange(row, reviewedAtCol).setValue(now);
+      }
+      if (reasonCol) {
+        sheet.getRange(row, reasonCol).setValue(status === "Rejected" ? reason : "");
       }
       colorRow(sheet, row, lastCol, status);
     }

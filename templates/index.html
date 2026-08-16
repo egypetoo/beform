@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=7">
 </head>
 <body>
     <div class="glow"></div>
@@ -128,7 +128,10 @@
             </section>
 
             <button type="submit" id="submit-btn">Submit Request</button>
-            <a class="excel-link" href="{{ url_for('login') }}">Manager login</a>
+            <div class="form-links">
+                <a class="excel-link" href="{{ url_for('track') }}">Track your request</a>
+                <a class="excel-link" href="{{ url_for('login') }}">Manager login</a>
+            </div>
         </form>
     </main>
 

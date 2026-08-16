@@ -38,6 +38,10 @@ LOGIN_ATTEMPTS = {}
 LOGIN_LOCK = Lock()
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 300
+TRACK_ATTEMPTS = {}
+TRACK_LOCK = Lock()
+MAX_TRACK_ATTEMPTS = 8
+TRACK_WINDOW_SECONDS = 300
 
 
 def today_values():
@@ -197,6 +201,41 @@ def can_review_department(manager: dict, department: str) -> bool:
     return department == manager.get("department")
 
 
+def manager_notify_emails(department_label: str) -> list:
+    load_dotenv(BASE_DIR / ".env", override=True)
+    mapping = {
+        "Web": os.getenv("MANAGER_WEB_EMAIL", ""),
+        "Social": os.getenv("MANAGER_SOCIAL_EMAIL", ""),
+        "Accounting": os.getenv("MANAGER_ACCOUNTING_EMAIL", ""),
+        "Sales": os.getenv("MANAGER_SALES_EMAIL", ""),
+        "HR": os.getenv("MANAGER_HR_EMAIL", ""),
+    }
+    emails = []
+    seen = set()
+    for value in (mapping.get(department_label, ""), os.getenv("MANAGER_HR_EMAIL", "")):
+        email = (value or "").strip()
+        key = email.lower()
+        if email and "@" in email and key not in seen:
+            seen.add(key)
+            emails.append(email)
+    return emails
+
+
+def app_base_url() -> str:
+    return (os.getenv("APP_BASE_URL", "") or "https://form.be-group.com").rstrip("/")
+
+
+def track_is_limited(ip: str) -> bool:
+    now = time.time()
+    with TRACK_LOCK:
+        record = TRACK_ATTEMPTS.get(ip)
+        if not record or now - record["start"] > TRACK_WINDOW_SECONDS:
+            TRACK_ATTEMPTS[ip] = {"count": 1, "start": now}
+            return False
+        record["count"] += 1
+        return record["count"] > MAX_TRACK_ATTEMPTS
+
+
 @app.context_processor
 def inject_security():
     return {"csrf_token": get_csrf_token()}
@@ -235,6 +274,8 @@ def set_security_headers(response):
 def save_submission(row: dict) -> dict:
     payload = dict(row)
     payload["action"] = "create"
+    payload["notify_emails"] = manager_notify_emails(row.get("department", ""))
+    payload["dashboard_url"] = f"{app_base_url()}/login"
     data = sheet_api(payload)
     ROWS_CACHE.clear()
     return data
@@ -278,16 +319,22 @@ def list_requests(department: str) -> list:
     return rows
 
 
-def set_request_status(items: list, status: str, reviewed_by: str) -> None:
+def set_request_status(items: list, status: str, reviewed_by: str, reason: str = "") -> None:
     sheet_api(
         {
             "action": "set_status",
             "items": items,
             "status": status,
             "reviewed_by": reviewed_by,
+            "reason": reason,
         }
     )
     ROWS_CACHE.clear()
+
+
+def lookup_by_fingerprint(fingerprint: str) -> list:
+    data = sheet_api({"action": "lookup", "fingerprint_id": fingerprint})
+    return data.get("rows", [])[:20]
 
 
 def login_required(view):
@@ -445,6 +492,39 @@ def success():
     return render_template("success.html")
 
 
+@app.route("/track", methods=["GET", "POST"])
+def track():
+    rows = None
+    fingerprint_id = ""
+
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return render_template("track.html", rows=None, fingerprint_id="")
+
+        ip = client_ip()
+        if track_is_limited(ip):
+            flash("Too many searches. Please wait 5 minutes and try again.", "error")
+            return render_template("track.html", rows=None, fingerprint_id="")
+
+        fingerprint_id = request.form.get("fingerprint_id", "").strip()
+        if not fingerprint_id:
+            flash("Fingerprint number is required.", "error")
+        elif not fingerprint_id.isdigit():
+            flash("Fingerprint number must contain digits only.", "error")
+        else:
+            try:
+                rows = lookup_by_fingerprint(fingerprint_id)
+                if not rows:
+                    flash("No requests found for this fingerprint number.", "error")
+            except Exception as exc:
+                (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+                flash("Could not load requests. Please try again.", "error")
+                rows = None
+
+    return render_template("track.html", rows=rows, fingerprint_id=fingerprint_id)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if session.get("manager"):
@@ -522,6 +602,7 @@ def dashboard():
                 str(row.get("Department") or ""),
                 str(row.get("Request Type") or ""),
                 str(row.get("Notes") or ""),
+                str(row.get("Rejection Reason") or ""),
             ]).lower()
         ]
 
@@ -566,6 +647,15 @@ def update_status():
         flash("Select at least one request first.", "error")
         return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
 
+    reason = request.form.get("rejection_reason", "").strip()
+    if status == "Rejected":
+        if not reason:
+            flash("Please enter a rejection reason.", "error")
+            return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
+        reason = reason[:300]
+    else:
+        reason = ""
+
     try:
         visible = list_requests(manager["department"])
     except Exception as exc:
@@ -594,7 +684,7 @@ def update_status():
         return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
 
     try:
-        set_request_status(authorized, status, manager["name"])
+        set_request_status(authorized, status, manager["name"], reason)
         flash(f"{len(authorized)} request(s) {status.lower()} successfully.", "success")
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")

@@ -201,6 +201,17 @@ button:disabled {
     text-decoration: none;
 }
 
+.form-links {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.form-links .excel-link {
+    margin-top: 16px;
+}
+
 .actions {
     display: grid;
     gap: 12px;
@@ -285,6 +296,20 @@ button:disabled {
     align-items: center;
     gap: 10px;
     margin-bottom: 14px;
+}
+
+.reason-field {
+    flex: 1 1 220px;
+    width: auto;
+    min-width: 180px;
+    margin: 0;
+    padding: 10px 12px;
+    font-size: 14px;
+}
+
+.wrap-cell {
+    white-space: normal;
+    max-width: 180px;
 }
 
 .select-all-label {
@@ -421,4 +446,36 @@ th {
     color: var(--muted);
     margin: 8px 0 4px;
     padding: 18px 4px;
+}
+
+.track-list {
+    display: grid;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.track-card {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 16px 18px;
+}
+
+.track-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.track-card p {
+    margin: 4px 0;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.reject-reason {
+    color: var(--danger) !important;
+    font-weight: 600;
 }

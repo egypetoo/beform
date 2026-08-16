@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BE GROUP | Track Request</title>
+    <link rel="icon" href="{{ url_for('static', filename='logo.webp') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=7">
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page">
+        <header class="hero">
+            <img class="logo" src="{{ url_for('static', filename='logo.webp') }}" alt="BE GROUP">
+            <p class="eyebrow">Request Status</p>
+            <h1>Track your request</h1>
+            <p class="subtitle">Enter your fingerprint number to see the latest status.</p>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="card errors">
+                    {% for category, message in messages %}
+                        <p>{{ message }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <form class="form-shell" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <section class="field">
+                <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
+                <input id="fingerprint_id" name="fingerprint_id" type="text" required
+                       inputmode="numeric" pattern="[0-9]+" maxlength="20"
+                       value="{{ fingerprint_id }}" placeholder="Enter fingerprint number">
+            </section>
+            <button type="submit">Check status</button>
+            <div class="form-links">
+                <a class="excel-link" href="{{ url_for('index') }}">Submit a request</a>
+                <a class="excel-link" href="{{ url_for('login') }}">Manager login</a>
+            </div>
+        </form>
+
+        {% if rows %}
+            <section class="track-list">
+                {% for row in rows %}
+                    {% set current_status = row.get('Status') or 'Pending' %}
+                    <article class="track-card">
+                        <div class="track-card-head">
+                            <strong>{{ row.get('Request Type', '') }}</strong>
+                            <span class="badge badge-{{ current_status|lower }}">{{ current_status }}</span>
+                        </div>
+                        <p>{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</p>
+                        <p>Submitted: {{ row.get('Submitted At', '') }}</p>
+                        {% if row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') %}
+                            <p>Time: {{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') }}</p>
+                        {% endif %}
+                        {% if row.get('Notes') %}
+                            <p>Notes: {{ row.get('Notes') }}</p>
+                        {% endif %}
+                        {% if current_status == 'Rejected' and row.get('Rejection Reason') %}
+                            <p class="reject-reason">Reason: {{ row.get('Rejection Reason') }}</p>
+                        {% endif %}
+                    </article>
+                {% endfor %}
+            </section>
+        {% endif %}
+    </main>
+    <script>
+        const fingerprint = document.getElementById('fingerprint_id');
+        fingerprint.addEventListener('input', () => {
+            fingerprint.value = fingerprint.value.replace(/\D/g, '');
+        });
+    </script>
+</body>
+</html>
