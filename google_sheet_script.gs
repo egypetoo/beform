@@ -1,6 +1,6 @@
 function doPost(e) {
   const sheet = getSheet();
-  const data = JSON.parse(e.postData.contents);
+  const data = parseData(e);
   sheet.appendRow([
     data.submitted_at || "",
     data.fingerprint_id || "",
@@ -22,12 +22,15 @@ function doPost(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function getSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName("HR Requests");
-  if (!sheet) {
-    sheet = ss.insertSheet("HR Requests");
+function parseData(e) {
+  if (e.postData && e.postData.contents) {
+    return JSON.parse(e.postData.contents);
   }
+  return e.parameter || {};
+}
+
+function getSheet() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
   if (sheet.getLastRow() === 0) {
     sheet.appendRow([
       "Submitted At",
