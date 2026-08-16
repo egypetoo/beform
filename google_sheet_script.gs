@@ -21,6 +21,9 @@ function doPost(e) {
   if (isDuplicate(deptSheet, data)) {
     return jsonResponse({ ok: true, duplicate: true });
   }
+  if (hasRemotePunchConflict(deptSheet, data)) {
+    return jsonResponse({ ok: true, conflict: true });
+  }
 
   const row = [
     data.request_id || "",
@@ -135,6 +138,80 @@ function isDuplicate(sheet, data) {
       continue;
     }
     return true;
+  }
+
+  return false;
+}
+
+function isPunchType(type) {
+  return type === "missing punch in" || type === "missing punch out";
+}
+
+function isRemoteType(type) {
+  return type === "work remotely";
+}
+
+function datesOverlap(fromA, toA, fromB, toB) {
+  const startA = fromA || toA;
+  const endA = toA || fromA;
+  const startB = fromB || toB;
+  const endB = toB || fromB;
+  if (!startA || !startB) {
+    return false;
+  }
+  return startA <= endB && startB <= endA;
+}
+
+function hasRemotePunchConflict(sheet, data) {
+  const newType = normalizeText(data.request_type);
+  const newIsPunch = isPunchType(newType);
+  const newIsRemote = isRemoteType(newType);
+  if (!newIsPunch && !newIsRemote) {
+    return false;
+  }
+  if (sheet.getLastRow() < 2) {
+    return false;
+  }
+
+  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const headers = values[0];
+  const fpCol = headers.indexOf("Fingerprint Number");
+  const typeCol = headers.indexOf("Request Type");
+  const fromCol = headers.indexOf("From Date");
+  const toCol = headers.indexOf("To Date");
+  const statusCol = headers.indexOf("Status");
+  if (fpCol < 0 || typeCol < 0) {
+    return false;
+  }
+
+  const fp = normalizeText(data.fingerprint_id);
+  const newFrom = normalizeDate(data.start_date);
+  const newTo = normalizeDate(data.end_date);
+
+  for (let i = values.length - 1; i >= 1; i--) {
+    const row = values[i];
+    const status = String(row[statusCol] || "").trim();
+    if (status === "Rejected") {
+      continue;
+    }
+    if (normalizeText(row[fpCol]) !== fp) {
+      continue;
+    }
+
+    const existingType = normalizeText(row[typeCol]);
+    const existingFrom = fromCol >= 0 ? normalizeDate(row[fromCol]) : "";
+    const existingTo = toCol >= 0 ? normalizeDate(row[toCol]) : "";
+    const overlaps = datesOverlap(newFrom, newTo, existingFrom, existingTo);
+    if (!overlaps) {
+      continue;
+    }
+
+    if (newIsPunch && isRemoteType(existingType)) {
+      return true;
+    }
+    if (newIsRemote && isPunchType(existingType)) {
+      return true;
+    }
   }
 
   return false;

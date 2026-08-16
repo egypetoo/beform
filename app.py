@@ -135,12 +135,12 @@ def sheet_api(payload: dict) -> dict:
     return data
 
 
-def save_submission(row: dict) -> bool:
+def save_submission(row: dict) -> dict:
     payload = dict(row)
     payload["action"] = "create"
     data = sheet_api(payload)
     ROWS_CACHE.clear()
-    return bool(data.get("duplicate"))
+    return data
 
 
 def submission_fingerprint(row: dict) -> str:
@@ -290,7 +290,7 @@ def index():
             )
 
         try:
-            duplicate = save_submission(row)
+            result = save_submission(row)
         except Exception as exc:
             (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
             flash("Could not save the request to the HR sheet. Please try again.", "error")
@@ -302,8 +302,18 @@ def index():
                 **today_values(),
             )
 
-        if duplicate:
+        if result.get("duplicate"):
             flash("This request was already submitted.", "error")
+            return render_template(
+                "index.html",
+                leave_groups=LEAVE_GROUPS,
+                departments=DEPARTMENTS,
+                form=request.form,
+                **today_values(),
+            )
+
+        if result.get("conflict"):
+            flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
             return render_template(
                 "index.html",
                 leave_groups=LEAVE_GROUPS,
