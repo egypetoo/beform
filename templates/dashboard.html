@@ -53,6 +53,7 @@
 
             {% if rows %}
                 <form method="post" action="{{ url_for('update_status') }}" id="bulk-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="status_filter" value="{{ status_filter }}">
                     <input type="hidden" name="q" value="{{ search_query }}">
                     <input type="hidden" name="type_filter" value="{{ type_filter }}">

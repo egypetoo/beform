@@ -1,14 +1,18 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from threading import Lock
+import hmac
 import json
 import os
+import secrets
 import time
 import uuid
 
 from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash
 import requests
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -16,13 +20,24 @@ load_dotenv(BASE_DIR / ".env")
 GOOGLE_SHEET_WEBHOOK = os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "hrform-secret-key")
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") != "0",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+)
 
 ROWS_CACHE = {}
 CACHE_SECONDS = 60
 RECENT_SUBMISSIONS = {}
 RECENT_LOCK = Lock()
 DEDUP_SECONDS = 90
+LOGIN_ATTEMPTS = {}
+LOGIN_LOCK = Lock()
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 300
 
 
 def today_values():
@@ -82,27 +97,27 @@ def get_managers():
         "web": {
             "name": "Web Manager",
             "department": "Web",
-            "password": os.getenv("MANAGER_WEB_PASSWORD", "web123"),
+            "password": os.getenv("MANAGER_WEB_PASSWORD", ""),
         },
         "social": {
             "name": "Social Manager",
             "department": "Social",
-            "password": os.getenv("MANAGER_SOCIAL_PASSWORD", "social123"),
+            "password": os.getenv("MANAGER_SOCIAL_PASSWORD", ""),
         },
         "accounting": {
             "name": "Accounting Manager",
             "department": "Accounting",
-            "password": os.getenv("MANAGER_ACCOUNTING_PASSWORD", "accounting123"),
+            "password": os.getenv("MANAGER_ACCOUNTING_PASSWORD", ""),
         },
         "sales": {
             "name": "Sales Manager",
             "department": "Sales",
-            "password": os.getenv("MANAGER_SALES_PASSWORD", "sales123"),
+            "password": os.getenv("MANAGER_SALES_PASSWORD", ""),
         },
         "hr": {
             "name": "HR Manager",
             "department": "ALL",
-            "password": os.getenv("MANAGER_HR_PASSWORD", "hr123"),
+            "password": os.getenv("MANAGER_HR_PASSWORD", ""),
         },
     }
 
@@ -119,10 +134,83 @@ def webhook_url():
     return os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip() or GOOGLE_SHEET_WEBHOOK
 
 
+def sheet_secret():
+    return os.getenv("SHEET_SECRET", "").strip()
+
+
+def password_matches(stored: str, provided: str) -> bool:
+    if not stored or not provided:
+        return False
+    if stored.startswith(("pbkdf2:", "scrypt:", "argon2:")):
+        return check_password_hash(stored, provided)
+    return hmac.compare_digest(stored, provided)
+
+
+def get_csrf_token() -> str:
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_hex(32)
+        session["csrf_token"] = token
+    return token
+
+
+def csrf_is_valid() -> bool:
+    sent = request.form.get("csrf_token", "")
+    expected = session.get("csrf_token", "")
+    return bool(sent) and bool(expected) and hmac.compare_digest(sent, expected)
+
+
+def client_ip() -> str:
+    return request.remote_addr or "unknown"
+
+
+def login_is_locked(ip: str) -> bool:
+    now = time.time()
+    with LOGIN_LOCK:
+        record = LOGIN_ATTEMPTS.get(ip)
+        if not record:
+            return False
+        if now - record["start"] > LOGIN_WINDOW_SECONDS:
+            LOGIN_ATTEMPTS.pop(ip, None)
+            return False
+        return record["count"] >= MAX_LOGIN_ATTEMPTS
+
+
+def record_login_failure(ip: str) -> None:
+    now = time.time()
+    with LOGIN_LOCK:
+        record = LOGIN_ATTEMPTS.get(ip)
+        if not record or now - record["start"] > LOGIN_WINDOW_SECONDS:
+            LOGIN_ATTEMPTS[ip] = {"count": 1, "start": now}
+        else:
+            record["count"] += 1
+
+
+def clear_login_failures(ip: str) -> None:
+    with LOGIN_LOCK:
+        LOGIN_ATTEMPTS.pop(ip, None)
+
+
+def can_review_department(manager: dict, department: str) -> bool:
+    if manager.get("department") == "ALL":
+        return True
+    return department == manager.get("department")
+
+
+@app.context_processor
+def inject_security():
+    return {"csrf_token": get_csrf_token()}
+
+
 def sheet_api(payload: dict) -> dict:
     webhook = webhook_url()
     if not webhook:
         raise RuntimeError("Google Sheet is not connected")
+
+    payload = dict(payload)
+    payload["secret"] = sheet_secret()
+    if not payload["secret"]:
+        raise RuntimeError("Sheet secret is not configured")
 
     response = requests.post(webhook, json=payload, timeout=20)
     response.raise_for_status()
@@ -133,6 +221,15 @@ def sheet_api(payload: dict) -> dict:
     if not data.get("ok"):
         raise RuntimeError("Google Sheet did not confirm the save")
     return data
+
+
+@app.after_request
+def set_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 
 def save_submission(row: dict) -> dict:
@@ -208,6 +305,16 @@ def index():
     options = option_lookup()
 
     if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return render_template(
+                "index.html",
+                leave_groups=LEAVE_GROUPS,
+                departments=DEPARTMENTS,
+                form=request.form,
+                **today_values(),
+            )
+
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
         name = request.form.get("name", "").strip()
         department = request.form.get("department", "").strip()
@@ -344,13 +451,27 @@ def login():
         return redirect(url_for("dashboard"))
 
     if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return render_template("login.html")
+
+        ip = client_ip()
+        if login_is_locked(ip):
+            flash("Too many login attempts. Please wait 5 minutes and try again.", "error")
+            return render_template("login.html")
+
         username = request.form.get("username", "").strip().lower()
         password = request.form.get("password", "")
         manager = get_managers().get(username)
-        if not manager or password != manager["password"]:
+        if not manager or not password_matches(manager["password"], password):
+            record_login_failure(ip)
             flash("Invalid username or password.", "error")
             return render_template("login.html")
 
+        clear_login_failures(ip)
+        session.clear()
+        session.permanent = True
+        session["csrf_token"] = secrets.token_hex(32)
         session["manager"] = {
             "username": username,
             "name": manager["name"],
@@ -420,6 +541,10 @@ def dashboard():
 @login_required
 def update_status():
     manager = session["manager"]
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("dashboard"))
+
     status = request.form.get("status", "").strip()
     selected = request.form.getlist("selected")
     request_id = request.form.get("request_id", "").strip()
@@ -442,8 +567,35 @@ def update_status():
         return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
 
     try:
-        set_request_status(items, status, manager["name"])
-        flash(f"{len(items)} request(s) {status.lower()} successfully.", "success")
+        visible = list_requests(manager["department"])
+    except Exception as exc:
+        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+        flash("Could not verify the selected requests.", "error")
+        return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
+
+    visible_by_id = {
+        str(row.get("Request ID") or "").strip(): str(row.get("Department") or "").strip()
+        for row in visible
+        if row.get("Request ID")
+    }
+    authorized = []
+    for item in items:
+        request_id_value = item["request_id"]
+        actual_department = visible_by_id.get(request_id_value)
+        if not actual_department or not can_review_department(manager, actual_department):
+            continue
+        authorized.append({
+            "request_id": request_id_value,
+            "department": actual_department,
+        })
+
+    if not authorized:
+        flash("You can only review requests from your department.", "error")
+        return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
+
+    try:
+        set_request_status(authorized, status, manager["name"])
+        flash(f"{len(authorized)} request(s) {status.lower()} successfully.", "success")
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
         flash("Could not update the request status.", "error")
@@ -457,4 +609,4 @@ def update_status():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=False, host="127.0.0.1", port=5000)

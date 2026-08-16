@@ -31,6 +31,7 @@
         {% endwith %}
 
         <form class="form-shell" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <section class="field">
                 <label for="username">Username</label>
                 <select id="username" name="username" required>

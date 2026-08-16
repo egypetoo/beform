@@ -36,6 +36,7 @@
         {% endwith %}
 
         <form id="hr-form" class="form-shell" method="post" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <section class="field">
                 <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
                 <input id="fingerprint_id" name="fingerprint_id" type="text" required

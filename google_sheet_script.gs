@@ -1,5 +1,10 @@
+const SHEET_SECRET = "HNCAHozrrkIAst0M1O_ZMqO9eY9XB4fILazhfu79ka0";
+
 function doPost(e) {
   const data = parseData(e);
+  if (!SHEET_SECRET || data.secret !== SHEET_SECRET) {
+    return jsonResponse({ ok: false, error: "unauthorized" });
+  }
   const action = data.action || "create";
 
   if (action === "list") {
