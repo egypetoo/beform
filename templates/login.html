@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BE GROUP | Manager Login</title>
+    <link rel="icon" href="{{ url_for('static', filename='logo.webp') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page">
+        <header class="hero">
+            <img class="logo" src="{{ url_for('static', filename='logo.webp') }}" alt="BE GROUP">
+            <p class="eyebrow">Manager Access</p>
+            <h1>Department Dashboard</h1>
+            <p class="subtitle">Sign in to review your team's requests.</p>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="card errors">
+                    {% for category, message in messages %}
+                        <p>{{ message }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <form class="form-shell" method="post">
+            <section class="field">
+                <label for="username">Username</label>
+                <select id="username" name="username" required>
+                    <option value="web">Web Manager</option>
+                    <option value="social">Social Manager</option>
+                    <option value="accounting">Accounting Manager</option>
+                    <option value="sales">Sales Manager</option>
+                    <option value="hr">HR Manager</option>
+                </select>
+            </section>
+            <section class="field">
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" required placeholder="Enter password">
+            </section>
+            <button type="submit">Sign in</button>
+        </form>
+    </main>
+</body>
+</html>

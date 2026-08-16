@@ -1,9 +1,12 @@
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
+import json
 import os
+import uuid
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, session, url_for
 import requests
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -11,7 +14,8 @@ load_dotenv(BASE_DIR / ".env")
 GOOGLE_SHEET_WEBHOOK = os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
 
 app = Flask(__name__)
-app.secret_key = "hrform-secret-key"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "hrform-secret-key")
+
 
 def today_values():
     now = datetime.now()
@@ -63,37 +67,36 @@ DEPARTMENTS = [
 ]
 DEPARTMENT_VALUES = {item["value"] for item in DEPARTMENTS}
 
-COLUMNS = [
-    "submitted_at",
-    "fingerprint_id",
-    "name",
-    "department",
-    "request_type",
-    "request_date",
-    "punch_in_time",
-    "punch_out_time",
-    "from_time",
-    "to_time",
-    "start_date",
-    "end_date",
-    "notes",
-]
 
-EXCEL_HEADERS = [
-    "Submitted At",
-    "Fingerprint Number",
-    "Name",
-    "Department",
-    "Request Type",
-    "Request Date",
-    "Punch In Time",
-    "Punch Out Time",
-    "From Time",
-    "To Time",
-    "From Date",
-    "To Date",
-    "Notes",
-]
+def get_managers():
+    load_dotenv(BASE_DIR / ".env", override=True)
+    return {
+        "web": {
+            "name": "Web Manager",
+            "department": "Web",
+            "password": os.getenv("MANAGER_WEB_PASSWORD", "web123"),
+        },
+        "social": {
+            "name": "Social Manager",
+            "department": "Social",
+            "password": os.getenv("MANAGER_SOCIAL_PASSWORD", "social123"),
+        },
+        "accounting": {
+            "name": "Accounting Manager",
+            "department": "Accounting",
+            "password": os.getenv("MANAGER_ACCOUNTING_PASSWORD", "accounting123"),
+        },
+        "sales": {
+            "name": "Sales Manager",
+            "department": "Sales",
+            "password": os.getenv("MANAGER_SALES_PASSWORD", "sales123"),
+        },
+        "hr": {
+            "name": "HR Manager",
+            "department": "ALL",
+            "password": os.getenv("MANAGER_HR_PASSWORD", "hr123"),
+        },
+    }
 
 
 def option_lookup():
@@ -104,16 +107,57 @@ def option_lookup():
     return mapping
 
 
-def save_submission(row: dict) -> None:
+def webhook_url():
     load_dotenv(BASE_DIR / ".env", override=True)
-    webhook = os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
+    return os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
+
+
+def sheet_api(payload: dict) -> dict:
+    webhook = webhook_url()
     if not webhook:
         raise RuntimeError("Google Sheet is not connected")
 
-    response = requests.post(webhook, json=row, timeout=25)
+    response = requests.post(webhook, json=payload, timeout=25)
     response.raise_for_status()
-    if "ok" not in (response.text or "").lower() and response.status_code != 200:
+    try:
+        data = json.loads(response.text or "{}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Invalid sheet response") from exc
+    if not data.get("ok"):
         raise RuntimeError("Google Sheet did not confirm the save")
+    return data
+
+
+def save_submission(row: dict) -> None:
+    payload = dict(row)
+    payload["action"] = "create"
+    sheet_api(payload)
+
+
+def list_requests(department: str) -> list:
+    data = sheet_api({"action": "list", "department": department})
+    return data.get("rows", [])
+
+
+def set_request_status(request_id: str, status: str, reviewed_by: str) -> None:
+    sheet_api(
+        {
+            "action": "set_status",
+            "request_id": request_id,
+            "status": status,
+            "reviewed_by": reviewed_by,
+        }
+    )
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("manager"):
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+
+    return wrapped
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -178,6 +222,7 @@ def index():
         try:
             save_submission(
                 {
+                    "request_id": uuid.uuid4().hex[:12].upper(),
                     "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "fingerprint_id": fingerprint_id,
                     "name": name,
@@ -191,6 +236,7 @@ def index():
                     "start_date": start_date,
                     "end_date": end_date,
                     "notes": notes,
+                    "status": "Pending",
                 }
             )
         except Exception as exc:
@@ -217,6 +263,79 @@ def index():
 @app.route("/success")
 def success():
     return render_template("success.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("manager"):
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip().lower()
+        password = request.form.get("password", "")
+        manager = get_managers().get(username)
+        if not manager or password != manager["password"]:
+            flash("Invalid username or password.", "error")
+            return render_template("login.html")
+
+        session["manager"] = {
+            "username": username,
+            "name": manager["name"],
+            "department": manager["department"],
+        }
+        return redirect(url_for("dashboard"))
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    manager = session["manager"]
+    status_filter = request.args.get("status", "Pending")
+    try:
+        rows = list_requests(manager["department"])
+    except Exception as exc:
+        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+        rows = []
+        flash("Could not load requests from the HR sheet.", "error")
+
+    if status_filter and status_filter != "All":
+        rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
+
+    return render_template(
+        "dashboard.html",
+        manager=manager,
+        rows=rows,
+        status_filter=status_filter,
+        statuses=["Pending", "Approved", "Rejected", "All"],
+    )
+
+
+@app.route("/dashboard/status", methods=["POST"])
+@login_required
+def update_status():
+    manager = session["manager"]
+    request_id = request.form.get("request_id", "").strip()
+    status = request.form.get("status", "").strip()
+    if status not in {"Approved", "Rejected"} or not request_id:
+        flash("Invalid review action.", "error")
+        return redirect(url_for("dashboard"))
+
+    try:
+        set_request_status(request_id, status, manager["name"])
+        flash(f"Request {status.lower()} successfully.", "success")
+    except Exception as exc:
+        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+        flash("Could not update the request status.", "error")
+
+    return redirect(url_for("dashboard", status=request.args.get("status", "Pending")))
 
 
 if __name__ == "__main__":

@@ -124,6 +124,7 @@ label span {
 input[type="text"],
 input[type="date"],
 input[type="time"],
+input[type="password"],
 select,
 textarea {
     width: 100%;
@@ -248,4 +249,119 @@ button:hover,
     .time-grid {
         grid-template-columns: 1fr;
     }
+}
+
+.page-wide {
+    max-width: 1180px;
+}
+
+.dash-hero {
+    margin-bottom: 18px;
+}
+
+.filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 18px;
+}
+
+.filter-chip {
+    color: var(--muted);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.filter-chip.active {
+    color: #111;
+    background: var(--orange);
+    border-color: var(--orange);
+}
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+th,
+td {
+    text-align: left;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    white-space: nowrap;
+}
+
+th {
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.badge {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.badge-pending {
+    background: rgba(245, 130, 32, 0.16);
+    color: var(--orange-soft);
+}
+
+.badge-approved {
+    background: rgba(46, 204, 113, 0.16);
+    color: #2ecc71;
+}
+
+.badge-rejected {
+    background: rgba(255, 107, 107, 0.16);
+    color: var(--danger);
+}
+
+.inline-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-sm {
+    width: auto;
+    padding: 8px 12px;
+    font-size: 12px;
+    border-radius: 10px;
+    box-shadow: none;
+}
+
+.btn-approve {
+    background: #2ecc71;
+    color: #07210f;
+}
+
+.btn-reject {
+    background: var(--danger);
+    color: #fff;
+}
+
+.success-msg {
+    color: #2ecc71;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(46, 204, 113, 0.35);
+}
+
+.empty-state {
+    color: var(--muted);
+    margin: 12px 0 0;
 }
