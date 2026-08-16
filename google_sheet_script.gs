@@ -17,6 +17,11 @@ function doPost(e) {
     return jsonResponse({ ok: true });
   }
 
+  const deptSheet = getSheetByName(data.department || "Other");
+  if (isDuplicate(deptSheet, data)) {
+    return jsonResponse({ ok: true, duplicate: true });
+  }
+
   const row = [
     data.request_id || "",
     data.submitted_at || "",
@@ -37,14 +42,11 @@ function doPost(e) {
     "",
   ];
 
-  const deptSheet = getSheetByName(data.department || "Other");
   const allSheet = getSheetByName("All");
   deptSheet.appendRow(row);
   allSheet.appendRow(row);
-  applyStatusColors(deptSheet);
-  applyStatusColors(allSheet);
 
-  return jsonResponse({ ok: true });
+  return jsonResponse({ ok: true, duplicate: false });
 }
 
 function parseData(e) {
@@ -58,6 +60,84 @@ function jsonResponse(payload) {
   return ContentService
     .createTextOutput(JSON.stringify(payload))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function normalizeText(value) {
+  return String(value == null ? "" : value).trim().toLowerCase();
+}
+
+function normalizeDate(value) {
+  if (Object.prototype.toString.call(value) === "[object Date]") {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  const text = String(value == null ? "" : value).trim();
+  return text.split(" ")[0];
+}
+
+function isDuplicate(sheet, data) {
+  if (sheet.getLastRow() < 2) {
+    return false;
+  }
+
+  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const headers = values[0];
+  const fpCol = headers.indexOf("Fingerprint Number");
+  const typeCol = headers.indexOf("Request Type");
+  const fromCol = headers.indexOf("From Date");
+  const toCol = headers.indexOf("To Date");
+  const statusCol = headers.indexOf("Status");
+  const punchInCol = headers.indexOf("Punch In Time");
+  const punchOutCol = headers.indexOf("Punch Out Time");
+  const fromTimeCol = headers.indexOf("From Time");
+  const toTimeCol = headers.indexOf("To Time");
+
+  if (fpCol < 0 || typeCol < 0) {
+    return false;
+  }
+
+  const fp = normalizeText(data.fingerprint_id);
+  const type = normalizeText(data.request_type);
+  const fromDate = normalizeDate(data.start_date);
+  const toDate = normalizeDate(data.end_date);
+  const punchIn = normalizeText(data.punch_in_time);
+  const punchOut = normalizeText(data.punch_out_time);
+  const fromTime = normalizeText(data.from_time);
+  const toTime = normalizeText(data.to_time);
+
+  for (let i = values.length - 1; i >= 1; i--) {
+    const row = values[i];
+    const status = String(row[statusCol] || "").trim();
+    if (status === "Rejected") {
+      continue;
+    }
+    if (normalizeText(row[fpCol]) !== fp) {
+      continue;
+    }
+    if (normalizeText(row[typeCol]) !== type) {
+      continue;
+    }
+    if (fromCol >= 0 && normalizeDate(row[fromCol]) !== fromDate) {
+      continue;
+    }
+    if (toCol >= 0 && normalizeDate(row[toCol]) !== toDate) {
+      continue;
+    }
+    if (punchInCol >= 0 && normalizeText(row[punchInCol]) !== punchIn) {
+      continue;
+    }
+    if (punchOutCol >= 0 && normalizeText(row[punchOutCol]) !== punchOut) {
+      continue;
+    }
+    if (fromTimeCol >= 0 && normalizeText(row[fromTimeCol]) !== fromTime) {
+      continue;
+    }
+    if (toTimeCol >= 0 && normalizeText(row[toTimeCol]) !== toTime) {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 function getSheetByName(name) {

@@ -1,7 +1,7 @@
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Lock
 import json
 import os
 import time
@@ -135,18 +135,12 @@ def sheet_api(payload: dict) -> dict:
     return data
 
 
-def save_submission(row: dict) -> None:
+def save_submission(row: dict) -> bool:
     payload = dict(row)
     payload["action"] = "create"
-    sheet_api(payload)
+    data = sheet_api(payload)
     ROWS_CACHE.clear()
-
-
-def save_submission_later(row: dict) -> None:
-    try:
-        save_submission(row)
-    except Exception as exc:
-        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+    return bool(data.get("duplicate"))
 
 
 def submission_fingerprint(row: dict) -> str:
@@ -286,9 +280,38 @@ def index():
             "status": "Pending",
         }
         if not claim_submission(submission_fingerprint(row)):
-            return redirect(url_for("success"))
+            flash("This request was already submitted.", "error")
+            return render_template(
+                "index.html",
+                leave_groups=LEAVE_GROUPS,
+                departments=DEPARTMENTS,
+                form=request.form,
+                **today_values(),
+            )
 
-        Thread(target=save_submission_later, args=(row,), daemon=True).start()
+        try:
+            duplicate = save_submission(row)
+        except Exception as exc:
+            (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+            flash("Could not save the request to the HR sheet. Please try again.", "error")
+            return render_template(
+                "index.html",
+                leave_groups=LEAVE_GROUPS,
+                departments=DEPARTMENTS,
+                form=request.form,
+                **today_values(),
+            )
+
+        if duplicate:
+            flash("This request was already submitted.", "error")
+            return render_template(
+                "index.html",
+                leave_groups=LEAVE_GROUPS,
+                departments=DEPARTMENTS,
+                form=request.form,
+                **today_values(),
+            )
+
         return redirect(url_for("success"))
 
     return render_template(
