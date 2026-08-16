@@ -18,6 +18,9 @@ import requests
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 GOOGLE_SHEET_WEBHOOK = os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
+MANAGER_LOGIN_PATH = os.getenv("MANAGER_LOGIN_PATH", "/be-review-k4n").strip() or "/be-review-k4n"
+if not MANAGER_LOGIN_PATH.startswith("/"):
+    MANAGER_LOGIN_PATH = "/" + MANAGER_LOGIN_PATH
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
@@ -505,7 +508,7 @@ def track():
     return render_template("track.html", rows=rows, fingerprint_id=fingerprint_id)
 
 
-@app.route("/login", methods=["GET", "POST"])
+@app.route(MANAGER_LOGIN_PATH, methods=["GET", "POST"])
 def login():
     if session.get("manager"):
         return redirect(url_for("dashboard"))

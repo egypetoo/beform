@@ -39,10 +39,7 @@
                        value="{{ fingerprint_id }}" placeholder="Enter fingerprint number">
             </section>
             <button type="submit">Check status</button>
-            <div class="form-links">
-                <a class="excel-link" href="{{ url_for('index') }}">Submit a request</a>
-                <a class="excel-link" href="{{ url_for('login') }}">Manager login</a>
-            </div>
+            <a class="excel-link" href="{{ url_for('index') }}">Submit a request</a>
         </form>
 
         {% if rows %}
