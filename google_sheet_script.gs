@@ -1,15 +1,5 @@
 const SHEET_SECRET = "HNCAHozrrkIAst0M1O_ZMqO9eY9XB4fILazhfu79ka0";
 
-// Run this once from the Apps Script editor (Run ▶) and click Allow.
-// Deploying a new version is not enough until mail permission is granted.
-function authorizeMail() {
-  MailApp.sendEmail(
-    Session.getActiveUser().getEmail() || "authorize@example.com",
-    "[BE GROUP] Mail permission enabled",
-    "Google Mail access is working. You can return to the dashboard and save your notification email."
-  );
-}
-
 function doPost(e) {
   const data = parseData(e);
   if (!SHEET_SECRET || data.secret !== SHEET_SECRET) {
@@ -34,39 +24,6 @@ function doPost(e) {
       : [{ request_id: data.request_id, department: data.department || "" }];
     updateStatuses(items, data.status, data.reviewed_by || "", data.reason || "");
     return jsonResponse({ ok: true });
-  }
-
-  if (action === "get_manager_email") {
-    return jsonResponse({
-      ok: true,
-      email: getStoredManagerEmail(data.department || ""),
-    });
-  }
-
-  if (action === "set_manager_email") {
-    const email = String(data.email || "").trim();
-    const department = data.department || "";
-    if (!isValidEmail(email)) {
-      return jsonResponse({ ok: false, error: "invalid_email" });
-    }
-    setStoredManagerEmail(department, email);
-    const stored = getStoredManagerEmail(department);
-    const mail = sendMail(
-      stored,
-      "[BE GROUP] Notification email saved",
-      [
-        "Your HR notification email was saved successfully.",
-        "",
-        "You will receive an email when a new request is submitted for " + normalizeDepartmentName(department) + ".",
-        "If this was not you, sign in to the dashboard and change the email.",
-      ].join("\n")
-    );
-    return jsonResponse({
-      ok: true,
-      email: stored,
-      mailed: mail.ok,
-      mail_error: mail.error || "",
-    });
   }
 
   if (action !== "create") {
@@ -105,7 +62,6 @@ function doPost(e) {
   const allSheet = getSheetByName("All");
   deptSheet.appendRow(row);
   allSheet.appendRow(row);
-  notifyManagers(data);
 
   return jsonResponse({ ok: true, duplicate: false });
 }
@@ -437,138 +393,6 @@ function lookupByFingerprint(fingerprint) {
       return normalizeText(row["Fingerprint Number"]) === fp;
     })
     .slice(0, 20);
-}
-
-function managerDepartments() {
-  return ["Web", "Social", "Accounting", "Sales", "HR"];
-}
-
-function getManagersSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName("Managers");
-  if (!sheet) {
-    sheet = ss.insertSheet("Managers");
-    sheet.appendRow(["Department", "Email"]);
-    managerDepartments().forEach(function (name) {
-      sheet.appendRow([name, ""]);
-    });
-    formatHeader(sheet);
-    return sheet;
-  }
-
-  const lastRow = Math.max(sheet.getLastRow(), 1);
-  const existing = {};
-  sheet.getRange(1, 1, lastRow, 1).getValues().forEach(function (row) {
-    existing[String(row[0] || "").trim().toLowerCase()] = true;
-  });
-  managerDepartments().forEach(function (name) {
-    if (!existing[name.toLowerCase()]) {
-      sheet.appendRow([name, ""]);
-    }
-  });
-  return sheet;
-}
-
-function normalizeDepartmentName(department) {
-  const value = String(department || "").trim();
-  if (!value || value.toUpperCase() === "ALL") {
-    return "HR";
-  }
-  const match = managerDepartments().filter(function (name) {
-    return name.toLowerCase() === value.toLowerCase();
-  })[0];
-  return match || value;
-}
-
-function isValidEmail(value) {
-  const email = String(value || "").trim();
-  return email.length > 4 && email.indexOf("@") > 0 && email.indexOf(".") > email.indexOf("@");
-}
-
-function getStoredManagerEmail(department) {
-  const wanted = normalizeDepartmentName(department).toLowerCase();
-  const sheet = getManagersSheet();
-  const values = sheet.getRange(1, 1, sheet.getLastRow(), 2).getValues();
-  for (let i = 1; i < values.length; i++) {
-    if (String(values[i][0] || "").trim().toLowerCase() === wanted) {
-      return String(values[i][1] || "").trim();
-    }
-  }
-  return "";
-}
-
-function setStoredManagerEmail(department, email) {
-  const wanted = normalizeDepartmentName(department);
-  const value = String(email || "").trim();
-  const sheet = getManagersSheet();
-  const values = sheet.getRange(1, 1, sheet.getLastRow(), 2).getValues();
-  for (let i = 1; i < values.length; i++) {
-    if (String(values[i][0] || "").trim().toLowerCase() === wanted.toLowerCase()) {
-      sheet.getRange(i + 1, 2).setValue(value);
-      return;
-    }
-  }
-  sheet.appendRow([wanted, value]);
-}
-
-function collectNotifyEmails(department) {
-  const emails = [];
-  const seen = {};
-  function add(email) {
-    const value = String(email || "").trim();
-    const key = value.toLowerCase();
-    if (isValidEmail(value) && !seen[key]) {
-      seen[key] = true;
-      emails.push(value);
-    }
-  }
-  add(getStoredManagerEmail(department));
-  add(getStoredManagerEmail("HR"));
-  return emails;
-}
-
-function sendMail(to, subject, body) {
-  const recipient = String(to || "").trim();
-  if (!isValidEmail(recipient)) {
-    return { ok: false, error: "missing_recipient" };
-  }
-  try {
-    MailApp.sendEmail(recipient, subject, body);
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: String(error) };
-  }
-}
-
-function notifyManagers(data) {
-  const emails = collectNotifyEmails(data.department || "");
-  if (!emails.length) {
-    return;
-  }
-
-  const name = data.name || "An employee";
-  const department = data.department || "";
-  const type = data.request_type || "HR request";
-  const dates = [data.start_date || "", data.end_date || ""].filter(Boolean).join(" → ");
-  const dashboard = data.dashboard_url || "";
-  const lines = [
-    "A new HR request is waiting for review.",
-    "",
-    "Name: " + name,
-    "Fingerprint: " + (data.fingerprint_id || ""),
-    "Department: " + department,
-    "Type: " + type,
-    "Dates: " + (dates || "-"),
-    "Notes: " + (data.notes || "-"),
-  ];
-  if (dashboard) {
-    lines.push("", "Review it here: " + dashboard);
-  }
-  const subject = "[BE GROUP] New HR request — " + (department || "Team") + " — " + type;
-  const body = lines.join("\n");
-  emails.forEach(function (email) {
-    sendMail(email, subject, body);
-  });
 }
 
 function updateStatuses(items, status, reviewedBy, reason) {

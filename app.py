@@ -201,21 +201,6 @@ def can_review_department(manager: dict, department: str) -> bool:
     return department == manager.get("department")
 
 
-def manager_email_department(manager: dict) -> str:
-    if manager.get("department") == "ALL":
-        return "HR"
-    return manager.get("department") or ""
-
-
-def is_valid_email(value: str) -> bool:
-    email = (value or "").strip()
-    return 5 <= len(email) <= 120 and "@" in email and "." in email.split("@")[-1]
-
-
-def app_base_url() -> str:
-    return (os.getenv("APP_BASE_URL", "") or "https://form.be-group.com").rstrip("/")
-
-
 def track_is_limited(ip: str) -> bool:
     now = time.time()
     with TRACK_LOCK:
@@ -265,7 +250,6 @@ def set_security_headers(response):
 def save_submission(row: dict) -> dict:
     payload = dict(row)
     payload["action"] = "create"
-    payload["dashboard_url"] = f"{app_base_url()}/login"
     data = sheet_api(payload)
     ROWS_CACHE.clear()
     return data
@@ -325,22 +309,6 @@ def set_request_status(items: list, status: str, reviewed_by: str, reason: str =
 def lookup_by_fingerprint(fingerprint: str) -> list:
     data = sheet_api({"action": "lookup", "fingerprint_id": fingerprint})
     return data.get("rows", [])[:20]
-
-
-def get_manager_email(department: str) -> str:
-    data = sheet_api({"action": "get_manager_email", "department": department})
-    return str(data.get("email") or "").strip()
-
-
-def save_stored_manager_email(department: str, email: str) -> dict:
-    data = sheet_api({
-        "action": "set_manager_email",
-        "department": department,
-        "email": email,
-    })
-    if str(data.get("email") or "").strip().lower() != email.lower():
-        raise RuntimeError("Google Sheet did not save the notification email")
-    return data
 
 
 def login_required(view):
@@ -588,14 +556,6 @@ def dashboard():
         rows = []
         flash("Could not load requests from the HR sheet.", "error")
 
-    manager_email = ""
-    try:
-        manager_email = get_manager_email(manager_email_department(manager))
-    except Exception:
-        manager_email = ""
-    if not manager_email:
-        manager_email = str(session.get("notify_email") or "").strip()
-
     request_types = sorted({
         str(row.get("Request Type") or "").strip()
         for row in rows
@@ -629,44 +589,7 @@ def dashboard():
         type_filter=type_filter,
         request_types=request_types,
         statuses=["Pending", "Approved", "Rejected", "All"],
-        manager_email=manager_email,
     )
-
-
-@app.route("/dashboard/email", methods=["POST"])
-@login_required
-def save_manager_email():
-    manager = session["manager"]
-    if not csrf_is_valid():
-        flash("The form expired. Please refresh and try again.", "error")
-        return redirect(url_for("dashboard"))
-
-    email = request.form.get("email", "").strip()
-    if not is_valid_email(email):
-        flash("Please enter a valid notification email.", "error")
-        return redirect(url_for("dashboard"))
-
-    try:
-        result = save_stored_manager_email(manager_email_department(manager), email)
-        session["notify_email"] = result.get("email") or email
-        if result.get("mailed"):
-            flash("Notification email saved. A test message was sent — check inbox and spam.", "success")
-        else:
-            error = result.get("mail_error") or "Google Mail permission is missing"
-            flash(
-                "Email was saved, but the test message was not sent. "
-                "In Apps Script click Deploy → New version, allow Gmail access, then save again. "
-                f"({error})",
-                "error",
-            )
-    except Exception as exc:
-        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-        flash(
-            "Could not save the notification email. Paste the latest google_sheet_script.gs and deploy a new version.",
-            "error",
-        )
-
-    return redirect(url_for("dashboard"))
 
 
 @app.route("/dashboard/status", methods=["POST"])

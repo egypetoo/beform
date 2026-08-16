@@ -272,35 +272,6 @@ button:disabled {
     margin-bottom: 18px;
 }
 
-.email-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 16px;
-}
-
-.email-bar label {
-    margin: 0;
-    font-size: 13px;
-    color: var(--muted);
-}
-
-.email-bar input {
-    width: min(320px, 100%);
-    padding: 10px 12px;
-    font-size: 14px;
-}
-
-.email-bar .btn-sm {
-    width: auto;
-}
-
-.email-hint {
-    margin-top: 10px;
-}
-
 .filter-bar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 200px 120px;

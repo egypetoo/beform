@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=8">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9">
 </head>
 <body>
     <div class="glow"></div>
@@ -18,16 +18,6 @@
             <p class="eyebrow">{{ manager.department if manager.department != 'ALL' else 'All Departments' }}</p>
             <h1>Request Dashboard</h1>
             <p class="subtitle">{{ manager.name }}</p>
-            <form class="email-bar" method="post" action="{{ url_for('save_manager_email') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <label for="manager-email">Notify me at</label>
-                <input id="manager-email" name="email" type="email" value="{{ manager_email }}"
-                       placeholder="your.email@be-group.com">
-                <button class="btn-sm" type="submit">Save</button>
-            </form>
-            {% if not manager_email %}
-                <p class="muted email-hint">Save your email once to get notified when a new request is submitted.</p>
-            {% endif %}
             <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
         </header>
 
