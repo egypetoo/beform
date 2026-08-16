@@ -34,8 +34,33 @@ function doPost(e) {
   }
 
   if (action === "set_manager_email") {
-    setStoredManagerEmail(data.department || "", data.email || "");
-    return jsonResponse({ ok: true });
+    const email = String(data.email || "").trim();
+    const department = data.department || "";
+    if (!isValidEmail(email)) {
+      return jsonResponse({ ok: false, error: "invalid_email" });
+    }
+    setStoredManagerEmail(department, email);
+    const stored = getStoredManagerEmail(department);
+    const mail = sendMail(
+      stored,
+      "[BE GROUP] Notification email saved",
+      [
+        "Your HR notification email was saved successfully.",
+        "",
+        "You will receive an email when a new request is submitted for " + normalizeDepartmentName(department) + ".",
+        "If this was not you, sign in to the dashboard and change the email.",
+      ].join("\n")
+    );
+    return jsonResponse({
+      ok: true,
+      email: stored,
+      mailed: mail.ok,
+      mail_error: mail.error || "",
+    });
+  }
+
+  if (action !== "create") {
+    return jsonResponse({ ok: false, error: "unknown_action" });
   }
 
   const deptSheet = getSheetByName(data.department || "Other");
@@ -492,6 +517,19 @@ function collectNotifyEmails(department) {
   return emails;
 }
 
+function sendMail(to, subject, body) {
+  const recipient = String(to || "").trim();
+  if (!isValidEmail(recipient)) {
+    return { ok: false, error: "missing_recipient" };
+  }
+  try {
+    MailApp.sendEmail(recipient, subject, body);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
+
 function notifyManagers(data) {
   const emails = collectNotifyEmails(data.department || "");
   if (!emails.length) {
@@ -516,16 +554,11 @@ function notifyManagers(data) {
   if (dashboard) {
     lines.push("", "Review it here: " + dashboard);
   }
-
-  try {
-    MailApp.sendEmail({
-      to: emails.join(","),
-      subject: "[BE GROUP] New HR request — " + (department || "Team") + " — " + type,
-      body: lines.join("\n"),
-    });
-  } catch (error) {
-    // Saving the request should not fail if email is unavailable.
-  }
+  const subject = "[BE GROUP] New HR request — " + (department || "Team") + " — " + type;
+  const body = lines.join("\n");
+  emails.forEach(function (email) {
+    sendMail(email, subject, body);
+  });
 }
 
 function updateStatuses(items, status, reviewedBy, reason) {

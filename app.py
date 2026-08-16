@@ -332,12 +332,15 @@ def get_manager_email(department: str) -> str:
     return str(data.get("email") or "").strip()
 
 
-def save_stored_manager_email(department: str, email: str) -> None:
-    sheet_api({
+def save_stored_manager_email(department: str, email: str) -> dict:
+    data = sheet_api({
         "action": "set_manager_email",
         "department": department,
         "email": email,
     })
+    if str(data.get("email") or "").strip().lower() != email.lower():
+        raise RuntimeError("Google Sheet did not save the notification email")
+    return data
 
 
 def login_required(view):
@@ -590,6 +593,8 @@ def dashboard():
         manager_email = get_manager_email(manager_email_department(manager))
     except Exception:
         manager_email = ""
+    if not manager_email:
+        manager_email = str(session.get("notify_email") or "").strip()
 
     request_types = sorted({
         str(row.get("Request Type") or "").strip()
@@ -637,16 +642,29 @@ def save_manager_email():
         return redirect(url_for("dashboard"))
 
     email = request.form.get("email", "").strip()
-    if email and not is_valid_email(email):
+    if not is_valid_email(email):
         flash("Please enter a valid notification email.", "error")
         return redirect(url_for("dashboard"))
 
     try:
-        save_stored_manager_email(manager_email_department(manager), email)
-        flash("Notification email saved.", "success")
+        result = save_stored_manager_email(manager_email_department(manager), email)
+        session["notify_email"] = result.get("email") or email
+        if result.get("mailed"):
+            flash("Notification email saved. A test message was sent — check inbox and spam.", "success")
+        else:
+            error = result.get("mail_error") or "Google Mail permission is missing"
+            flash(
+                "Email was saved, but the test message was not sent. "
+                "In Apps Script click Deploy → New version, allow Gmail access, then save again. "
+                f"({error})",
+                "error",
+            )
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-        flash("Could not save the notification email.", "error")
+        flash(
+            "Could not save the notification email. Paste the latest google_sheet_script.gs and deploy a new version.",
+            "error",
+        )
 
     return redirect(url_for("dashboard"))
 
