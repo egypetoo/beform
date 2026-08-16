@@ -26,6 +26,18 @@ function doPost(e) {
     return jsonResponse({ ok: true });
   }
 
+  if (action === "get_manager_email") {
+    return jsonResponse({
+      ok: true,
+      email: getStoredManagerEmail(data.department || ""),
+    });
+  }
+
+  if (action === "set_manager_email") {
+    setStoredManagerEmail(data.department || "", data.email || "");
+    return jsonResponse({ ok: true });
+  }
+
   const deptSheet = getSheetByName(data.department || "Other");
   if (isDuplicate(deptSheet, data)) {
     return jsonResponse({ ok: true, duplicate: true });
@@ -392,17 +404,96 @@ function lookupByFingerprint(fingerprint) {
     .slice(0, 20);
 }
 
-function notifyManagers(data) {
+function managerDepartments() {
+  return ["Web", "Social", "Accounting", "Sales", "HR"];
+}
+
+function getManagersSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Managers");
+  if (!sheet) {
+    sheet = ss.insertSheet("Managers");
+    sheet.appendRow(["Department", "Email"]);
+    managerDepartments().forEach(function (name) {
+      sheet.appendRow([name, ""]);
+    });
+    formatHeader(sheet);
+    return sheet;
+  }
+
+  const lastRow = Math.max(sheet.getLastRow(), 1);
+  const existing = {};
+  sheet.getRange(1, 1, lastRow, 1).getValues().forEach(function (row) {
+    existing[String(row[0] || "").trim().toLowerCase()] = true;
+  });
+  managerDepartments().forEach(function (name) {
+    if (!existing[name.toLowerCase()]) {
+      sheet.appendRow([name, ""]);
+    }
+  });
+  return sheet;
+}
+
+function normalizeDepartmentName(department) {
+  const value = String(department || "").trim();
+  if (!value || value.toUpperCase() === "ALL") {
+    return "HR";
+  }
+  const match = managerDepartments().filter(function (name) {
+    return name.toLowerCase() === value.toLowerCase();
+  })[0];
+  return match || value;
+}
+
+function isValidEmail(value) {
+  const email = String(value || "").trim();
+  return email.length > 4 && email.indexOf("@") > 0 && email.indexOf(".") > email.indexOf("@");
+}
+
+function getStoredManagerEmail(department) {
+  const wanted = normalizeDepartmentName(department).toLowerCase();
+  const sheet = getManagersSheet();
+  const values = sheet.getRange(1, 1, sheet.getLastRow(), 2).getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0] || "").trim().toLowerCase() === wanted) {
+      return String(values[i][1] || "").trim();
+    }
+  }
+  return "";
+}
+
+function setStoredManagerEmail(department, email) {
+  const wanted = normalizeDepartmentName(department);
+  const value = String(email || "").trim();
+  const sheet = getManagersSheet();
+  const values = sheet.getRange(1, 1, sheet.getLastRow(), 2).getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0] || "").trim().toLowerCase() === wanted.toLowerCase()) {
+      sheet.getRange(i + 1, 2).setValue(value);
+      return;
+    }
+  }
+  sheet.appendRow([wanted, value]);
+}
+
+function collectNotifyEmails(department) {
   const emails = [];
   const seen = {};
-  (data.notify_emails || []).forEach(function (email) {
+  function add(email) {
     const value = String(email || "").trim();
     const key = value.toLowerCase();
-    if (value && value.indexOf("@") > 0 && !seen[key]) {
+    if (isValidEmail(value) && !seen[key]) {
       seen[key] = true;
       emails.push(value);
     }
-  });
+  }
+  add(getStoredManagerEmail(department));
+  add(getStoredManagerEmail("HR"));
+  return emails;
+}
+
+function notifyManagers(data) {
+  const emails = collectNotifyEmails(data.department || "");
   if (!emails.length) {
     return;
   }
