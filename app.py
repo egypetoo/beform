@@ -105,18 +105,15 @@ def option_lookup():
 
 
 def save_submission(row: dict) -> None:
-    if not GOOGLE_SHEET_WEBHOOK:
+    load_dotenv(BASE_DIR / ".env", override=True)
+    webhook = os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
+    if not webhook:
         raise RuntimeError("Google Sheet is not connected")
 
-    response = requests.post(
-        GOOGLE_SHEET_WEBHOOK,
-        json=row,
-        timeout=20,
-        allow_redirects=False,
-    )
-    if response.is_redirect or response.status_code in {301, 302, 303, 307, 308}:
-        response = requests.post(response.headers["Location"], json=row, timeout=20)
+    response = requests.post(webhook, json=row, timeout=25)
     response.raise_for_status()
+    if "ok" not in (response.text or "").lower() and response.status_code != 200:
+        raise RuntimeError("Google Sheet did not confirm the save")
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -159,7 +156,7 @@ def index():
                 errors.append("From time is required")
             if not to_time:
                 errors.append("To time is required")
-        if request_type in TIME_RANGE_TYPES or request_type in DATE_RANGE_TYPES:
+        if request_type in options:
             if not start_date:
                 errors.append("From date is required")
             if not end_date:
@@ -191,12 +188,13 @@ def index():
                     "punch_out_time": punch_out_time if request_type == "missing_punch_out" else "",
                     "from_time": from_time if request_type in TIME_RANGE_TYPES else "",
                     "to_time": to_time if request_type in TIME_RANGE_TYPES else "",
-                    "start_date": start_date if request_type not in PUNCH_TYPES else "",
-                    "end_date": end_date if request_type not in PUNCH_TYPES else "",
+                    "start_date": start_date,
+                    "end_date": end_date,
                     "notes": notes,
                 }
             )
-        except Exception:
+        except Exception as exc:
+            (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
             flash("Could not save the request to the HR sheet. Please try again.", "error")
             return render_template(
                 "index.html",

@@ -144,7 +144,7 @@
             punchIn.classList.toggle('hidden', value !== 'missing_punch_in');
             punchOut.classList.toggle('hidden', value !== 'missing_punch_out');
             timeRange.classList.toggle('hidden', !timeRangeTypes.includes(value));
-            leaveDates.classList.toggle('hidden', !value || value === 'missing_punch_in' || value === 'missing_punch_out');
+            leaveDates.classList.toggle('hidden', !value);
         }
 
         requestType.addEventListener('change', updateFields);
