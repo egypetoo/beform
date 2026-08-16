@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=6">
 </head>
 <body>
     <div class="glow"></div>
@@ -58,14 +58,15 @@
                     <input type="hidden" name="type_filter" value="{{ type_filter }}">
                     <input type="hidden" name="request_id" id="single-id" value="">
                     <input type="hidden" name="department" id="single-dept" value="">
+                    <input type="hidden" name="status" id="action-status" value="">
 
                     <div class="bulk-bar">
                         <label class="select-all-label">
                             <input type="checkbox" id="select-all">
                             Select all
                         </label>
-                        <button class="btn-sm btn-approve" name="status" value="Approved" type="submit">Approve selected</button>
-                        <button class="btn-sm btn-reject" name="status" value="Rejected" type="submit">Reject selected</button>
+                        <button class="btn-sm btn-approve" type="submit" data-action="Approved">Approve selected</button>
+                        <button class="btn-sm btn-reject" type="submit" data-action="Rejected">Reject selected</button>
                     </div>
 
                     <div class="table-wrap">
@@ -109,14 +110,12 @@
                                         <td>
                                             {% if current_status == 'Pending' and row.get('Request ID') %}
                                                 <div class="inline-actions">
-                                                    <button class="btn-sm btn-approve" name="status" value="Approved" type="submit"
+                                                    <button class="btn-sm btn-approve row-action" type="submit" data-action="Approved"
                                                             data-id="{{ row.get('Request ID') }}"
-                                                            data-dept="{{ row.get('Department', '') }}"
-                                                            onclick="setSingle(this)">Approve</button>
-                                                    <button class="btn-sm btn-reject" name="status" value="Rejected" type="submit"
+                                                            data-dept="{{ row.get('Department', '') }}">Approve</button>
+                                                    <button class="btn-sm btn-reject row-action" type="submit" data-action="Rejected"
                                                             data-id="{{ row.get('Request ID') }}"
-                                                            data-dept="{{ row.get('Department', '') }}"
-                                                            onclick="setSingle(this)">Reject</button>
+                                                            data-dept="{{ row.get('Department', '') }}">Reject</button>
                                                 </div>
                                             {% else %}
                                                 <span class="muted">{{ row.get('Reviewed By', '') }}</span>
@@ -135,6 +134,12 @@
     </main>
     <script>
         const selectAll = document.getElementById('select-all');
+        const bulkForm = document.getElementById('bulk-form');
+        const actionStatus = document.getElementById('action-status');
+        const singleId = document.getElementById('single-id');
+        const singleDept = document.getElementById('single-dept');
+        let sending = false;
+
         if (selectAll) {
             selectAll.addEventListener('change', () => {
                 document.querySelectorAll('.row-check').forEach((checkbox) => {
@@ -143,20 +148,29 @@
             });
         }
 
-        function setSingle(button) {
-            document.querySelectorAll('.row-check').forEach((checkbox) => {
-                checkbox.checked = false;
-            });
-            document.getElementById('single-id').value = button.dataset.id || '';
-            document.getElementById('single-dept').value = button.dataset.dept || '';
-        }
-
-        const bulkForm = document.getElementById('bulk-form');
         if (bulkForm) {
-            bulkForm.addEventListener('submit', () => {
-                bulkForm.querySelectorAll('button[type="submit"]').forEach((button) => {
-                    button.disabled = true;
+            bulkForm.querySelectorAll('button[type="submit"]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    actionStatus.value = button.dataset.action || '';
+                    if (button.classList.contains('row-action')) {
+                        document.querySelectorAll('.row-check').forEach((checkbox) => {
+                            checkbox.checked = false;
+                        });
+                        singleId.value = button.dataset.id || '';
+                        singleDept.value = button.dataset.dept || '';
+                    } else {
+                        singleId.value = '';
+                        singleDept.value = '';
+                    }
                 });
+            });
+
+            bulkForm.addEventListener('submit', (event) => {
+                if (sending) {
+                    event.preventDefault();
+                    return;
+                }
+                sending = true;
             });
         }
     </script>
