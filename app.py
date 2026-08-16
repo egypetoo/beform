@@ -376,6 +376,12 @@ def index():
                 errors.append("From date is required")
             if not end_date:
                 errors.append("To date is required")
+        if start_date and end_date and start_date > end_date:
+            errors.append("From date cannot be after To date")
+        if request_type in PUNCH_TYPES:
+            today = datetime.now().strftime("%Y-%m-%d")
+            if (start_date and start_date > today) or (end_date and end_date > today):
+                errors.append("Missing punch cannot be submitted for a future date")
 
         if errors:
             for error in errors:

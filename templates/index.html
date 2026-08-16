@@ -141,7 +141,11 @@
         const punchOut = document.getElementById('punch-out-card');
         const leaveDates = document.getElementById('leave-dates-card');
         const timeRange = document.getElementById('time-range-card');
+        const startDate = document.getElementById('start_date');
+        const endDate = document.getElementById('end_date');
         const timeRangeTypes = ['business_mission', 'personal_excuse'];
+        const punchTypes = ['missing_punch_in', 'missing_punch_out'];
+        const today = '{{ today }}';
 
         function updateFields() {
             const value = requestType.value;
@@ -150,6 +154,14 @@
             punchOut.classList.toggle('hidden', value !== 'missing_punch_out');
             timeRange.classList.toggle('hidden', !timeRangeTypes.includes(value));
             leaveDates.classList.toggle('hidden', !value);
+
+            const isPunch = punchTypes.includes(value);
+            startDate.max = isPunch ? today : '';
+            endDate.max = isPunch ? today : '';
+            if (isPunch) {
+                if (startDate.value > today) startDate.value = today;
+                if (endDate.value > today) endDate.value = today;
+            }
         }
 
         requestType.addEventListener('change', updateFields);
@@ -166,6 +178,12 @@
         form.addEventListener('submit', (event) => {
             if (sending) {
                 event.preventDefault();
+                return;
+            }
+            if (punchTypes.includes(requestType.value) &&
+                (startDate.value > today || endDate.value > today)) {
+                event.preventDefault();
+                alert('Missing punch cannot be submitted for a future date.');
                 return;
             }
             sending = true;
