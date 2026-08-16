@@ -81,13 +81,14 @@
             </section>
 
             <section class="field leave-dates" id="leave-dates-card">
+                <p class="field-hint hidden" id="saturday-hint">Friday and Saturday are off, except one working Saturday each month (25th to 24th).</p>
                 <div class="time-grid">
                     <div>
-                        <label for="start_date">From Date <span>*</span></label>
+                        <label for="start_date" id="start-date-label">From Date <span>*</span></label>
                         <input id="start_date" name="start_date" type="date"
                                value="{{ form.get('start_date') or today }}">
                     </div>
-                    <div>
+                    <div id="end-date-wrap">
                         <label for="end_date">To Date <span>*</span></label>
                         <input id="end_date" name="end_date" type="date"
                                value="{{ form.get('end_date') or today }}">
@@ -140,26 +141,51 @@
         const timeRange = document.getElementById('time-range-card');
         const startDate = document.getElementById('start_date');
         const endDate = document.getElementById('end_date');
+        const endDateWrap = document.getElementById('end-date-wrap');
+        const startDateLabel = document.getElementById('start-date-label');
+        const saturdayHint = document.getElementById('saturday-hint');
         const timeRangeTypes = ['business_mission', 'personal_excuse'];
         const punchTypes = ['missing_punch_in', 'missing_punch_out'];
+        const saturdayType = 'monthly_saturday';
         const today = '{{ today }}';
+
+        function weekday(value) {
+            if (!value) return -1;
+            const [year, month, day] = value.split('-').map(Number);
+            return new Date(year, month - 1, day).getDay();
+        }
 
         function updateFields() {
             const value = requestType.value;
+            const isPunch = punchTypes.includes(value);
+            const isSaturday = value === saturdayType;
 
             punchIn.classList.toggle('hidden', value !== 'missing_punch_in');
             punchOut.classList.toggle('hidden', value !== 'missing_punch_out');
             timeRange.classList.toggle('hidden', !timeRangeTypes.includes(value));
             leaveDates.classList.toggle('hidden', !value);
+            endDateWrap.classList.toggle('hidden', isSaturday);
+            saturdayHint.classList.toggle('hidden', !isSaturday);
+            startDateLabel.innerHTML = isSaturday
+                ? 'Saturday Date <span>*</span>'
+                : 'From Date <span>*</span>';
 
-            const isPunch = punchTypes.includes(value);
             startDate.max = isPunch ? today : '';
             endDate.max = isPunch ? today : '';
             if (isPunch) {
                 if (startDate.value > today) startDate.value = today;
                 if (endDate.value > today) endDate.value = today;
             }
+            if (isSaturday) {
+                endDate.value = startDate.value;
+            }
         }
+
+        startDate.addEventListener('change', () => {
+            if (requestType.value === saturdayType) {
+                endDate.value = startDate.value;
+            }
+        });
 
         requestType.addEventListener('change', updateFields);
         updateFields();
@@ -182,6 +208,20 @@
                 event.preventDefault();
                 alert('Missing punch cannot be submitted for a future date.');
                 return;
+            }
+            if (requestType.value === saturdayType) {
+                const day = weekday(startDate.value);
+                if (day === 5) {
+                    event.preventDefault();
+                    alert('Friday is an off day. Choose the working Saturday instead.');
+                    return;
+                }
+                if (day !== 6) {
+                    event.preventDefault();
+                    alert('Monthly Saturday Work must be a Saturday.');
+                    return;
+                }
+                endDate.value = startDate.value;
             }
             sending = true;
             submitBtn.disabled = true;

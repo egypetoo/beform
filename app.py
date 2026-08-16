@@ -34,6 +34,8 @@ app.config.update(
 
 ROWS_CACHE = {}
 CACHE_SECONDS = 60
+TRACK_CACHE = {}
+TRACK_CACHE_SECONDS = 60
 RECENT_SUBMISSIONS = {}
 RECENT_LOCK = Lock()
 DEDUP_SECONDS = 90
@@ -53,6 +55,49 @@ def today_values():
         "today": now.strftime("%Y-%m-%d"),
         "today_display": now.strftime("%A, %B %d, %Y"),
     }
+
+
+def shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
+    month += delta
+    year += (month - 1) // 12
+    month = (month - 1) % 12 + 1
+    return year, month
+
+
+def cycle_start_for(day) -> datetime:
+    if day.day >= 25:
+        return datetime(day.year, day.month, 25)
+    year, month = shift_month(day.year, day.month, -1)
+    return datetime(year, month, 25)
+
+
+def cycle_end_for(start: datetime) -> datetime:
+    year, month = shift_month(start.year, start.month, 1)
+    return datetime(year, month, 24)
+
+
+def payroll_cycles(count: int = 8) -> list:
+    start = cycle_start_for(datetime.now())
+    cycles = []
+    for _ in range(count):
+        end = cycle_end_for(start)
+        cycles.append({
+            "value": start.strftime("%Y-%m-%d"),
+            "label": f"{start.strftime('%d %b')} – {end.strftime('%d %b %Y')}",
+            "start": start.strftime("%Y-%m-%d"),
+            "end": end.strftime("%Y-%m-%d"),
+        })
+        year, month = shift_month(start.year, start.month, -1)
+        start = datetime(year, month, 25)
+    return cycles
+
+
+def row_date(row: dict) -> str:
+    return str(row.get("Submitted At") or row.get("From Date") or "")[:10]
+
+
+def current_cycle_value() -> str:
+    return cycle_start_for(datetime.now()).strftime("%Y-%m-%d")
 
 LEAVE_GROUPS = [
     {
@@ -82,11 +127,19 @@ LEAVE_GROUPS = [
             {"value": "work_remotely", "en": "Work Remotely", "ar": "عمل عن بعد"},
         ],
     },
+    {
+        "title": "Attendance",
+        "title_ar": "الحضور",
+        "options": [
+            {"value": "monthly_saturday", "en": "Monthly Saturday Work", "ar": "عمل السبت الشهري"},
+        ],
+    },
 ]
 
 PUNCH_TYPES = {"missing_punch_in", "missing_punch_out"}
 TIME_RANGE_TYPES = {"business_mission", "personal_excuse"}
 DATE_RANGE_TYPES = {"sick_leave", "unpaid_leave", "annual_vacation", "sickness_vacation", "work_remotely"}
+SATURDAY_TYPES = {"monthly_saturday"}
 
 DEPARTMENTS = [
     {"value": "web", "label": "Web"},
@@ -310,8 +363,25 @@ def set_request_status(items: list, status: str, reviewed_by: str, reason: str =
 
 
 def lookup_by_fingerprint(fingerprint: str) -> list:
-    data = sheet_api({"action": "lookup", "fingerprint_id": fingerprint})
-    return data.get("rows", [])[:20]
+    now = time.time()
+    cached = TRACK_CACHE.get(fingerprint)
+    if cached and now - cached["at"] < TRACK_CACHE_SECONDS:
+        return list(cached["rows"])
+
+    cycles = payroll_cycles()
+    cutoff = cycles[-1]["start"]
+    data = sheet_api({
+        "action": "lookup",
+        "fingerprint_id": fingerprint,
+        "from_date": cutoff,
+    })
+    rows = []
+    for row in data.get("rows", []):
+        submitted = row_date(row)
+        if submitted >= cutoff:
+            rows.append(row)
+    TRACK_CACHE[fingerprint] = {"at": now, "rows": rows}
+    return list(rows)
 
 
 def login_required(view):
@@ -369,6 +439,8 @@ def index():
             errors.append("Actual punch-in time is required")
         if request_type == "missing_punch_out" and not punch_out_time:
             errors.append("Actual punch-out time is required")
+        if request_type in SATURDAY_TYPES and start_date:
+            end_date = start_date
         if request_type in TIME_RANGE_TYPES:
             if not from_time:
                 errors.append("From time is required")
@@ -376,8 +448,8 @@ def index():
                 errors.append("To time is required")
         if request_type in options:
             if not start_date:
-                errors.append("From date is required")
-            if not end_date:
+                errors.append("Saturday date is required" if request_type in SATURDAY_TYPES else "From date is required")
+            if request_type not in SATURDAY_TYPES and not end_date:
                 errors.append("To date is required")
         if start_date and end_date and start_date > end_date:
             errors.append("From date cannot be after To date")
@@ -385,6 +457,17 @@ def index():
             today = datetime.now().strftime("%Y-%m-%d")
             if (start_date and start_date > today) or (end_date and end_date > today):
                 errors.append("Missing punch cannot be submitted for a future date")
+        if request_type in SATURDAY_TYPES and start_date:
+            try:
+                saturday = datetime.strptime(start_date, "%Y-%m-%d")
+            except ValueError:
+                saturday = None
+                errors.append("Please choose a valid Saturday date")
+            if saturday:
+                if saturday.weekday() == 4:
+                    errors.append("Friday is an off day. Choose the working Saturday instead.")
+                elif saturday.weekday() != 5:
+                    errors.append("Monthly Saturday Work must be a Saturday. Friday and Saturday are off except one Saturday per month.")
 
         if errors:
             for error in errors:
@@ -412,7 +495,7 @@ def index():
             "from_time": from_time if request_type in TIME_RANGE_TYPES else "",
             "to_time": to_time if request_type in TIME_RANGE_TYPES else "",
             "start_date": start_date,
-            "end_date": end_date,
+            "end_date": start_date if request_type in SATURDAY_TYPES else end_date,
             "notes": notes,
             "status": "Pending",
         }
@@ -439,6 +522,16 @@ def index():
                 **today_values(),
             )
 
+        if result.get("saturday_month"):
+            flash("Only one working Saturday is allowed per month (25th to 24th). You already submitted one.", "error")
+            return render_template(
+                "index.html",
+                leave_groups=LEAVE_GROUPS,
+                departments=DEPARTMENTS,
+                form=request.form,
+                **today_values(),
+            )
+
         if result.get("duplicate"):
             flash("This request was already submitted.", "error")
             return render_template(
@@ -450,7 +543,10 @@ def index():
             )
 
         if result.get("conflict"):
-            flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
+            if result.get("conflict_type") == "saturday":
+                flash("This Saturday overlaps another leave request.", "error")
+            else:
+                flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
             return render_template(
                 "index.html",
                 leave_groups=LEAVE_GROUPS,
@@ -479,33 +575,94 @@ def success():
 def track():
     rows = None
     fingerprint_id = ""
+    status_filter = "All"
+    type_filter = ""
+    request_types = []
+    cycles = payroll_cycles()
+    month_filter = current_cycle_value()
+    allowed_months = {item["value"] for item in cycles}
 
     if request.method == "POST":
         if not csrf_is_valid():
             flash("The form expired. Please refresh and try again.", "error")
-            return render_template("track.html", rows=None, fingerprint_id="")
-
-        ip = client_ip()
-        if track_is_limited(ip):
-            flash("Too many searches. Please wait 5 minutes and try again.", "error")
-            return render_template("track.html", rows=None, fingerprint_id="")
+            return render_template(
+                "track.html",
+                rows=None,
+                fingerprint_id="",
+                status_filter="All",
+                type_filter="",
+                request_types=[],
+                cycles=cycles,
+                month_filter=month_filter,
+                statuses=["Pending", "Approved", "Rejected", "All"],
+            )
 
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
+        status_filter = request.form.get("status", "All").strip() or "All"
+        type_filter = request.form.get("type", "").strip()
+        month_filter = request.form.get("month", month_filter).strip() or month_filter
+        if month_filter not in allowed_months:
+            month_filter = current_cycle_value()
+        if status_filter not in {"Pending", "Approved", "Rejected", "All"}:
+            status_filter = "All"
+        selected_cycle = next(item for item in cycles if item["value"] == month_filter)
+
         if not fingerprint_id:
             flash("Fingerprint number is required.", "error")
         elif not fingerprint_id.isdigit():
             flash("Fingerprint number must contain digits only.", "error")
         else:
+            cached = TRACK_CACHE.get(fingerprint_id)
+            cache_fresh = bool(cached and time.time() - cached["at"] < TRACK_CACHE_SECONDS)
+            if not cache_fresh and track_is_limited(client_ip()):
+                flash("Too many searches. Please wait 5 minutes and try again.", "error")
+                return render_template(
+                    "track.html",
+                    rows=None,
+                    fingerprint_id=fingerprint_id,
+                    status_filter=status_filter,
+                    type_filter=type_filter,
+                    request_types=[],
+                    cycles=cycles,
+                    month_filter=month_filter,
+                    statuses=["Pending", "Approved", "Rejected", "All"],
+                )
             try:
-                rows = lookup_by_fingerprint(fingerprint_id)
-                if not rows:
-                    flash("No requests found for this fingerprint number.", "error")
+                all_rows = lookup_by_fingerprint(fingerprint_id)
+                if not all_rows:
+                    flash("No requests found for this fingerprint.", "error")
+                    rows = None
+                else:
+                    month_rows = [
+                        row for row in all_rows
+                        if selected_cycle["start"] <= row_date(row) <= selected_cycle["end"]
+                    ]
+                    request_types = sorted({
+                        str(row.get("Request Type") or "").strip()
+                        for row in month_rows
+                        if row.get("Request Type")
+                    })
+                    rows = month_rows
+                    if status_filter != "All":
+                        rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
+                    if type_filter:
+                        rows = [row for row in rows if (row.get("Request Type") or "") == type_filter]
             except Exception as exc:
                 (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
                 flash("Could not load requests. Please try again.", "error")
                 rows = None
 
-    return render_template("track.html", rows=rows, fingerprint_id=fingerprint_id)
+    return render_template(
+        "track.html",
+        rows=rows,
+        fingerprint_id=fingerprint_id,
+        status_filter=status_filter,
+        type_filter=type_filter,
+        request_types=request_types,
+        cycles=cycles,
+        month_filter=month_filter,
+        statuses=["Pending", "Approved", "Rejected", "All"],
+    )
 
 
 @app.route(MANAGER_LOGIN_PATH, methods=["GET", "POST"])

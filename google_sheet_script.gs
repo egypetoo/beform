@@ -15,7 +15,7 @@ function doPost(e) {
   }
 
   if (action === "lookup") {
-    return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "") });
+    return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "", data.from_date || "") });
   }
 
   if (action === "set_status") {
@@ -31,11 +31,17 @@ function doPost(e) {
   }
 
   const deptSheet = getSheetByName(data.department || "Other");
+  if (hasSaturdayInSameCycle(deptSheet, data)) {
+    return jsonResponse({ ok: true, duplicate: true, saturday_month: true });
+  }
   if (isDuplicate(deptSheet, data)) {
     return jsonResponse({ ok: true, duplicate: true });
   }
   if (hasRemotePunchConflict(deptSheet, data)) {
     return jsonResponse({ ok: true, conflict: true });
+  }
+  if (hasSaturdayLeaveConflict(deptSheet, data)) {
+    return jsonResponse({ ok: true, conflict: true, conflict_type: "saturday" });
   }
 
   const row = [
@@ -154,6 +160,134 @@ function isDuplicate(sheet, data) {
     return true;
   }
 
+  return false;
+}
+
+function isSaturdayWorkType(type) {
+  return type === "monthly saturday work";
+}
+
+function isOffDayLeave(type) {
+  return type === "work remotely"
+    || type === "annual vacation"
+    || type === "sickness vacation"
+    || type === "sick leave"
+    || type === "unpaid leave";
+}
+
+function payrollCycleStart(dateText) {
+  const parts = String(dateText || "").split("-");
+  if (parts.length < 3) {
+    return "";
+  }
+  let year = parseInt(parts[0], 10);
+  let month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (!year || !month || !day) {
+    return "";
+  }
+  if (day < 25) {
+    month -= 1;
+    if (month < 1) {
+      month = 12;
+      year -= 1;
+    }
+  }
+  return year + "-" + String(month).padStart(2, "0") + "-25";
+}
+
+function hasSaturdayInSameCycle(sheet, data) {
+  if (!isSaturdayWorkType(normalizeText(data.request_type))) {
+    return false;
+  }
+  if (sheet.getLastRow() < 2) {
+    return false;
+  }
+
+  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const headers = values[0];
+  const fpCol = headers.indexOf("Fingerprint Number");
+  const typeCol = headers.indexOf("Request Type");
+  const fromCol = headers.indexOf("From Date");
+  const statusCol = headers.indexOf("Status");
+  if (fpCol < 0 || typeCol < 0 || fromCol < 0) {
+    return false;
+  }
+
+  const fp = normalizeText(data.fingerprint_id);
+  const cycle = payrollCycleStart(normalizeDate(data.start_date));
+  if (!cycle) {
+    return false;
+  }
+
+  for (let i = values.length - 1; i >= 1; i--) {
+    const row = values[i];
+    const status = String(row[statusCol] || "").trim();
+    if (status === "Rejected") {
+      continue;
+    }
+    if (normalizeText(row[fpCol]) !== fp) {
+      continue;
+    }
+    if (!isSaturdayWorkType(normalizeText(row[typeCol]))) {
+      continue;
+    }
+    if (payrollCycleStart(normalizeDate(row[fromCol])) === cycle) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasSaturdayLeaveConflict(sheet, data) {
+  const newType = normalizeText(data.request_type);
+  const newIsSaturday = isSaturdayWorkType(newType);
+  const newIsLeave = isOffDayLeave(newType);
+  if (!newIsSaturday && !newIsLeave) {
+    return false;
+  }
+  if (sheet.getLastRow() < 2) {
+    return false;
+  }
+
+  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const headers = values[0];
+  const fpCol = headers.indexOf("Fingerprint Number");
+  const typeCol = headers.indexOf("Request Type");
+  const fromCol = headers.indexOf("From Date");
+  const toCol = headers.indexOf("To Date");
+  const statusCol = headers.indexOf("Status");
+  if (fpCol < 0 || typeCol < 0) {
+    return false;
+  }
+
+  const fp = normalizeText(data.fingerprint_id);
+  const newFrom = normalizeDate(data.start_date);
+  const newTo = normalizeDate(data.end_date);
+
+  for (let i = values.length - 1; i >= 1; i--) {
+    const row = values[i];
+    const status = String(row[statusCol] || "").trim();
+    if (status === "Rejected") {
+      continue;
+    }
+    if (normalizeText(row[fpCol]) !== fp) {
+      continue;
+    }
+
+    const existingType = normalizeText(row[typeCol]);
+    const existingFrom = fromCol >= 0 ? normalizeDate(row[fromCol]) : "";
+    const existingTo = toCol >= 0 ? normalizeDate(row[toCol]) : "";
+    if (!datesOverlap(newFrom, newTo, existingFrom, existingTo)) {
+      continue;
+    }
+    if (newIsSaturday && isOffDayLeave(existingType)) {
+      return true;
+    }
+    if (newIsLeave && isSaturdayWorkType(existingType)) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -377,7 +511,7 @@ function stringifyValue(value) {
   return value == null ? "" : String(value);
 }
 
-function lookupByFingerprint(fingerprint) {
+function lookupByFingerprint(fingerprint, fromDate) {
   const fp = normalizeText(fingerprint);
   if (!fp) {
     return [];
@@ -388,11 +522,20 @@ function lookupByFingerprint(fingerprint) {
     return [];
   }
 
-  return sheetToObjects(sheet)
-    .filter(function (row) {
-      return normalizeText(row["Fingerprint Number"]) === fp;
-    })
-    .slice(0, 20);
+  let cutoff = normalizeDate(fromDate);
+  if (!cutoff) {
+    const cutoffDate = new Date();
+    cutoffDate.setMonth(cutoffDate.getMonth() - 8);
+    cutoff = Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+
+  return sheetToObjects(sheet).filter(function (row) {
+    if (normalizeText(row["Fingerprint Number"]) !== fp) {
+      return false;
+    }
+    const submitted = normalizeDate(row["Submitted At"] || row["From Date"] || "");
+    return !submitted || submitted >= cutoff;
+  });
 }
 
 function updateStatuses(items, status, reviewedBy, reason) {

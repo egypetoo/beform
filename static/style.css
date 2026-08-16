@@ -121,6 +121,13 @@ label span {
     color: var(--orange);
 }
 
+.field-hint {
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
 input[type="text"],
 input[type="date"],
 input[type="time"],
@@ -338,7 +345,8 @@ button:disabled {
 
 a.filter-chip,
 a.filter-chip:link,
-a.filter-chip:visited {
+a.filter-chip:visited,
+button.filter-chip {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -350,18 +358,27 @@ a.filter-chip:visited {
     padding: 8px 16px;
     font-weight: 700;
     font-size: 14px;
+    width: auto;
+    box-shadow: none;
 }
 
-a.filter-chip:hover {
+a.filter-chip:hover,
+button.filter-chip:hover {
     border-color: var(--orange);
     color: #fff;
 }
 
 a.filter-chip.active,
-a.filter-chip.active:visited {
+a.filter-chip.active:visited,
+button.filter-chip.active {
     color: #111;
     background: var(--orange);
     border-color: var(--orange);
+}
+
+.track-filter-bar {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 120px;
+    margin-top: 4px;
 }
 
 .table-wrap {

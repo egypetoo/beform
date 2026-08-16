@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9">
 </head>
 <body>
     <div class="glow"></div>
@@ -17,7 +17,7 @@
             <img class="logo" src="{{ url_for('static', filename='logo.webp') }}" alt="BE GROUP">
             <p class="eyebrow">Request Status</p>
             <h1>Track your request</h1>
-            <p class="subtitle">Enter your fingerprint number to see the latest status.</p>
+            <p class="subtitle">Enter your fingerprint number. The work month runs from the 25th to the 24th.</p>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -39,6 +39,31 @@
                        value="{{ fingerprint_id }}" placeholder="Enter fingerprint number">
             </section>
             <button type="submit">Check status</button>
+
+            {% if rows is not none %}
+                <div class="filters">
+                    {% for status in statuses %}
+                        <button class="filter-chip {% if status_filter == status %}active{% endif %}"
+                                type="submit" name="status" value="{{ status }}">{{ status }}</button>
+                    {% endfor %}
+                </div>
+                <input type="hidden" name="status" value="{{ status_filter }}">
+                <div class="filter-bar track-filter-bar">
+                    <select name="month">
+                        {% for cycle in cycles %}
+                            <option value="{{ cycle.value }}" {% if month_filter == cycle.value %}selected{% endif %}>{{ cycle.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <select name="type">
+                        <option value="">All types</option>
+                        {% for request_type in request_types %}
+                            <option value="{{ request_type }}" {% if type_filter == request_type %}selected{% endif %}>{{ request_type }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit">Filter</button>
+                </div>
+            {% endif %}
+
             <a class="excel-link" href="{{ url_for('index') }}">Submit a request</a>
         </form>
 
@@ -65,6 +90,8 @@
                     </article>
                 {% endfor %}
             </section>
+        {% elif rows is not none %}
+            <p class="empty-state">No requests match this filter for the selected month.</p>
         {% endif %}
     </main>
     <script>
