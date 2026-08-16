@@ -34,8 +34,12 @@ function doPost(e) {
     "",
   ];
 
-  getSheetByName(data.department || "Other").appendRow(row);
-  getSheetByName("All").appendRow(row);
+  const deptSheet = getSheetByName(data.department || "Other");
+  const allSheet = getSheetByName("All");
+  deptSheet.appendRow(row);
+  allSheet.appendRow(row);
+  applyStatusColors(deptSheet);
+  applyStatusColors(allSheet);
 
   return jsonResponse({ ok: true });
 }
@@ -146,6 +150,51 @@ function sheetToObjects(sheet) {
   return rows.reverse();
 }
 
+function columnToLetter(column) {
+  let letter = "";
+  while (column > 0) {
+    const remainder = (column - 1) % 26;
+    letter = String.fromCharCode(65 + remainder) + letter;
+    column = Math.floor((column - 1) / 26);
+  }
+  return letter;
+}
+
+function colorRow(sheet, row, lastCol, status) {
+  const range = sheet.getRange(row, 1, 1, lastCol);
+  if (status === "Approved") {
+    range.setBackground("#c6efce");
+  } else if (status === "Rejected") {
+    range.setBackground("#ffc7ce");
+  } else {
+    range.setBackground("#ffffff");
+  }
+}
+
+function applyStatusColors(sheet) {
+  const lastCol = Math.max(sheet.getLastColumn(), headerList().length);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const statusCol = headers.indexOf("Status") + 1;
+  if (!statusCol) {
+    return;
+  }
+
+  const statusLetter = columnToLetter(statusCol);
+  const range = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), lastCol);
+  const approved = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied("=" + statusLetter + '2="Approved"')
+    .setBackground("#c6efce")
+    .setRanges([range])
+    .build();
+  const rejected = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied("=" + statusLetter + '2="Rejected"')
+    .setBackground("#ffc7ce")
+    .setRanges([range])
+    .build();
+
+  sheet.setConditionalFormatRules([approved, rejected]);
+}
+
 function stringifyValue(value) {
   if (Object.prototype.toString.call(value) === "[object Date]") {
     return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm");
@@ -201,6 +250,9 @@ function updateSheetStatus(sheet, requestId, status, reviewedBy) {
       if (reviewedAtCol) {
         sheet.getRange(row, reviewedAtCol).setValue(now);
       }
+      colorRow(sheet, row, lastCol, status);
     }
   }
+
+  applyStatusColors(sheet);
 }
