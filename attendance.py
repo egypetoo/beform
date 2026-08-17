@@ -50,6 +50,7 @@ MISSING_PUNCH_TYPES = {
 }
 LATE_EXCUSE_TYPE = "personal excuse"
 SATURDAY_WORK_TYPE = "monthly saturday work"
+NO_CLOCK_OUT_DEPARTMENTS = {"sales", "مبيعات"}
 WINDOW_START = "09:00"
 WINDOW_END = "10:15"
 QUARTER_UNTIL = "11:00"
@@ -456,6 +457,13 @@ def notes_ar(types: list) -> str:
     return " - ".join(labels)
 
 
+def skips_clock_out(department: str) -> bool:
+    text = " ".join((department or "").strip().lower().split())
+    if not text:
+        return False
+    return text in NO_CLOCK_OUT_DEPARTMENTS or "sales" in text or "مبيعات" in text
+
+
 def missing_punch_reason(types: list) -> str:
     labels = []
     seen = set()
@@ -480,8 +488,14 @@ def classify_day(
     late_excuse: bool = False,
     remaining_allowance: int = MONTHLY_LATE_ALLOWANCE_MINUTES,
     missing_punch_types: list | None = None,
+    department: str = "",
 ) -> dict:
     missing_punch_types = list(missing_punch_types or [])
+    skip_out = skips_clock_out(department)
+    deduct_missing = [
+        item for item in missing_punch_types
+        if not skip_out or str(item).strip().lower() != "missing punch out"
+    ]
     note_types = list(types or [])
     if late_excuse:
         note_types.append(LATE_EXCUSE_TYPE)
@@ -500,12 +514,12 @@ def classify_day(
         return empty
     if types:
         return empty
-    if missing_punch_types:
+    if deduct_missing:
         return {
             **empty,
             "notes": notes,
             "deduction": DEDUCTION_HALF,
-            "reason": missing_punch_reason(missing_punch_types),
+            "reason": missing_punch_reason(deduct_missing),
         }
     if not clock_in:
         if clock_out:
@@ -521,7 +535,7 @@ def classify_day(
             "deduction": DEDUCTION_FULL,
             "reason": "عدم البصمة ولا يوجد طلب",
         }
-    if not clock_out:
+    if not clock_out and not skip_out:
         return {
             **empty,
             "notes": notes,
@@ -552,6 +566,8 @@ def classify_day(
             "remaining": remaining - used,
             "used": used,
         }
+    if skip_out:
+        return empty
     evening = early_penalty(clock_out)
     if evening:
         reason = "انصراف من 16:30 إلى 17:14" if evening == DEDUCTION_QUARTER else "انصراف قبل 16:30"
@@ -649,6 +665,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                 late_excuse,
                 remaining,
                 missing_types,
+                department,
             )
             remaining = result["remaining"]
             allowance_used += result["used"]
