@@ -907,7 +907,8 @@ th {
     align-items: center;
 }
 
-.inline-form input {
+.inline-form input,
+.inline-edit {
     min-width: 0;
     flex: 1;
     margin: 0;

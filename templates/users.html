@@ -102,6 +102,7 @@
 
         <section class="form-shell users-shell">
             <h2 class="section-title">Departments</h2>
+            <p class="muted">Change a department name here. Manager and team names are edited in the list below.</p>
             {% if custom_departments %}
                 <div class="table-wrap">
                     <table>
@@ -116,7 +117,14 @@
                         <tbody>
                             {% for dept in custom_departments %}
                                 <tr>
-                                    <td class="card-name" data-label="Department">{{ dept.label }}</td>
+                                    <td class="card-name" data-label="Department">
+                                        <form method="post" action="{{ url_for('users_department_rename') }}" class="inline-form">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="department_id" value="{{ dept.id }}">
+                                            <input type="text" name="label" value="{{ dept.label }}" required maxlength="40" aria-label="Department name">
+                                            <button class="btn-sm btn-approve" type="submit">Save</button>
+                                        </form>
+                                    </td>
                                     <td data-label="Manager">
                                         {% if dept.manager %}
                                             {{ dept.manager.name }} ({{ dept.manager.username }})
@@ -159,7 +167,7 @@
         </section>
 
         <section class="form-shell users-shell">
-            <h2 class="section-title">Current team leaders</h2>
+            <h2 class="section-title">Managers & team leaders</h2>
             {% if users %}
                 <div class="table-wrap">
                     <table>
@@ -177,10 +185,27 @@
                         <tbody>
                             {% for user in users %}
                                 <tr>
-                                    <td class="card-name" data-label="Name">{{ user.name }}</td>
+                                    <td class="card-name" data-label="Name">
+                                        <form id="edit-user-{{ user.id }}" method="post" action="{{ url_for('users_edit') }}">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                                        </form>
+                                        <div class="inline-form">
+                                            <input form="edit-user-{{ user.id }}" type="text" name="name"
+                                                   value="{{ user.name }}" required maxlength="80" aria-label="Name">
+                                            <button form="edit-user-{{ user.id }}" class="btn-sm btn-approve" type="submit">Save</button>
+                                        </div>
+                                    </td>
                                     <td data-label="Username">{{ user.username }}</td>
                                     <td data-label="Department">{{ user.department }}</td>
-                                    <td data-label="Team">{{ user.team if user.role == 'team' else 'All teams' }}</td>
+                                    <td data-label="Team">
+                                        {% if user.role == 'team' %}
+                                            <input form="edit-user-{{ user.id }}" class="inline-edit" type="text" name="team"
+                                                   value="{{ user.team }}" required maxlength="60" aria-label="Team name">
+                                        {% else %}
+                                            All teams
+                                        {% endif %}
+                                    </td>
                                     <td data-label="Status">
                                         <span class="badge {{ 'badge-approved' if user.active else 'badge-rejected' }}">
                                             {{ 'Active' if user.active else 'Disabled' }}

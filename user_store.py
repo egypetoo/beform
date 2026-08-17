@@ -284,6 +284,68 @@ def toggle_department(dept_id: int) -> bool:
         return updated
 
 
+def rename_department(dept_id: int, new_label: str) -> str:
+    new_label = (new_label or "").strip()
+    value = slug_from_label(new_label)
+    if not LABEL_RE.match(new_label):
+        raise ValueError("Department name must be 2-40 characters: letters, numbers, spaces, &, / or dash.")
+    if new_label.lower() in RESERVED_SHEETS or value in RESERVED_SHEETS:
+        raise ValueError("This department name is reserved.")
+    if len(value) < 3:
+        raise ValueError("Department name is too short.")
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        row = conn.execute("SELECT * FROM departments WHERE id = ?", (dept_id,)).fetchone()
+        if not row:
+            conn.close()
+            raise ValueError("Department not found.")
+        old_label = row["label"]
+        if old_label == new_label:
+            conn.close()
+            return old_label
+        clash = conn.execute(
+            "SELECT id FROM departments WHERE id != ? AND lower(label) = lower(?)",
+            (dept_id, new_label),
+        ).fetchone()
+        if clash:
+            conn.close()
+            raise ValueError("Another department already uses this name.")
+        conn.execute("UPDATE departments SET label = ? WHERE id = ?", (new_label, dept_id))
+        conn.execute("UPDATE users SET department = ? WHERE department = ?", (new_label, old_label))
+        conn.commit()
+        conn.close()
+    return new_label
+
+
+def update_person(user_id: int, name: str, team: str | None = None) -> bool:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Name is required.")
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        row = conn.execute(
+            "SELECT * FROM users WHERE id = ? AND role IN ('team', 'department')",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            conn.close()
+            return False
+        if row["role"] == "team":
+            team = (team or "").strip()
+            if not team:
+                raise ValueError("Team name is required.")
+            if len(team) > 60:
+                raise ValueError("Team name is too long.")
+            conn.execute("UPDATE users SET name = ?, team = ? WHERE id = ?", (name, team, user_id))
+        else:
+            conn.execute("UPDATE users SET name = ? WHERE id = ?", (name, user_id))
+        conn.commit()
+        conn.close()
+    return True
+
+
 def normalize_username(value: str) -> str:
     return (value or "").strip().lower()
 

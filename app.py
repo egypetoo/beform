@@ -1156,6 +1156,44 @@ def users_import():
     return redirect(url_for("users_admin"))
 
 
+@app.route("/users/department/rename", methods=["POST"])
+@hr_required
+def users_department_rename():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    try:
+        dept_id = int(request.form.get("department_id", "0"))
+    except ValueError:
+        dept_id = 0
+    try:
+        label = user_store.rename_department(dept_id, request.form.get("label", ""))
+        flash(f"Department renamed to {label}.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("users_admin"))
+
+
+@app.route("/users/edit", methods=["POST"])
+@hr_required
+def users_edit():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    try:
+        user_id = int(request.form.get("user_id", "0"))
+    except ValueError:
+        user_id = 0
+    try:
+        if user_store.update_person(user_id, request.form.get("name", ""), request.form.get("team")):
+            flash("Details updated.", "success")
+        else:
+            flash("Could not update that account.", "error")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("users_admin"))
+
+
 @app.route("/users/department/toggle", methods=["POST"])
 @hr_required
 def users_department_toggle():
