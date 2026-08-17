@@ -54,6 +54,8 @@ WINDOW_START = "09:00"
 WINDOW_END = "10:15"
 QUARTER_UNTIL = "11:00"
 REQUIRED_MINUTES = 510
+DAILY_GRACE_MINUTES = 15
+SHIFT_END = "17:30"
 MONTHLY_LATE_ALLOWANCE_MINUTES = 4 * 60
 DEDUCTION_FULL = "يوم"
 DEDUCTION_HALF = "نصف يوم"
@@ -128,26 +130,43 @@ def is_whole_hour_excuse(from_time: str, to_time: str) -> bool:
 def evaluate_shift(clock_in: str, clock_out: str) -> dict:
     in_minutes = minutes_of(clock_in)
     out_minutes = minutes_of(clock_out)
+    start = minutes_of(WINDOW_START)
+    end = minutes_of(SHIFT_END)
     late_minutes = 0
+    late_from_start = 0
+    early_out = 0
     worked_minutes = None
     short_minutes = 0
+    grace_used = 0
+    short_after_grace = 0
     if in_minutes is not None:
         late_minutes = max(0, in_minutes - minutes_of(WINDOW_END))
+        late_from_start = max(0, in_minutes - start) if start is not None else 0
         if out_minutes is not None:
-            if out_minutes < in_minutes:
-                out_minutes += 24 * 60
-            worked_minutes = out_minutes - in_minutes
+            raw_out = out_minutes
+            if raw_out < in_minutes:
+                raw_out += 24 * 60
+            worked_minutes = raw_out - in_minutes
             short_minutes = max(0, REQUIRED_MINUTES - worked_minutes)
+            if end is not None:
+                early_out = max(0, end - out_minutes)
+            deviation = late_from_start + early_out
+            grace_used = min(DAILY_GRACE_MINUTES, deviation)
+            short_after_grace = max(0, short_minutes - DAILY_GRACE_MINUTES)
     return {
         "late_minutes": late_minutes,
         "late": format_hours(late_minutes),
         "late_hours": decimal_hours(late_minutes),
+        "late_from_start": late_from_start,
+        "early_out": early_out,
+        "grace_used": grace_used,
         "worked_minutes": worked_minutes,
         "worked": format_hours(worked_minutes) if worked_minutes is not None else "",
         "worked_hours": decimal_hours(worked_minutes) if worked_minutes is not None else "",
         "short_minutes": short_minutes,
         "short": format_hours(short_minutes),
         "short_hours": decimal_hours(short_minutes),
+        "short_after_grace": short_after_grace,
     }
 
 
@@ -487,7 +506,14 @@ def classify_day(
             "deduction": DEDUCTION_HALF,
             "reason": "نسيان بصمة انصراف",
         }
-    shift = evaluate_shift(clock_in, punch.get("clock_out") or "")
+    shift = evaluate_shift(clock_in, clock_out)
+    if shift["short_after_grace"]:
+        return {
+            **empty,
+            "notes": notes,
+            "deduction": DEDUCTION_HALF,
+            "reason": "عدم إكمال 8 ساعات ونصف",
+        }
     late_minutes = shift["late_minutes"]
     if not late_minutes:
         return empty
