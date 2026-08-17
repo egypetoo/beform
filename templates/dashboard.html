@@ -36,6 +36,21 @@
             <form class="filter-bar dash-filter-bar" method="get">
                 <input type="hidden" name="status" value="{{ status_filter }}">
                 <input type="search" class="filter-span" name="q" value="{{ search_query }}" placeholder="Search name, fingerprint, type...">
+                {% if department_options %}
+                    <select name="dept">
+                        <option value="">All departments</option>
+                        {% for department in department_options %}
+                            <option value="{{ department }}" {% if department_filter == department %}selected{% endif %}>{{ department }}</option>
+                        {% endfor %}
+                    </select>
+                {% elif team_options %}
+                    <select name="team">
+                        <option value="">All teams</option>
+                        {% for team in team_options %}
+                            <option value="{{ team }}" {% if team_filter == team %}selected{% endif %}>{{ team }}</option>
+                        {% endfor %}
+                    </select>
+                {% endif %}
                 <select class="filter-span" name="type">
                     <option value="">All types</option>
                     {% for request_type in request_types %}
@@ -56,7 +71,7 @@
             <div class="filters">
                 {% for status in statuses %}
                     <a class="filter-chip {% if status_filter == status %}active{% endif %}"
-                       href="{{ url_for('dashboard', status=status, q=search_query, type=type_filter, **{'from': date_from, 'to': date_to}) }}">{{ status }}</a>
+                       href="{{ url_for('dashboard', status=status, q=search_query, type=type_filter, dept=department_filter, team=team_filter, **{'from': date_from, 'to': date_to}) }}">{{ status }}</a>
                 {% endfor %}
             </div>
 
@@ -68,6 +83,8 @@
                     <input type="hidden" name="type_filter" value="{{ type_filter }}">
                     <input type="hidden" name="date_from" value="{{ date_from }}">
                     <input type="hidden" name="date_to" value="{{ date_to }}">
+                    <input type="hidden" name="dept_filter" value="{{ department_filter }}">
+                    <input type="hidden" name="team_filter" value="{{ team_filter }}">
                     <input type="hidden" name="request_id" id="single-id" value="">
                     <input type="hidden" name="department" id="single-dept" value="">
                     <input type="hidden" name="status" id="action-status" value="">

@@ -250,6 +250,20 @@ def clear_login_failures(ip: str) -> None:
         LOGIN_ATTEMPTS.pop(ip, None)
 
 
+def unique_labels(*groups) -> list:
+    seen = set()
+    labels = []
+    for group in groups:
+        for value in group:
+            text = str(value or "").strip()
+            key = text.lower()
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            labels.append(text)
+    return sorted(labels, key=str.lower)
+
+
 def dashboard_redirect_args(form=None) -> dict:
     source = form if form is not None else request.form
     return {
@@ -258,6 +272,8 @@ def dashboard_redirect_args(form=None) -> dict:
         "type": source.get("type_filter") or source.get("type") or "",
         "from": source.get("date_from") or source.get("from") or "",
         "to": source.get("date_to") or source.get("to") or "",
+        "dept": source.get("dept_filter") or source.get("dept") or "",
+        "team": source.get("team_filter") or source.get("team") or "",
     }
 
 
@@ -778,6 +794,8 @@ def dashboard():
     type_filter = request.args.get("type", "").strip()
     date_from = request.args.get("from", "").strip()
     date_to = request.args.get("to", "").strip()
+    department_filter = request.args.get("dept", "").strip() if is_hr(manager) else ""
+    team_filter = request.args.get("team", "").strip() if manager_role(manager) == "department" else ""
     if len(date_from) != 10:
         date_from = ""
     if len(date_to) != 10:
@@ -795,7 +813,40 @@ def dashboard():
         for row in rows
         if row.get("Request Type")
     })
+    department_options = []
+    team_options = []
+    if is_hr(manager):
+        department_options = unique_labels(
+            [item["label"] for item in all_departments(active_only=False)],
+            [row.get("Department") for row in rows],
+            [department_filter],
+        )
+        department_filter = next(
+            (item for item in department_options if item.lower() == department_filter.lower()),
+            department_filter,
+        ) if department_filter else ""
+    elif manager_role(manager) == "department":
+        configured = user_store.teams_by_department().get(manager.get("department") or "", [])
+        team_options = unique_labels(
+            [item["value"] for item in configured],
+            [row.get("Team") for row in rows],
+            [team_filter],
+        )
+        team_filter = next(
+            (item for item in team_options if item.lower() == team_filter.lower()),
+            team_filter,
+        ) if team_filter else ""
 
+    if department_filter:
+        rows = [
+            row for row in rows
+            if str(row.get("Department") or "").strip().lower() == department_filter.lower()
+        ]
+    if team_filter:
+        rows = [
+            row for row in rows
+            if str(row.get("Team") or "").strip().lower() == team_filter.lower()
+        ]
     if status_filter and status_filter != "All":
         rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
     if type_filter:
@@ -824,6 +875,10 @@ def dashboard():
         status_filter=status_filter,
         search_query=search_query,
         type_filter=type_filter,
+        department_filter=department_filter,
+        team_filter=team_filter,
+        department_options=department_options,
+        team_options=team_options,
         date_from=date_from,
         date_to=date_to,
         request_types=request_types,
