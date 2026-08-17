@@ -496,7 +496,7 @@ def classify_day(
     empty = {"notes": notes, "deduction": "", "reason": "", "remaining": remaining, "used": 0}
     if is_friday(day):
         return empty
-    if is_saturday(day) and not clock_in:
+    if is_saturday(day) and not clock_in and not clock_out:
         return empty
     if types:
         return empty
@@ -508,6 +508,13 @@ def classify_day(
             "reason": missing_punch_reason(missing_punch_types),
         }
     if not clock_in:
+        if clock_out:
+            return {
+                **empty,
+                "notes": notes,
+                "deduction": DEDUCTION_HALF,
+                "reason": "نسيان بصمة حضور",
+            }
         return {
             **empty,
             "notes": notes,
@@ -699,7 +706,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         has_monthly_saturday = False
         for day in saturday_days:
             punch = punches_by_day.get(day) or {}
-            if punch.get("clock_in") or covering_types(saturday_work, device, fingerprint, day):
+            if punch.get("clock_in") or punch.get("clock_out") or covering_types(saturday_work, device, fingerprint, day):
                 has_monthly_saturday = True
                 break
         if saturday_days and not has_monthly_saturday:
