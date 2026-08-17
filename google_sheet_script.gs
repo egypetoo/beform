@@ -508,11 +508,18 @@ function stringifyValue(value) {
   if (Object.prototype.toString.call(value) === "[object Date]") {
     return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm");
   }
+  if (typeof value === "number" && value === Math.floor(value)) {
+    return String(value);
+  }
   return value == null ? "" : String(value);
 }
 
+function normalizeFingerprint(value) {
+  return String(value == null ? "" : value).trim().replace(/\.0$/, "");
+}
+
 function lookupByFingerprint(fingerprint, fromDate) {
-  const fp = normalizeText(fingerprint);
+  const fp = normalizeFingerprint(fingerprint);
   if (!fp) {
     return [];
   }
@@ -530,7 +537,7 @@ function lookupByFingerprint(fingerprint, fromDate) {
   }
 
   return sheetToObjects(sheet).filter(function (row) {
-    if (normalizeText(row["Fingerprint Number"]) !== fp) {
+    if (normalizeFingerprint(row["Fingerprint Number"]) !== fp) {
       return false;
     }
     const submitted = normalizeDate(row["Submitted At"] || row["From Date"] || "");

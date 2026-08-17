@@ -301,14 +301,14 @@ def sheet_api(payload: dict) -> dict:
     if not payload["secret"]:
         raise RuntimeError("Sheet secret is not configured")
 
-    response = requests.post(webhook, json=payload, timeout=20)
+    response = requests.post(webhook, json=payload, timeout=40)
     response.raise_for_status()
     try:
         data = json.loads(response.text or "{}")
     except json.JSONDecodeError as exc:
         raise RuntimeError("Invalid sheet response") from exc
     if not data.get("ok"):
-        raise RuntimeError("Google Sheet did not confirm the save")
+        raise RuntimeError(data.get("error") or "Google Sheet did not confirm the save")
     return data
 
 
@@ -380,6 +380,13 @@ def set_request_status(items: list, status: str, reviewed_by: str, reason: str =
     ROWS_CACHE.clear()
 
 
+def normalize_fingerprint(value) -> str:
+    text = str(value or "").strip()
+    if text.endswith(".0") and text[:-2].replace(".", "").isdigit():
+        text = text[:-2]
+    return text
+
+
 def lookup_by_fingerprint(fingerprint: str) -> list:
     now = time.time()
     cached = TRACK_CACHE.get(fingerprint)
@@ -388,16 +395,26 @@ def lookup_by_fingerprint(fingerprint: str) -> list:
 
     cycles = payroll_cycles()
     cutoff = cycles[-1]["start"]
-    data = sheet_api({
-        "action": "lookup",
-        "fingerprint_id": fingerprint,
-        "from_date": cutoff,
-    })
     rows = []
-    for row in data.get("rows", []):
+    try:
+        data = sheet_api({
+            "action": "lookup",
+            "fingerprint_id": fingerprint,
+            "from_date": cutoff,
+        })
+        source_rows = data.get("rows", [])
+    except Exception:
+        data = sheet_api({"action": "list", "department": "ALL"})
+        source_rows = data.get("rows", [])
+
+    wanted = normalize_fingerprint(fingerprint)
+    for row in source_rows:
+        if normalize_fingerprint(row.get("Fingerprint Number")) != wanted:
+            continue
         submitted = row_date(row)
-        if submitted >= cutoff:
-            rows.append(row)
+        if submitted and submitted < cutoff:
+            continue
+        rows.append(row)
     TRACK_CACHE[fingerprint] = {"at": now, "rows": rows}
     return list(rows)
 
