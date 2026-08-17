@@ -10,6 +10,9 @@ import os
 import secrets
 import time
 import uuid
+import zipfile
+from xml.etree import ElementTree as ET
+from xml.sax.saxutils import escape
 
 from dotenv import load_dotenv
 from flask import Flask, Response, flash, redirect, render_template, request, send_from_directory, session, url_for
@@ -979,6 +982,111 @@ IMPORT_SAMPLE_ROWS = [
 ]
 MAX_IMPORT_BYTES = 200_000
 MAX_IMPORT_ROWS = 200
+XLSX_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+
+
+def _xlsx_cell_ref(row: int, col: int) -> str:
+    letters = ""
+    while col:
+        col, rem = divmod(col - 1, 26)
+        letters = chr(65 + rem) + letters
+    return f"{letters}{row}"
+
+
+def build_xlsx_bytes(headers: list, rows: list) -> bytes:
+    xml_rows = []
+    for row_index, values in enumerate([headers, *rows], start=1):
+        cells = []
+        for col_index, value in enumerate(values, start=1):
+            text = escape(str(value or ""))
+            ref = _xlsx_cell_ref(row_index, col_index)
+            cells.append(f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>')
+        xml_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(xml_rows)}</sheetData></worksheet>'
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            "</Types>"
+        ))
+        archive.writestr("_rels/.rels", (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            "</Relationships>"
+        ))
+        archive.writestr("xl/workbook.xml", (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<sheets><sheet name="People" sheetId="1" r:id="rId1"/></sheets></workbook>'
+        ))
+        archive.writestr("xl/_rels/workbook.xml.rels", (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            "</Relationships>"
+        ))
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return buffer.getvalue()
+
+
+def parse_xlsx_bytes(raw: bytes) -> list:
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        names = archive.namelist()
+        shared = []
+        if "xl/sharedStrings.xml" in names:
+            root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+            for item in root.findall("m:si", XLSX_NS):
+                shared.append("".join((node.text or "") for node in item.findall(".//m:t", XLSX_NS)))
+        sheet_name = next((name for name in names if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")), None)
+        if not sheet_name:
+            raise ValueError("The Excel file has no worksheet.")
+        sheet = ET.fromstring(archive.read(sheet_name))
+
+    parsed_rows = []
+    for row in sheet.findall("m:sheetData/m:row", XLSX_NS):
+        values = {}
+        for cell in row.findall("m:c", XLSX_NS):
+            ref = cell.get("r") or ""
+            col_letters = "".join(ch for ch in ref if ch.isalpha())
+            col_index = 0
+            for ch in col_letters:
+                col_index = col_index * 26 + (ord(ch.upper()) - 64)
+            col_index -= 1
+            cell_type = cell.get("t")
+            number = cell.find("m:v", XLSX_NS)
+            inline = cell.find("m:is", XLSX_NS)
+            if cell_type == "s" and number is not None and number.text:
+                text = shared[int(number.text)]
+            elif cell_type == "inlineStr" and inline is not None:
+                text = "".join((node.text or "") for node in inline.findall(".//m:t", XLSX_NS))
+            elif number is not None:
+                text = number.text or ""
+            else:
+                text = ""
+            values[col_index] = text
+        if values:
+            parsed_rows.append(values)
+    if not parsed_rows:
+        return []
+    width = max(max(row) for row in parsed_rows) + 1
+    headers = [str(parsed_rows[0].get(index, "")).strip().lower() for index in range(width)]
+    rows = []
+    for row in parsed_rows[1:]:
+        rows.append({headers[index]: row.get(index, "") for index in range(width) if headers[index]})
+        if len(rows) > MAX_IMPORT_ROWS:
+            raise ValueError("Too many rows. Import up to 200 at a time.")
+    return rows
 
 
 def parse_people_file(upload) -> list:
@@ -988,22 +1096,11 @@ def parse_people_file(upload) -> list:
         raise ValueError("File is too large. Keep it under 200 KB.")
     if filename.endswith(".xlsx"):
         try:
-            from openpyxl import load_workbook
-        except ImportError as exc:
-            raise ValueError("Excel .xlsx needs openpyxl. Save as CSV UTF-8 instead.") from exc
-        workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-        sheet = workbook.active
-        rows_iter = sheet.iter_rows(values_only=True)
-        try:
-            headers = [str(cell or "").strip().lower() for cell in next(rows_iter)]
-        except StopIteration as exc:
-            raise ValueError("The file is empty.") from exc
-        rows = []
-        for values in rows_iter:
-            rows.append({headers[i]: values[i] if i < len(values) else "" for i in range(len(headers))})
-            if len(rows) > MAX_IMPORT_ROWS:
-                raise ValueError("Too many rows. Import up to 200 at a time.")
-        return rows
+            return parse_xlsx_bytes(raw)
+        except (zipfile.BadZipFile, ET.ParseError, KeyError, IndexError, ValueError) as exc:
+            if isinstance(exc, ValueError) and str(exc):
+                raise
+            raise ValueError("Could not read the Excel file. Use the template or save as CSV UTF-8.") from exc
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -1020,21 +1117,9 @@ def parse_people_file(upload) -> list:
 @app.route("/users/template.xlsx")
 @hr_required
 def users_template():
-    from openpyxl import Workbook
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "People"
-    sheet.append(IMPORT_HEADERS)
-    for row in IMPORT_SAMPLE_ROWS:
-        sheet.append(row)
-    for column in sheet.columns:
-        sheet.column_dimensions[column[0].column_letter].width = 18
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    buffer.seek(0)
+    payload = build_xlsx_bytes(IMPORT_HEADERS, IMPORT_SAMPLE_ROWS)
     return Response(
-        buffer.getvalue(),
+        payload,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=be-people-template.xlsx"},
     )
