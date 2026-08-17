@@ -665,6 +665,32 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                     half_days += 1
                 else:
                     quarter_days += 1
+        saturday_days = [day for day in calendar if is_saturday(day)]
+        has_monthly_saturday = False
+        for day in saturday_days:
+            punch = punches_by_day.get(day) or {}
+            if punch.get("clock_in") or covering_types(saturday_work, device, fingerprint, day):
+                has_monthly_saturday = True
+                break
+        if saturday_days and not has_monthly_saturday:
+            target = saturday_days[-1]
+            for row in export_rows:
+                if row["date"] != target:
+                    continue
+                if row["deduction"]:
+                    break
+                row["deduction"] = DEDUCTION_FULL
+                row["reason"] = "عدم إدخال السبت الشهري"
+                if not row["notes"]:
+                    row["notes"] = "عمل السبت الشهري"
+                missing.append({
+                    "date": target,
+                    "label": weekday_label(target),
+                    "deduction": DEDUCTION_FULL,
+                })
+                missing_total += 1
+                full_days += 1
+                break
         all_export.extend(export_rows)
         if not missing and not late and not short and not covered_days:
             continue
