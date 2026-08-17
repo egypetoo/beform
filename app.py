@@ -108,6 +108,14 @@ def current_cycle_value() -> str:
 
 LEAVE_GROUPS = [
     {
+        "title": "Work",
+        "title_ar": "العمل",
+        "options": [
+            {"value": "work_remotely", "en": "Work Remotely", "ar": "عمل عن بعد"},
+            {"value": "monthly_saturday", "en": "Monthly Saturday Work", "ar": "عمل السبت الشهري"},
+        ],
+    },
+    {
         "title": "Leaves",
         "title_ar": "الإجازات",
         "options": [
@@ -125,20 +133,6 @@ LEAVE_GROUPS = [
         "options": [
             {"value": "annual_vacation", "en": "Annual Vacation", "ar": "إجازة سنوية"},
             {"value": "sickness_vacation", "en": "Sickness Vacation", "ar": "إجازة مرضية طويلة"},
-        ],
-    },
-    {
-        "title": "Casual Vacations",
-        "title_ar": "إجازات أخرى",
-        "options": [
-            {"value": "work_remotely", "en": "Work Remotely", "ar": "عمل عن بعد"},
-        ],
-    },
-    {
-        "title": "Attendance",
-        "title_ar": "الحضور",
-        "options": [
-            {"value": "monthly_saturday", "en": "Monthly Saturday Work", "ar": "عمل السبت الشهري"},
         ],
     },
 ]
