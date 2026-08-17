@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BE GROUP | Team Leaders</title>
+    <title>BE GROUP | People & Departments</title>
     {% include "_pwa_head.html" %}
 </head>
 <body>
@@ -12,8 +12,8 @@
         <header class="hero dash-hero">
             {% include "_logo.html" %}
             <p class="eyebrow">HR Admin</p>
-            <h1>Team Leaders</h1>
-            <p class="subtitle">Add a team leader, assign a department, and give them a dashboard password.</p>
+            <h1>People & Departments</h1>
+            <p class="subtitle">Add departments and team leaders. New departments appear on the request form automatically.</p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
@@ -63,6 +63,72 @@
             <button type="submit">Add team leader</button>
         </form>
 
+        <form class="form-shell users-shell" method="post" action="{{ url_for('users_department') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h2 class="section-title">Add department</h2>
+            <section class="field">
+                <label for="label">Department name</label>
+                <input id="label" name="label" type="text" required placeholder="Marketing">
+            </section>
+            <section class="field">
+                <label for="manager_name">Department manager name</label>
+                <input id="manager_name" name="manager_name" type="text" required placeholder="Mohamed">
+            </section>
+            <section class="field">
+                <label for="manager_username">Manager username</label>
+                <input id="manager_username" name="manager_username" type="text" required maxlength="20"
+                       placeholder="marketing">
+            </section>
+            <section class="field">
+                <label for="manager_password">Manager password</label>
+                <input id="manager_password" name="manager_password" type="password" required minlength="8"
+                       placeholder="At least 8 characters">
+            </section>
+            <button type="submit">Add department</button>
+        </form>
+
+        <section class="form-shell users-shell">
+            <h2 class="section-title">Added departments</h2>
+            {% if custom_departments %}
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Department</th>
+                                <th>Form value</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for dept in custom_departments %}
+                                <tr>
+                                    <td class="card-name" data-label="Department">{{ dept.label }}</td>
+                                    <td data-label="Form value">{{ dept.value }}</td>
+                                    <td data-label="Status">
+                                        <span class="badge {{ 'badge-approved' if dept.active else 'badge-rejected' }}">
+                                            {{ 'Active' if dept.active else 'Hidden' }}
+                                        </span>
+                                    </td>
+                                    <td class="card-actions" data-label="Visibility">
+                                        <form method="post" action="{{ url_for('users_department_toggle') }}">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="department_id" value="{{ dept.id }}">
+                                            <button class="btn-sm {{ 'btn-reject' if dept.active else 'btn-approve' }}" type="submit">
+                                                {{ 'Hide from form' if dept.active else 'Show on form' }}
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty-state">No extra departments yet. Web, Social, Accounting, Sales, and HR are already built in.</p>
+            {% endif %}
+        </section>
+
         <section class="form-shell users-shell">
             <h2 class="section-title">Current team leaders</h2>
             {% if users %}
@@ -85,7 +151,7 @@
                                     <td class="card-name" data-label="Name">{{ user.name }}</td>
                                     <td data-label="Username">{{ user.username }}</td>
                                     <td data-label="Department">{{ user.department }}</td>
-                                    <td data-label="Team">{{ user.team }}</td>
+                                    <td data-label="Team">{{ user.team if user.role == 'team' else 'All teams' }}</td>
                                     <td data-label="Status">
                                         <span class="badge {{ 'badge-approved' if user.active else 'badge-rejected' }}">
                                             {{ 'Active' if user.active else 'Disabled' }}

@@ -30,18 +30,17 @@ function doPost(e) {
     return jsonResponse({ ok: false, error: "unknown_action" });
   }
 
-  const deptSheet = getSheetByName(data.department || "Other");
-  if (hasSaturdayInSameCycle(deptSheet, data)) {
-    return jsonResponse({ ok: true, duplicate: true, saturday_month: true });
-  }
-  if (isDuplicate(deptSheet, data)) {
-    return jsonResponse({ ok: true, duplicate: true });
-  }
-  if (hasRemotePunchConflict(deptSheet, data)) {
-    return jsonResponse({ ok: true, conflict: true });
-  }
-  if (hasSaturdayLeaveConflict(deptSheet, data)) {
-    return jsonResponse({ ok: true, conflict: true, conflict_type: "saturday" });
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const deptSheet = getOrCreateSheet(ss, data.department || "Other");
+  const deptHeaders = ensureHeaders(deptSheet);
+  const lastRow = deptSheet.getLastRow();
+  const values = lastRow >= 2
+    ? deptSheet.getRange(1, 1, lastRow, deptSheet.getLastColumn()).getValues()
+    : [deptHeaders];
+
+  const blocked = checkCreateConflicts(values, data);
+  if (blocked) {
+    return jsonResponse(blocked);
   }
 
   const valuesByHeader = {
@@ -66,9 +65,10 @@ function doPost(e) {
     "Rejection Reason": "",
   };
 
-  const allSheet = getSheetByName("All");
-  appendMappedRow(deptSheet, valuesByHeader);
-  appendMappedRow(allSheet, valuesByHeader);
+  const allSheet = getOrCreateSheet(ss, "All");
+  const allHeaders = ensureHeaders(allSheet);
+  appendMappedRow(deptSheet, valuesByHeader, deptHeaders);
+  appendMappedRow(allSheet, valuesByHeader, allHeaders);
 
   return jsonResponse({ ok: true, duplicate: false });
 }
@@ -98,12 +98,11 @@ function normalizeDate(value) {
   return text.split(" ")[0];
 }
 
-function isDuplicate(sheet, data) {
-  if (sheet.getLastRow() < 2) {
-    return false;
+function checkCreateConflicts(values, data) {
+  if (!values || values.length < 2) {
+    return null;
   }
 
-  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
   const headers = values[0];
   const fpCol = headers.indexOf("Fingerprint Number");
   const typeCol = headers.indexOf("Request Type");
@@ -114,9 +113,8 @@ function isDuplicate(sheet, data) {
   const punchOutCol = headers.indexOf("Punch Out Time");
   const fromTimeCol = headers.indexOf("From Time");
   const toTimeCol = headers.indexOf("To Time");
-
   if (fpCol < 0 || typeCol < 0) {
-    return false;
+    return null;
   }
 
   const fp = normalizeText(data.fingerprint_id);
@@ -127,6 +125,15 @@ function isDuplicate(sheet, data) {
   const punchOut = normalizeText(data.punch_out_time);
   const fromTime = normalizeText(data.from_time);
   const toTime = normalizeText(data.to_time);
+  const newIsSaturday = isSaturdayWorkType(type);
+  const newIsLeave = isOffDayLeave(type);
+  const newIsPunch = isPunchType(type);
+  const newIsRemote = isRemoteType(type);
+  const cycle = newIsSaturday ? payrollCycleStart(fromDate) : "";
+
+  let duplicate = false;
+  let remoteConflict = false;
+  let saturdayConflict = false;
 
   for (let i = values.length - 1; i >= 1; i--) {
     const row = values[i];
@@ -137,31 +144,54 @@ function isDuplicate(sheet, data) {
     if (normalizeText(row[fpCol]) !== fp) {
       continue;
     }
-    if (normalizeText(row[typeCol]) !== type) {
-      continue;
+
+    const existingType = normalizeText(row[typeCol]);
+    const existingFrom = fromCol >= 0 ? normalizeDate(row[fromCol]) : "";
+    const existingTo = toCol >= 0 ? normalizeDate(row[toCol]) : "";
+
+    if (newIsSaturday && cycle && isSaturdayWorkType(existingType) && payrollCycleStart(existingFrom) === cycle) {
+      return { ok: true, duplicate: true, saturday_month: true };
     }
-    if (fromCol >= 0 && normalizeDate(row[fromCol]) !== fromDate) {
-      continue;
+
+    if (
+      !duplicate
+      && existingType === type
+      && (fromCol < 0 || existingFrom === fromDate)
+      && (toCol < 0 || existingTo === toDate)
+      && (punchInCol < 0 || normalizeText(row[punchInCol]) === punchIn)
+      && (punchOutCol < 0 || normalizeText(row[punchOutCol]) === punchOut)
+      && (fromTimeCol < 0 || normalizeText(row[fromTimeCol]) === fromTime)
+      && (toTimeCol < 0 || normalizeText(row[toTimeCol]) === toTime)
+    ) {
+      duplicate = true;
     }
-    if (toCol >= 0 && normalizeDate(row[toCol]) !== toDate) {
-      continue;
+
+    if ((newIsPunch || newIsRemote || newIsSaturday || newIsLeave) && datesOverlap(fromDate, toDate, existingFrom, existingTo)) {
+      if (newIsPunch && isRemoteType(existingType)) {
+        remoteConflict = true;
+      }
+      if (newIsRemote && isPunchType(existingType)) {
+        remoteConflict = true;
+      }
+      if (newIsSaturday && isOffDayLeave(existingType)) {
+        saturdayConflict = true;
+      }
+      if (newIsLeave && isSaturdayWorkType(existingType)) {
+        saturdayConflict = true;
+      }
     }
-    if (punchInCol >= 0 && normalizeText(row[punchInCol]) !== punchIn) {
-      continue;
-    }
-    if (punchOutCol >= 0 && normalizeText(row[punchOutCol]) !== punchOut) {
-      continue;
-    }
-    if (fromTimeCol >= 0 && normalizeText(row[fromTimeCol]) !== fromTime) {
-      continue;
-    }
-    if (toTimeCol >= 0 && normalizeText(row[toTimeCol]) !== toTime) {
-      continue;
-    }
-    return true;
   }
 
-  return false;
+  if (duplicate) {
+    return { ok: true, duplicate: true };
+  }
+  if (remoteConflict) {
+    return { ok: true, conflict: true };
+  }
+  if (saturdayConflict) {
+    return { ok: true, conflict: true, conflict_type: "saturday" };
+  }
+  return null;
 }
 
 function isSaturdayWorkType(type) {
@@ -197,101 +227,6 @@ function payrollCycleStart(dateText) {
   return year + "-" + String(month).padStart(2, "0") + "-25";
 }
 
-function hasSaturdayInSameCycle(sheet, data) {
-  if (!isSaturdayWorkType(normalizeText(data.request_type))) {
-    return false;
-  }
-  if (sheet.getLastRow() < 2) {
-    return false;
-  }
-
-  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
-  const headers = values[0];
-  const fpCol = headers.indexOf("Fingerprint Number");
-  const typeCol = headers.indexOf("Request Type");
-  const fromCol = headers.indexOf("From Date");
-  const statusCol = headers.indexOf("Status");
-  if (fpCol < 0 || typeCol < 0 || fromCol < 0) {
-    return false;
-  }
-
-  const fp = normalizeText(data.fingerprint_id);
-  const cycle = payrollCycleStart(normalizeDate(data.start_date));
-  if (!cycle) {
-    return false;
-  }
-
-  for (let i = values.length - 1; i >= 1; i--) {
-    const row = values[i];
-    const status = String(row[statusCol] || "").trim();
-    if (status === "Rejected") {
-      continue;
-    }
-    if (normalizeText(row[fpCol]) !== fp) {
-      continue;
-    }
-    if (!isSaturdayWorkType(normalizeText(row[typeCol]))) {
-      continue;
-    }
-    if (payrollCycleStart(normalizeDate(row[fromCol])) === cycle) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function hasSaturdayLeaveConflict(sheet, data) {
-  const newType = normalizeText(data.request_type);
-  const newIsSaturday = isSaturdayWorkType(newType);
-  const newIsLeave = isOffDayLeave(newType);
-  if (!newIsSaturday && !newIsLeave) {
-    return false;
-  }
-  if (sheet.getLastRow() < 2) {
-    return false;
-  }
-
-  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
-  const headers = values[0];
-  const fpCol = headers.indexOf("Fingerprint Number");
-  const typeCol = headers.indexOf("Request Type");
-  const fromCol = headers.indexOf("From Date");
-  const toCol = headers.indexOf("To Date");
-  const statusCol = headers.indexOf("Status");
-  if (fpCol < 0 || typeCol < 0) {
-    return false;
-  }
-
-  const fp = normalizeText(data.fingerprint_id);
-  const newFrom = normalizeDate(data.start_date);
-  const newTo = normalizeDate(data.end_date);
-
-  for (let i = values.length - 1; i >= 1; i--) {
-    const row = values[i];
-    const status = String(row[statusCol] || "").trim();
-    if (status === "Rejected") {
-      continue;
-    }
-    if (normalizeText(row[fpCol]) !== fp) {
-      continue;
-    }
-
-    const existingType = normalizeText(row[typeCol]);
-    const existingFrom = fromCol >= 0 ? normalizeDate(row[fromCol]) : "";
-    const existingTo = toCol >= 0 ? normalizeDate(row[toCol]) : "";
-    if (!datesOverlap(newFrom, newTo, existingFrom, existingTo)) {
-      continue;
-    }
-    if (newIsSaturday && isOffDayLeave(existingType)) {
-      return true;
-    }
-    if (newIsLeave && isSaturdayWorkType(existingType)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function isPunchType(type) {
   return type === "missing punch in" || type === "missing punch out";
 }
@@ -311,76 +246,26 @@ function datesOverlap(fromA, toA, fromB, toB) {
   return startA <= endB && startB <= endA;
 }
 
-function hasRemotePunchConflict(sheet, data) {
-  const newType = normalizeText(data.request_type);
-  const newIsPunch = isPunchType(newType);
-  const newIsRemote = isRemoteType(newType);
-  if (!newIsPunch && !newIsRemote) {
-    return false;
+function appendMappedRow(sheet, valuesByHeader, headers) {
+  if (!headers || !headers.length) {
+    headers = ensureHeaders(sheet);
   }
-  if (sheet.getLastRow() < 2) {
-    return false;
-  }
-
-  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
-  const headers = values[0];
-  const fpCol = headers.indexOf("Fingerprint Number");
-  const typeCol = headers.indexOf("Request Type");
-  const fromCol = headers.indexOf("From Date");
-  const toCol = headers.indexOf("To Date");
-  const statusCol = headers.indexOf("Status");
-  if (fpCol < 0 || typeCol < 0) {
-    return false;
-  }
-
-  const fp = normalizeText(data.fingerprint_id);
-  const newFrom = normalizeDate(data.start_date);
-  const newTo = normalizeDate(data.end_date);
-
-  for (let i = values.length - 1; i >= 1; i--) {
-    const row = values[i];
-    const status = String(row[statusCol] || "").trim();
-    if (status === "Rejected") {
-      continue;
-    }
-    if (normalizeText(row[fpCol]) !== fp) {
-      continue;
-    }
-
-    const existingType = normalizeText(row[typeCol]);
-    const existingFrom = fromCol >= 0 ? normalizeDate(row[fromCol]) : "";
-    const existingTo = toCol >= 0 ? normalizeDate(row[toCol]) : "";
-    const overlaps = datesOverlap(newFrom, newTo, existingFrom, existingTo);
-    if (!overlaps) {
-      continue;
-    }
-
-    if (newIsPunch && isRemoteType(existingType)) {
-      return true;
-    }
-    if (newIsRemote && isPunchType(existingType)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function appendMappedRow(sheet, valuesByHeader) {
-  ensureHeaders(sheet);
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const row = headers.map(function (header) {
     return Object.prototype.hasOwnProperty.call(valuesByHeader, header) ? valuesByHeader[header] : "";
   });
   sheet.appendRow(row);
 }
 
-function getSheetByName(name) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+function getOrCreateSheet(ss, name) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
   }
+  return sheet;
+}
+
+function getSheetByName(name) {
+  const sheet = getOrCreateSheet(SpreadsheetApp.getActiveSpreadsheet(), name);
   ensureHeaders(sheet);
   return sheet;
 }
@@ -410,10 +295,11 @@ function headerList() {
 }
 
 function ensureHeaders(sheet) {
+  const needed = headerList();
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(headerList());
+    sheet.appendRow(needed);
     formatHeader(sheet);
-    return;
+    return needed;
   }
 
   let headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
@@ -422,21 +308,23 @@ function ensureHeaders(sheet) {
   if (String(headers[0]).trim() !== "Request ID") {
     sheet.insertColumnBefore(1);
     sheet.getRange(1, 1).setValue("Request ID");
+    headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     changed = true;
   }
 
-  headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  ["Status", "Reviewed By", "Reviewed At", "Rejection Reason", "Team"].forEach(function (name) {
-    if (headers.indexOf(name) === -1) {
-      sheet.getRange(1, sheet.getLastColumn() + 1).setValue(name);
-      headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-      changed = true;
-    }
+  const missing = needed.filter(function (name) {
+    return headers.indexOf(name) === -1;
   });
+  if (missing.length) {
+    sheet.getRange(1, sheet.getLastColumn() + 1, 1, missing.length).setValues([missing]);
+    headers = headers.concat(missing);
+    changed = true;
+  }
 
   if (changed) {
     formatHeader(sheet);
   }
+  return headers;
 }
 
 function formatHeader(sheet) {

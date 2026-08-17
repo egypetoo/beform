@@ -17,6 +17,8 @@ import requests
 
 import user_store
 
+SHEET_SESSION = requests.Session()
+
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 GOOGLE_SHEET_WEBHOOK = os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
@@ -144,16 +146,36 @@ TIME_RANGE_TYPES = {"business_mission", "personal_excuse"}
 DATE_RANGE_TYPES = {"sick_leave", "unpaid_leave", "annual_vacation", "sickness_vacation", "work_remotely"}
 SATURDAY_TYPES = {"monthly_saturday"}
 
-DEPARTMENTS = [
+BUILTIN_DEPARTMENTS = [
     {"value": "web", "label": "Web"},
     {"value": "social", "label": "Social"},
     {"value": "accounting", "label": "Accounting"},
     {"value": "sales", "label": "Sales"},
     {"value": "hr", "label": "HR"},
 ]
-DEPARTMENT_VALUES = {item["value"] for item in DEPARTMENTS}
-DEPARTMENT_LABELS = {item["value"]: item["label"] for item in DEPARTMENTS}
-DEPARTMENT_LABEL_SET = {item["label"] for item in DEPARTMENTS}
+
+
+def all_departments(active_only: bool = True) -> list:
+    items = list(BUILTIN_DEPARTMENTS)
+    seen = {item["value"] for item in items}
+    seen_labels = {item["label"].lower() for item in items}
+    for dept in user_store.list_custom_departments(active_only=active_only):
+        if dept["value"] in seen or dept["label"].lower() in seen_labels:
+            continue
+        items.append({"value": dept["value"], "label": dept["label"]})
+        seen.add(dept["value"])
+        seen_labels.add(dept["label"].lower())
+    return items
+
+
+def department_maps():
+    departments = all_departments(active_only=True)
+    return {
+        "items": departments,
+        "values": {item["value"] for item in departments},
+        "labels": {item["value"]: item["label"] for item in departments},
+        "label_set": {item["label"] for item in departments},
+    }
 
 
 def get_managers():
@@ -310,14 +332,14 @@ def teams_for_form() -> dict:
     by_label = user_store.teams_by_department()
     return {
         item["value"]: by_label.get(item["label"], [])
-        for item in DEPARTMENTS
+        for item in all_departments()
     }
 
 
 def index_context(form) -> dict:
     return {
         "leave_groups": LEAVE_GROUPS,
-        "departments": DEPARTMENTS,
+        "departments": all_departments(),
         "teams_by_department": teams_for_form(),
         "form": form,
         **today_values(),
@@ -354,7 +376,7 @@ def sheet_api(payload: dict) -> dict:
     if not payload["secret"]:
         raise RuntimeError("Sheet secret is not configured")
 
-    response = requests.post(webhook, json=payload, timeout=40)
+    response = SHEET_SESSION.post(webhook, json=payload, timeout=20)
     response.raise_for_status()
     try:
         data = json.loads(response.text or "{}")
@@ -549,7 +571,7 @@ def index():
             errors.append("Name is required")
         if not department:
             errors.append("Department is required")
-        elif department not in DEPARTMENT_VALUES:
+        elif department not in department_maps()["values"]:
             errors.append("Please select a valid department")
         else:
             allowed_teams = [item["value"] for item in teams_for_form().get(department, [])]
@@ -599,7 +621,7 @@ def index():
             return render_template("index.html", **index_context(request.form))
 
         selected = options[request_type]
-        department_label = next(item["label"] for item in DEPARTMENTS if item["value"] == department)
+        department_label = department_maps()["labels"].get(department, "")
         row = {
             "request_id": uuid.uuid4().hex[:12].upper(),
             "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -925,6 +947,7 @@ def update_status():
 @app.route("/users", methods=["GET", "POST"])
 @hr_required
 def users_admin():
+    maps = department_maps()
     if request.method == "POST":
         if not csrf_is_valid():
             flash("The form expired. Please refresh and try again.", "error")
@@ -935,14 +958,14 @@ def users_admin():
         department_value = request.form.get("department", "").strip()
         team = request.form.get("team", "")
         password = request.form.get("password", "")
-        department_label = DEPARTMENT_LABELS.get(department_value, "")
+        department_label = maps["labels"].get(department_value, "")
         errors = user_store.validate_new_user(
             username,
             name,
             department_label,
             team,
             password,
-            DEPARTMENT_LABEL_SET,
+            maps["label_set"],
         )
         if errors:
             for error in errors:
@@ -959,8 +982,60 @@ def users_admin():
         "users.html",
         manager=session["manager"],
         users=user_store.list_users(),
-        departments=DEPARTMENTS,
+        departments=maps["items"],
+        custom_departments=user_store.list_custom_departments(active_only=False),
     )
+
+
+@app.route("/users/department", methods=["POST"])
+@hr_required
+def users_department():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+
+    maps = department_maps()
+    label = request.form.get("label", "")
+    name = request.form.get("manager_name", "")
+    username = request.form.get("manager_username", "")
+    password = request.form.get("manager_password", "")
+    errors = user_store.validate_new_department(
+        label,
+        name,
+        username,
+        password,
+        maps["values"],
+        maps["label_set"],
+    )
+    if user_store.find_user(username) or username.strip().lower() in get_managers():
+        errors.append("This username already exists.")
+    if errors:
+        for error in errors:
+            flash(error, "error")
+    else:
+        try:
+            created = user_store.create_department(label, name, username, password)
+            flash(f"Department {created['label']} added. Manager login: {created['username']}", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+    return redirect(url_for("users_admin"))
+
+
+@app.route("/users/department/toggle", methods=["POST"])
+@hr_required
+def users_department_toggle():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    try:
+        dept_id = int(request.form.get("department_id", "0"))
+    except ValueError:
+        dept_id = 0
+    if user_store.toggle_department(dept_id):
+        flash("Department status updated.", "success")
+    else:
+        flash("Could not update that department.", "error")
+    return redirect(url_for("users_admin"))
 
 
 @app.route("/users/password", methods=["POST"])
