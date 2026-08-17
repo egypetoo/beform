@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=11">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=12">
 </head>
 <body>
     <div class="glow"></div>
@@ -111,7 +111,7 @@
                                             {% endif %}
                                         </td>
                                         <td data-label="Submitted">{{ row.get('Submitted At', '') }}</td>
-                                        <td data-label="Name">{{ row.get('Name', '') }}</td>
+                                        <td class="card-name" data-label="Name">{{ row.get('Name', '') }}</td>
                                         <td data-label="Fingerprint">{{ row.get('Fingerprint Number', '') }}</td>
                                         <td data-label="Department">{{ row.get('Department', '') }}</td>
                                         <td data-label="Type">{{ row.get('Request Type', '') }}</td>
