@@ -100,6 +100,7 @@
             </section>
 
             <section class="field time-range" id="time-range-card">
+                <p class="field-hint hidden" id="excuse-hint">إذن التأخير بالساعة فقط: ساعة أو ساعتين أو ثلاث ساعات. مفيش نص ساعة أو ربع ساعة.</p>
                 <div class="time-grid">
                     <div>
                         <label for="from_time">From Time <span>*</span></label>
@@ -148,9 +149,13 @@
         const endDateWrap = document.getElementById('end-date-wrap');
         const startDateLabel = document.getElementById('start-date-label');
         const saturdayHint = document.getElementById('saturday-hint');
+        const excuseHint = document.getElementById('excuse-hint');
+        const fromTime = document.getElementById('from_time');
+        const toTime = document.getElementById('to_time');
         const timeRangeTypes = ['business_mission', 'personal_excuse'];
         const punchTypes = ['missing_punch_in', 'missing_punch_out'];
         const saturdayType = 'monthly_saturday';
+        const personalExcuse = 'personal_excuse';
         const today = '{{ today }}';
 
         function weekday(value) {
@@ -170,6 +175,7 @@
             leaveDates.classList.toggle('hidden', !value);
             endDateWrap.classList.toggle('hidden', isSaturday);
             saturdayHint.classList.toggle('hidden', !isSaturday);
+            excuseHint.classList.toggle('hidden', value !== personalExcuse);
             startDateLabel.innerHTML = isSaturday
                 ? 'Saturday Date <span>*</span>'
                 : 'From Date <span>*</span>';
@@ -253,6 +259,18 @@
                     return;
                 }
                 endDate.value = startDate.value;
+            }
+            if (requestType.value === personalExcuse) {
+                const startParts = (fromTime.value || '').split(':');
+                const endParts = (toTime.value || '').split(':');
+                const start = startParts.length >= 2 ? Number(startParts[0]) * 60 + Number(startParts[1]) : NaN;
+                const end = endParts.length >= 2 ? Number(endParts[0]) * 60 + Number(endParts[1]) : NaN;
+                const duration = end - start;
+                if (!Number.isFinite(duration) || duration < 60 || duration % 60 !== 0) {
+                    event.preventDefault();
+                    alert('إذن التأخير لازم يكون ساعة كاملة أو أكثر (ساعة، ساعتين، ثلاث ساعات). مفيش كسور.');
+                    return;
+                }
             }
             sending = true;
             submitBtn.disabled = true;

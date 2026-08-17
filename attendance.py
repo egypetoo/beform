@@ -50,10 +50,12 @@ LATE_EXCUSE_TYPE = "personal excuse"
 SATURDAY_WORK_TYPE = "monthly saturday work"
 WINDOW_START = "09:00"
 WINDOW_END = "10:15"
+QUARTER_UNTIL = "11:00"
 REQUIRED_MINUTES = 510
 MONTHLY_LATE_ALLOWANCE_MINUTES = 4 * 60
 DEDUCTION_FULL = "يوم"
 DEDUCTION_HALF = "نصف يوم"
+DEDUCTION_QUARTER = "ربع يوم"
 NOTE_AR = {
     "work remotely": "عمل عن بعد",
     "business mission": "مأمورية",
@@ -83,6 +85,41 @@ def format_hours(minutes: int) -> str:
 
 def decimal_hours(minutes: int) -> str:
     return f"{max(0, int(minutes or 0)) / 60:.2f}"
+
+
+def ceil_hours_minutes(minutes: int) -> int:
+    minutes = max(0, int(minutes or 0))
+    if not minutes:
+        return 0
+    return ((minutes + 59) // 60) * 60
+
+
+def late_penalty(clock_in: str) -> str:
+    in_minutes = minutes_of(clock_in)
+    allowed = minutes_of(WINDOW_END)
+    quarter_until = minutes_of(QUARTER_UNTIL)
+    if in_minutes is None or allowed is None or quarter_until is None:
+        return ""
+    if in_minutes <= allowed:
+        return ""
+    if in_minutes <= quarter_until:
+        return DEDUCTION_QUARTER
+    return DEDUCTION_HALF
+
+
+def excuse_duration_minutes(from_time: str, to_time: str) -> int | None:
+    start = minutes_of(from_time)
+    end = minutes_of(to_time)
+    if start is None or end is None:
+        return None
+    if end <= start:
+        return None
+    return end - start
+
+
+def is_whole_hour_excuse(from_time: str, to_time: str) -> bool:
+    duration = excuse_duration_minutes(from_time, to_time)
+    return duration is not None and duration >= 60 and duration % 60 == 0
 
 
 def evaluate_shift(clock_in: str, clock_out: str) -> dict:
@@ -402,17 +439,19 @@ def classify_day(
     late_minutes = shift["late_minutes"]
     if not late_minutes:
         return empty
-    if late_excuse and remaining >= late_minutes:
+    needed = ceil_hours_minutes(late_minutes)
+    penalty = late_penalty(clock_in)
+    if late_excuse and remaining >= needed:
         return {
             "notes": notes,
             "deduction": "",
-            "remaining": remaining - late_minutes,
-            "used": late_minutes,
+            "remaining": remaining - needed,
+            "used": needed,
         }
     used = remaining if late_excuse else 0
     return {
         "notes": notes,
-        "deduction": DEDUCTION_HALF,
+        "deduction": penalty,
         "remaining": remaining - used,
         "used": used,
     }
@@ -469,6 +508,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         short_minutes = 0
         full_days = 0
         half_days = 0
+        quarter_days = 0
         allowance_used = 0
         remaining = MONTHLY_LATE_ALLOWANCE_MINUTES
         name = (employee or {}).get("name") or sample.get("name") or fingerprint
@@ -521,20 +561,23 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                 })
                 missing_total += 1
                 full_days += 1
-            elif deduction == DEDUCTION_HALF:
+            elif deduction in {DEDUCTION_HALF, DEDUCTION_QUARTER}:
                 shift = evaluate_shift(punch.get("clock_in") or "", punch.get("clock_out") or "")
                 late.append({
                     "date": day,
                     "label": weekday_label(day),
                     "clock_in": punch.get("clock_in") or "",
                     "clock_out": punch.get("clock_out") or "",
-                    "deduction": DEDUCTION_HALF,
+                    "deduction": deduction,
                     **shift,
                 })
                 late_total += 1
                 late_minutes += shift["late_minutes"]
                 late_minutes_total += shift["late_minutes"]
-                half_days += 1
+                if deduction == DEDUCTION_HALF:
+                    half_days += 1
+                else:
+                    quarter_days += 1
         all_export.extend(export_rows)
         if not missing and not late and not short and not covered_days:
             continue
@@ -556,7 +599,8 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
             "short_text": format_hours(short_minutes),
             "full_days": full_days,
             "half_days": half_days,
-            "deduction_total": full_days + half_days * 0.5,
+            "quarter_days": quarter_days,
+            "deduction_total": full_days + half_days * 0.5 + quarter_days * 0.25,
             "allowance_used": allowance_used,
             "allowance_left": remaining,
             "allowance_used_text": format_hours(allowance_used),
@@ -582,6 +626,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         "export_rows": all_export,
         "full_days_total": sum(person.get("full_days") or 0 for person in people),
         "half_days_total": sum(person.get("half_days") or 0 for person in people),
+        "quarter_days_total": sum(person.get("quarter_days") or 0 for person in people),
     }
 
 
@@ -609,6 +654,7 @@ def report_sheets(report: dict) -> list:
             "department": item.get("department") or "",
             "full": 0,
             "half": 0,
+            "quarter": 0,
             "used": 0,
             "left": MONTHLY_LATE_ALLOWANCE_MINUTES,
         })
@@ -618,9 +664,11 @@ def report_sheets(report: dict) -> list:
             totals[key]["full"] += 1
         elif item.get("deduction") == DEDUCTION_HALF:
             totals[key]["half"] += 1
+        elif item.get("deduction") == DEDUCTION_QUARTER:
+            totals[key]["quarter"] += 1
     summary_rows = []
     for item in sorted(totals.values(), key=lambda row: (fingerprint_sort_key(row["fingerprint"]), row["device"])):
-        if not item["full"] and not item["half"] and not item["used"]:
+        if not item["full"] and not item["half"] and not item["quarter"] and not item["used"]:
             continue
         summary_rows.append([
             item["name"],
@@ -629,7 +677,8 @@ def report_sheets(report: dict) -> list:
             item["department"],
             item["full"],
             item["half"],
-            item["full"] + item["half"] * 0.5,
+            item["quarter"],
+            item["full"] + item["half"] * 0.5 + item["quarter"] * 0.25,
             format_hours(item["used"]),
             format_hours(item["left"]),
         ])
@@ -658,6 +707,7 @@ def report_sheets(report: dict) -> list:
                 "القسم",
                 "خصم يوم",
                 "خصم نصف يوم",
+                "خصم ربع يوم",
                 "إجمالي الخصم",
                 "إذن التأخير المستخدم",
                 "إذن التأخير المتبقي",

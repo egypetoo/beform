@@ -134,7 +134,7 @@ LEAVE_GROUPS = [
         "options": [
             {"value": "business_mission", "en": "Business Mission", "ar": "مهمة عمل"},
             {"value": "sick_leave", "en": "Sick Leave", "ar": "إجازة مرضية"},
-            {"value": "personal_excuse", "en": "Personal Excuse", "ar": "عذر شخصي"},
+            {"value": "personal_excuse", "en": "Personal Excuse", "ar": "إذن تأخير"},
             {"value": "unpaid_leave", "en": "Unpaid Leave", "ar": "إجازة بدون راتب"},
             {"value": "missing_punch_in", "en": "Missing Punch In", "ar": "نسيان بصمة حضور"},
             {"value": "missing_punch_out", "en": "Missing Punch Out", "ar": "نسيان بصمة انصراف"},
@@ -590,6 +590,9 @@ def index():
                 errors.append("From time is required")
             if not to_time:
                 errors.append("To time is required")
+        if request_type == "personal_excuse" and from_time and to_time:
+            if not attendance.is_whole_hour_excuse(from_time, to_time):
+                errors.append("Late excuse must be whole hours only (1, 2, 3 hours). Fractions are not allowed.")
         if request_type in options:
             if not start_date:
                 errors.append("Saturday date is required" if request_type in SATURDAY_TYPES else "From date is required")
@@ -1611,6 +1614,7 @@ def attendance_report():
         report["covered_total"] = sum(len(person["covered"]) for person in report["people"])
         report["full_days_total"] = sum(1 for row in export_rows if row.get("deduction") == attendance.DEDUCTION_FULL)
         report["half_days_total"] = sum(1 for row in export_rows if row.get("deduction") == attendance.DEDUCTION_HALF)
+        report["quarter_days_total"] = sum(1 for row in export_rows if row.get("deduction") == attendance.DEDUCTION_QUARTER)
         late_minutes = sum(person.get("late_minutes") or 0 for person in report["people"])
         short_minutes = sum(person.get("short_minutes") or 0 for person in report["people"])
         report["late_minutes_total"] = late_minutes

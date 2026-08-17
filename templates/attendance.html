@@ -34,7 +34,7 @@
         <form class="form-shell" method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Upload machine sheets</h2>
-            <p class="muted">الحضور من 9:00 لحد 10:15 مسموح. بعد 10:15 لازم إذن تأخير (Personal Excuse) ويتخصم من 4 ساعات سماح في الشهر. بعد ما الـ 4 ساعات تخلص، أو من غير إذن، الخصم نصف يوم. مفيش بصمة ومفيش إجازة/مأمورية = يوم. الجمعة مش بتظهر. السبت إجازة إلا لو بصم أو قدّم عمل السبت الشهري.</p>
+            <p class="muted">الحضور من 9:00 لحد 10:15 مسموح. من 10:16 لحد 11:00 خصم ربع يوم. بعد 11:00 خصم نصف يوم. إذن التأخير بالساعة الكاملة فقط ويتخصم من 4 ساعات سماح في الشهر. مفيش بصمة ومفيش إجازة/مأمورية = يوم. الجمعة مش بتظهر. السبت إجازة إلا لو بصم أو قدّم عمل السبت الشهري.</p>
             <section class="field">
                 <label for="sheets">F8 / F9 attendance files</label>
                 <input id="sheets" name="sheets" type="file" accept=".xls,.xlsx,.csv" multiple required>
@@ -64,7 +64,7 @@
         {% if report %}
             <section class="form-shell users-shell">
                 <h2 class="section-title">Results</h2>
-                <p class="muted">{{ report.from_date }} → {{ report.to_date }} · {{ report.punch_rows }} machine rows · خصم يوم: {{ report.full_days_total }} · خصم نصف يوم: {{ report.half_days_total }} · covered by form: {{ report.covered_total }}</p>
+                <p class="muted">{{ report.from_date }} → {{ report.to_date }} · {{ report.punch_rows }} machine rows · خصم يوم: {{ report.full_days_total }} · خصم نصف يوم: {{ report.half_days_total }} · خصم ربع يوم: {{ report.quarter_days_total or 0 }} · covered by form: {{ report.covered_total }}</p>
                 <a class="excel-link" href="{{ url_for('attendance_export') }}">Download Excel</a>
                 {% if report.people %}
                     <div class="table-wrap">
@@ -78,7 +78,8 @@
                                     <th>إذن التأخير 4 ساعات</th>
                                     <th>No punch & no form</th>
                                     <th>Covered by form</th>
-                                    <th>Half-day after 10:15</th>
+                                    <th>ربع يوم 10:16–11:00</th>
+                                    <th>نصف يوم بعد 11:00</th>
                                     <th>Full-day deduction</th>
                                 </tr>
                             </thead>
@@ -100,7 +101,8 @@
                                         </td>
                                         <td data-label="No punch & no form">{{ person.full_days or 0 }}</td>
                                         <td data-label="Covered by form">{{ person.covered|length }}</td>
-                                        <td data-label="Half-day after 10:15">{{ person.half_days or 0 }}</td>
+                                        <td data-label="ربع يوم 10:16–11:00">{{ person.quarter_days or 0 }}</td>
+                                        <td data-label="نصف يوم بعد 11:00">{{ person.half_days or 0 }}</td>
                                         <td data-label="Full-day deduction">{{ person.full_days or 0 }}</td>
                                     </tr>
                                 {% endfor %}
