@@ -40,24 +40,25 @@ COVERING_TYPES = {
     "work remotely",
     "business mission",
     "sick leave",
-    "personal excuse",
     "unpaid leave",
     "missing punch in",
     "missing punch out",
     "annual vacation",
     "sickness vacation",
 }
+LATE_EXCUSE_TYPE = "personal excuse"
 SATURDAY_WORK_TYPE = "monthly saturday work"
 WINDOW_START = "09:00"
 WINDOW_END = "10:15"
 REQUIRED_MINUTES = 510
+MONTHLY_LATE_ALLOWANCE_MINUTES = 4 * 60
 DEDUCTION_FULL = "يوم"
 DEDUCTION_HALF = "نصف يوم"
 NOTE_AR = {
     "work remotely": "عمل عن بعد",
     "business mission": "مأمورية",
     "sick leave": "إجازة مرضية",
-    "personal excuse": "عذر شخصي",
+    "personal excuse": "إذن",
     "unpaid leave": "إجازة بدون راتب",
     "missing punch in": "نسيان بصمة",
     "missing punch out": "نسيان بصمة",
@@ -286,14 +287,15 @@ def covering_types(index: dict, device: str, fingerprint: str, day: str) -> list
     return found
 
 
-def saturday_work_index(requests: list) -> dict:
+def type_index(requests: list, wanted: str) -> dict:
+    wanted = (wanted or "").strip().lower()
     index = defaultdict(list)
     for row in requests:
         status = str(row.get("Status") or "Pending").strip().lower()
         if status == "rejected":
             continue
         request_type = str(row.get("Request Type") or "").strip().lower()
-        if request_type != SATURDAY_WORK_TYPE:
+        if request_type != wanted:
             continue
         fingerprint = user_store.normalize_fingerprint_id(row.get("Fingerprint Number"))
         if not fingerprint:
@@ -304,6 +306,14 @@ def saturday_work_index(requests: list) -> dict:
             if not device:
                 index[("", fingerprint, day)].append(request_type)
     return index
+
+
+def saturday_work_index(requests: list) -> dict:
+    return type_index(requests, SATURDAY_WORK_TYPE)
+
+
+def late_excuse_index(requests: list) -> dict:
+    return type_index(requests, LATE_EXCUSE_TYPE)
 
 
 def weekday_index(day: str) -> int | None:
@@ -358,22 +368,47 @@ def notes_ar(types: list) -> str:
     return " - ".join(labels)
 
 
-def classify_day(punch: dict, types: list, saturday_work: bool = False) -> tuple[str, str]:
-    notes = notes_ar(types)
+def classify_day(
+    punch: dict,
+    types: list,
+    saturday_work: bool = False,
+    late_excuse: bool = False,
+    remaining_allowance: int = MONTHLY_LATE_ALLOWANCE_MINUTES,
+) -> dict:
+    note_types = list(types or [])
+    if late_excuse:
+        note_types.append(LATE_EXCUSE_TYPE)
+    notes = notes_ar(note_types)
+    remaining = max(0, int(remaining_allowance or 0))
     day = punch.get("date") or ""
     clock_in = punch.get("clock_in") or ""
+    empty = {"notes": notes, "deduction": "", "remaining": remaining, "used": 0}
     if is_friday(day):
-        return notes, ""
+        return empty
     if is_saturday(day) and not saturday_work and not clock_in:
-        return notes, ""
+        return empty
     if types:
-        return notes, ""
+        return empty
     if not clock_in:
-        return "", DEDUCTION_FULL
+        return {**empty, "notes": notes, "deduction": DEDUCTION_FULL}
     shift = evaluate_shift(clock_in, punch.get("clock_out") or "")
-    if shift["late_minutes"]:
-        return "", DEDUCTION_HALF
-    return "", ""
+    late_minutes = shift["late_minutes"]
+    if not late_minutes:
+        return empty
+    if late_excuse and remaining >= late_minutes:
+        return {
+            "notes": notes,
+            "deduction": "",
+            "remaining": remaining - late_minutes,
+            "used": late_minutes,
+        }
+    used = remaining if late_excuse else 0
+    return {
+        "notes": notes,
+        "deduction": DEDUCTION_HALF,
+        "remaining": remaining - used,
+        "used": used,
+    }
 
 
 def build_report(punches: list, requests: list, employees: list) -> dict:
@@ -390,6 +425,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
     }
     covered = coverage_index(requests)
     saturday_work = saturday_work_index(requests)
+    late_excuses = late_excuse_index(requests)
     punch_dates = [punch["date"] for punch in punches if punch.get("date")]
     from_date = min(punch_dates) if punch_dates else ""
     to_date = max(punch_dates) if punch_dates else ""
@@ -426,6 +462,8 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         short_minutes = 0
         full_days = 0
         half_days = 0
+        allowance_used = 0
+        remaining = MONTHLY_LATE_ALLOWANCE_MINUTES
         name = (employee or {}).get("name") or sample.get("name") or fingerprint
         department = (employee or {}).get("department") or ""
         for day in calendar:
@@ -440,7 +478,12 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
             }
             types = covering_types(covered, device, fingerprint, day)
             worked_saturday = bool(covering_types(saturday_work, device, fingerprint, day))
-            notes, deduction = classify_day(punch, types, worked_saturday)
+            late_excuse = bool(covering_types(late_excuses, device, fingerprint, day))
+            result = classify_day(punch, types, worked_saturday, late_excuse, remaining)
+            remaining = result["remaining"]
+            allowance_used += result["used"]
+            notes = result["notes"]
+            deduction = result["deduction"]
             export_rows.append({
                 "fingerprint": fingerprint,
                 "name": name,
@@ -453,12 +496,14 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                 "clock_out": punch.get("clock_out") or "",
                 "notes": notes,
                 "deduction": deduction,
+                "allowance_used": result["used"],
+                "allowance_left": remaining,
             })
-            if types:
+            if types or late_excuse:
                 covered_days.append({
                     "date": day,
                     "label": weekday_label(day),
-                    "types": types,
+                    "types": types or [LATE_EXCUSE_TYPE],
                 })
                 covered_total += 1
             if deduction == DEDUCTION_FULL:
@@ -505,6 +550,10 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
             "full_days": full_days,
             "half_days": half_days,
             "deduction_total": full_days + half_days * 0.5,
+            "allowance_used": allowance_used,
+            "allowance_left": remaining,
+            "allowance_used_text": format_hours(allowance_used),
+            "allowance_left_text": format_hours(remaining),
         })
 
     people.sort(key=lambda item: (item["department"], item["name"].lower(), item["device"]))
@@ -553,14 +602,18 @@ def report_sheets(report: dict) -> list:
             "department": item.get("department") or "",
             "full": 0,
             "half": 0,
+            "used": 0,
+            "left": MONTHLY_LATE_ALLOWANCE_MINUTES,
         })
+        totals[key]["left"] = item.get("allowance_left", totals[key]["left"])
+        totals[key]["used"] += int(item.get("allowance_used") or 0)
         if item.get("deduction") == DEDUCTION_FULL:
             totals[key]["full"] += 1
         elif item.get("deduction") == DEDUCTION_HALF:
             totals[key]["half"] += 1
     summary_rows = []
     for item in sorted(totals.values(), key=lambda row: (row["department"], row["name"].lower(), row["device"])):
-        if not item["full"] and not item["half"]:
+        if not item["full"] and not item["half"] and not item["used"]:
             continue
         summary_rows.append([
             item["name"],
@@ -570,6 +623,8 @@ def report_sheets(report: dict) -> list:
             item["full"],
             item["half"],
             item["full"] + item["half"] * 0.5,
+            format_hours(item["used"]),
+            format_hours(item["left"]),
         ])
     return [
         {
@@ -597,6 +652,8 @@ def report_sheets(report: dict) -> list:
                 "خصم يوم",
                 "خصم نصف يوم",
                 "إجمالي الخصم",
+                "إذن التأخير المستخدم",
+                "إذن التأخير المتبقي",
             ],
             "rows": summary_rows,
         },
