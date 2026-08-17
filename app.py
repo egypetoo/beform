@@ -970,12 +970,13 @@ def users_department():
     return redirect(url_for("users_admin"))
 
 
-IMPORT_TEMPLATE = """role,department,team,name,username,password
-department,Web,,Mohamed,web,ChangeMe123
-team,Web,Ahmed team,Ahmed,ahmed,ChangeMe123
-team,Web,Omar team,Omar,omar,ChangeMe123
-department,Marketing,,Sara,marketing,ChangeMe123
-"""
+IMPORT_HEADERS = ["role", "department", "team", "name", "username", "password"]
+IMPORT_SAMPLE_ROWS = [
+    ["department", "Web", "", "Mohamed", "web", "ChangeMe123"],
+    ["team", "Web", "Ahmed team", "Ahmed", "ahmed", "ChangeMe123"],
+    ["team", "Web", "Omar team", "Omar", "omar", "ChangeMe123"],
+    ["department", "Marketing", "", "Sara", "marketing", "ChangeMe123"],
+]
 MAX_IMPORT_BYTES = 200_000
 MAX_IMPORT_ROWS = 200
 
@@ -1016,13 +1017,26 @@ def parse_people_file(upload) -> list:
     return rows
 
 
-@app.route("/users/template.csv")
+@app.route("/users/template.xlsx")
 @hr_required
 def users_template():
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "People"
+    sheet.append(IMPORT_HEADERS)
+    for row in IMPORT_SAMPLE_ROWS:
+        sheet.append(row)
+    for column in sheet.columns:
+        sheet.column_dimensions[column[0].column_letter].width = 18
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
     return Response(
-        IMPORT_TEMPLATE,
-        mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=be-people-template.csv"},
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=be-people-template.xlsx"},
     )
 
 
@@ -1034,7 +1048,7 @@ def users_import():
         return redirect(url_for("users_admin"))
     upload = request.files.get("sheet")
     if not upload or not upload.filename:
-        flash("Choose a CSV or Excel file first.", "error")
+        flash("Choose an Excel file first.", "error")
         return redirect(url_for("users_admin"))
     try:
         rows = parse_people_file(upload)
@@ -1108,6 +1122,23 @@ def users_toggle():
         flash("Account status updated.", "success")
     else:
         flash("Could not update that account.", "error")
+    return redirect(url_for("users_admin"))
+
+
+@app.route("/users/delete", methods=["POST"])
+@hr_required
+def users_delete():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    try:
+        user_id = int(request.form.get("user_id", "0"))
+    except ValueError:
+        user_id = 0
+    if user_store.delete_user(user_id):
+        flash("Account deleted.", "success")
+    else:
+        flash("Could not delete that account.", "error")
     return redirect(url_for("users_admin"))
 
 

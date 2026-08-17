@@ -33,13 +33,13 @@
         <form class="form-shell" method="post" action="{{ url_for('users_import') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Upload sheet</h2>
-            <p class="muted">CSV or Excel with columns: role, department, team, name, username, password. Role is <strong>department</strong> or <strong>team</strong>.</p>
+            <p class="muted">Excel file with columns: role, department, team, name, username, password. Role is <strong>department</strong> or <strong>team</strong>.</p>
             <section class="field">
                 <label for="sheet">People file</label>
-                <input id="sheet" name="sheet" type="file" accept=".csv,.xlsx" required>
+                <input id="sheet" name="sheet" type="file" accept=".xlsx,.csv" required>
             </section>
             <button type="submit">Import people</button>
-            <a class="excel-link" href="{{ url_for('users_template') }}">Download template CSV</a>
+            <a class="excel-link" href="{{ url_for('users_template') }}">Download template Excel</a>
         </form>
 
         <form class="form-shell" method="post">
@@ -178,13 +178,21 @@
                                         </form>
                                     </td>
                                     <td class="card-actions" data-label="Account">
-                                        <form method="post" action="{{ url_for('users_toggle') }}">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                            <input type="hidden" name="user_id" value="{{ user.id }}">
-                                            <button class="btn-sm {{ 'btn-reject' if user.active else 'btn-approve' }}" type="submit">
-                                                {{ 'Disable' if user.active else 'Enable' }}
-                                            </button>
-                                        </form>
+                                        <div class="inline-form">
+                                            <form method="post" action="{{ url_for('users_toggle') }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                <input type="hidden" name="user_id" value="{{ user.id }}">
+                                                <button class="btn-sm {{ 'btn-reject' if user.active else 'btn-approve' }}" type="submit">
+                                                    {{ 'Disable' if user.active else 'Enable' }}
+                                                </button>
+                                            </form>
+                                            <form method="post" action="{{ url_for('users_delete') }}"
+                                                  onsubmit="return confirm('Delete this account permanently?');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                <input type="hidden" name="user_id" value="{{ user.id }}">
+                                                <button class="btn-sm btn-reject" type="submit">Delete</button>
+                                            </form>
+                                        </div>
                                     </td>
                                 </tr>
                             {% endfor %}

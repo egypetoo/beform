@@ -464,3 +464,17 @@ def toggle_user(user_id: int) -> bool:
         updated = cursor.rowcount > 0
         conn.close()
         return updated
+
+
+def delete_user(user_id: int) -> bool:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        cursor = conn.execute(
+            "DELETE FROM users WHERE id = ? AND role IN ('team', 'department')",
+            (user_id,),
+        )
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        conn.close()
+        return deleted
