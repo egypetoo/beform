@@ -182,13 +182,18 @@ def list_custom_departments(active_only: bool = False) -> list:
         sql += " WHERE active = 1"
     sql += " ORDER BY label"
     rows = conn.execute(sql).fetchall()
+    managers = conn.execute(
+        "SELECT * FROM users WHERE role = 'department' AND active = 1"
+    ).fetchall()
     conn.close()
+    by_label = {row["department"]: _row_to_user(row) for row in managers}
     return [
         {
             "id": row["id"],
             "value": row["value"],
             "label": row["label"],
             "active": bool(row["active"]),
+            "manager": by_label.get(row["label"]),
         }
         for row in rows
     ]
