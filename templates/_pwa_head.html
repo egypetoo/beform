@@ -3,5 +3,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BE HR">
-<link rel="manifest" href="{{ url_for('pwa_manifest') }}">
+<link rel="icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+<link rel="preload" as="image" href="{{ url_for('static', filename='logo.webp') }}" fetchpriority="high">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=14">
+<link rel="manifest" href="{{ url_for('pwa_manifest') }}">

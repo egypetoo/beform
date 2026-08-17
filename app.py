@@ -318,6 +318,8 @@ def set_security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=604800"
     return response
 
 

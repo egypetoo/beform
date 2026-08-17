@@ -4,18 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BE GROUP | HR Request Form</title>
-    <link rel="icon" href="{{ url_for('static', filename='logo.webp') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=13">
     {% include "_pwa_head.html" %}
 </head>
 <body>
     <div class="glow"></div>
     <main class="page">
         <header class="hero">
-            <img class="logo" src="{{ url_for('static', filename='logo.webp') }}" alt="BE GROUP">
+            {% include "_logo.html" %}
             <p class="eyebrow">Human Resources</p>
             <h1>HR Request Form</h1>
             <p class="subtitle">Please fill in the details carefully. Fields marked with * are required.</p>
