@@ -13,7 +13,7 @@
             {% include "_logo.html" %}
             <p class="eyebrow">HR Admin</p>
             <h1>People & Departments</h1>
-            <p class="subtitle">Add departments and team leaders. New departments appear on the request form automatically.</p>
+            <p class="subtitle">HR creates every department and its manager password. Built-in logins for Web/Social/Sales are removed.</p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
@@ -88,7 +88,7 @@
         </form>
 
         <section class="form-shell users-shell">
-            <h2 class="section-title">Added departments</h2>
+            <h2 class="section-title">Departments</h2>
             {% if custom_departments %}
                 <div class="table-wrap">
                     <table>
@@ -125,7 +125,7 @@
                     </table>
                 </div>
             {% else %}
-                <p class="empty-state">No extra departments yet. Web, Social, Accounting, Sales, and HR are already built in.</p>
+                <p class="empty-state">No departments yet. Add Web, Social, or any new department above.</p>
             {% endif %}
         </section>
 

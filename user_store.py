@@ -11,9 +11,16 @@ DB_PATH = BASE_DIR / "users.db"
 USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,20}$")
 DB_LOCK = Lock()
 
-RESERVED_USERNAMES = {"web", "social", "accounting", "sales", "hr", "all"}
+RESERVED_USERNAMES = {"hr", "all"}
 RESERVED_SHEETS = {"all", "other"}
 LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 &/\-]{1,39}$")
+SEED_DEPARTMENTS = [
+    ("web", "Web"),
+    ("social", "Social"),
+    ("accounting", "Accounting"),
+    ("sales", "Sales"),
+    ("hr", "HR"),
+]
 
 
 def db() -> sqlite3.Connection:
@@ -51,6 +58,13 @@ def init_db() -> None:
             )
             """
         )
+        conn.commit()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for value, label in SEED_DEPARTMENTS:
+            conn.execute(
+                "INSERT OR IGNORE INTO departments (value, label, active, created_at) VALUES (?, ?, 1, ?)",
+                (value, label, now),
+            )
         conn.commit()
         conn.close()
 
@@ -116,6 +130,50 @@ def slug_from_label(label: str) -> str:
     return slug[:20]
 
 
+def username_taken(username: str) -> bool:
+    username = normalize_username(username)
+    if not username or username in RESERVED_USERNAMES:
+        return True
+    init_db()
+    conn = db()
+    row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+    conn.close()
+    return bool(row)
+
+
+def department_manager(label: str) -> dict | None:
+    init_db()
+    conn = db()
+    row = conn.execute(
+        """
+        SELECT * FROM users
+        WHERE department = ? AND role = 'department' AND active = 1
+        LIMIT 1
+        """,
+        ((label or "").strip(),),
+    ).fetchone()
+    conn.close()
+    return _row_to_user(row) if row else None
+
+
+def find_department(label: str) -> dict | None:
+    init_db()
+    conn = db()
+    row = conn.execute(
+        "SELECT * FROM departments WHERE lower(label) = lower(?) OR value = ?",
+        ((label or "").strip(), slug_from_label(label)),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "value": row["value"],
+        "label": row["label"],
+        "active": bool(row["active"]),
+    }
+
+
 def list_custom_departments(active_only: bool = False) -> list:
     init_db()
     conn = db()
@@ -136,7 +194,7 @@ def list_custom_departments(active_only: bool = False) -> list:
     ]
 
 
-def validate_new_department(label: str, name: str, username: str, password: str, taken_values: set, taken_labels: set) -> list:
+def validate_new_department(label: str, name: str, username: str, password: str) -> list:
     errors = []
     label = (label or "").strip()
     name = (name or "").strip()
@@ -148,18 +206,19 @@ def validate_new_department(label: str, name: str, username: str, password: str,
         errors.append("Department name must be 2-40 characters: letters, numbers, spaces, &, / or dash.")
     elif label.lower() in RESERVED_SHEETS or value in RESERVED_SHEETS:
         errors.append("This department name is reserved.")
-    elif value in taken_values or label.lower() in {item.lower() for item in taken_labels}:
-        errors.append("This department already exists.")
     elif len(value) < 3:
-        errors.append("Department name is too short to create a username.")
+        errors.append("Department name is too short.")
     if not name:
         errors.append("Manager name is required.")
     if not USERNAME_RE.match(username):
         errors.append("Username must be 3-20 characters: letters, numbers, dot, dash, or underscore.")
-    elif username in RESERVED_USERNAMES:
-        errors.append("This username is reserved.")
+    elif username_taken(username):
+        errors.append("This username is reserved or already exists.")
     if len(password) < 8:
         errors.append("Password must be at least 8 characters.")
+    existing = find_department(label)
+    if existing and department_manager(existing["label"]):
+        errors.append("This department already has a manager. Reset their password from the list below.")
     return errors
 
 
@@ -172,10 +231,24 @@ def create_department(label: str, name: str, username: str, password: str) -> di
     with DB_LOCK:
         conn = db()
         try:
-            conn.execute(
-                "INSERT INTO departments (value, label, active, created_at) VALUES (?, ?, 1, ?)",
-                (value, label, now),
-            )
+            existing = conn.execute(
+                "SELECT label FROM departments WHERE lower(label) = lower(?) OR value = ?",
+                (label, value),
+            ).fetchone()
+            if existing:
+                label = existing["label"]
+            else:
+                conn.execute(
+                    "INSERT INTO departments (value, label, active, created_at) VALUES (?, ?, 1, ?)",
+                    (value, label, now),
+                )
+            manager = conn.execute(
+                "SELECT id FROM users WHERE department = ? AND role = 'department' AND active = 1",
+                (label,),
+            ).fetchone()
+            if manager:
+                conn.close()
+                raise ValueError("This department already has a manager.")
             conn.execute(
                 """
                 INSERT INTO users (username, name, department, team, role, password_hash, active, created_at)
@@ -219,8 +292,8 @@ def validate_new_user(username: str, name: str, department: str, team: str, pass
 
     if not USERNAME_RE.match(username):
         errors.append("Username must be 3-20 characters: letters, numbers, dot, dash, or underscore.")
-    elif username in RESERVED_USERNAMES:
-        errors.append("This username is reserved for a department manager.")
+    elif username_taken(username):
+        errors.append("This username is reserved or already exists.")
     if not name:
         errors.append("Name is required.")
     if department not in departments:

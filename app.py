@@ -146,26 +146,11 @@ TIME_RANGE_TYPES = {"business_mission", "personal_excuse"}
 DATE_RANGE_TYPES = {"sick_leave", "unpaid_leave", "annual_vacation", "sickness_vacation", "work_remotely"}
 SATURDAY_TYPES = {"monthly_saturday"}
 
-BUILTIN_DEPARTMENTS = [
-    {"value": "web", "label": "Web"},
-    {"value": "social", "label": "Social"},
-    {"value": "accounting", "label": "Accounting"},
-    {"value": "sales", "label": "Sales"},
-    {"value": "hr", "label": "HR"},
-]
-
-
 def all_departments(active_only: bool = True) -> list:
-    items = list(BUILTIN_DEPARTMENTS)
-    seen = {item["value"] for item in items}
-    seen_labels = {item["label"].lower() for item in items}
-    for dept in user_store.list_custom_departments(active_only=active_only):
-        if dept["value"] in seen or dept["label"].lower() in seen_labels:
-            continue
-        items.append({"value": dept["value"], "label": dept["label"]})
-        seen.add(dept["value"])
-        seen_labels.add(dept["label"].lower())
-    return items
+    return [
+        {"value": dept["value"], "label": dept["label"]}
+        for dept in user_store.list_custom_departments(active_only=active_only)
+    ]
 
 
 def department_maps():
@@ -181,34 +166,6 @@ def department_maps():
 def get_managers():
     load_dotenv(BASE_DIR / ".env", override=True)
     return {
-        "web": {
-            "name": "Web Manager",
-            "department": "Web",
-            "role": "department",
-            "team": "",
-            "password": os.getenv("MANAGER_WEB_PASSWORD", ""),
-        },
-        "social": {
-            "name": "Social Manager",
-            "department": "Social",
-            "role": "department",
-            "team": "",
-            "password": os.getenv("MANAGER_SOCIAL_PASSWORD", ""),
-        },
-        "accounting": {
-            "name": "Accounting Manager",
-            "department": "Accounting",
-            "role": "department",
-            "team": "",
-            "password": os.getenv("MANAGER_ACCOUNTING_PASSWORD", ""),
-        },
-        "sales": {
-            "name": "Sales Manager",
-            "department": "Sales",
-            "role": "department",
-            "team": "",
-            "password": os.getenv("MANAGER_SALES_PASSWORD", ""),
-        },
         "hr": {
             "name": "HR Manager",
             "department": "ALL",
@@ -994,21 +951,11 @@ def users_department():
         flash("The form expired. Please refresh and try again.", "error")
         return redirect(url_for("users_admin"))
 
-    maps = department_maps()
     label = request.form.get("label", "")
     name = request.form.get("manager_name", "")
     username = request.form.get("manager_username", "")
     password = request.form.get("manager_password", "")
-    errors = user_store.validate_new_department(
-        label,
-        name,
-        username,
-        password,
-        maps["values"],
-        maps["label_set"],
-    )
-    if user_store.find_user(username) or username.strip().lower() in get_managers():
-        errors.append("This username already exists.")
+    errors = user_store.validate_new_department(label, name, username, password)
     if errors:
         for error in errors:
             flash(error, "error")
