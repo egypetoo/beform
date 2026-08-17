@@ -68,6 +68,7 @@ NOTE_AR = {
     "missing punch out": "نسيان بصمة",
     "annual vacation": "اعتيادي",
     "sickness vacation": "إجازة مرضية",
+    "monthly saturday work": "عمل السبت الشهري",
 }
 
 
@@ -450,6 +451,8 @@ def classify_day(
     note_types = list(types or [])
     if late_excuse:
         note_types.append(LATE_EXCUSE_TYPE)
+    if saturday_work:
+        note_types.append(SATURDAY_WORK_TYPE)
     note_types.extend(missing_punch_types)
     notes = notes_ar(note_types)
     remaining = max(0, int(remaining_allowance or 0))
@@ -459,7 +462,7 @@ def classify_day(
     empty = {"notes": notes, "deduction": "", "reason": "", "remaining": remaining, "used": 0}
     if is_friday(day):
         return empty
-    if is_saturday(day) and not saturday_work and not clock_in:
+    if is_saturday(day) and not clock_in:
         return empty
     if types:
         return empty
@@ -509,26 +512,6 @@ def classify_day(
         "notes": notes,
         "deduction": penalty,
         "reason": reason,
-        "remaining": remaining - used,
-        "used": used,
-    }
-    shift = evaluate_shift(clock_in, punch.get("clock_out") or "")
-    late_minutes = shift["late_minutes"]
-    if not late_minutes:
-        return empty
-    needed = ceil_hours_minutes(late_minutes)
-    penalty = late_penalty(clock_in)
-    if late_excuse and remaining >= needed:
-        return {
-            "notes": notes,
-            "deduction": "",
-            "remaining": remaining - needed,
-            "used": needed,
-        }
-    used = remaining if late_excuse else 0
-    return {
-        "notes": notes,
-        "deduction": penalty,
         "remaining": remaining - used,
         "used": used,
     }
@@ -633,11 +616,11 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                 "allowance_used": result["used"],
                 "allowance_left": remaining,
             })
-            if types or late_excuse or missing_types:
+            if types or late_excuse or missing_types or worked_saturday:
                 covered_days.append({
                     "date": day,
                     "label": weekday_label(day),
-                    "types": types or missing_types or [LATE_EXCUSE_TYPE],
+                    "types": types or missing_types or (["Monthly Saturday Work"] if worked_saturday else [LATE_EXCUSE_TYPE]),
                 })
                 covered_total += 1
             if deduction == DEDUCTION_FULL:
