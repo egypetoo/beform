@@ -223,14 +223,14 @@ function payrollCycleStart(dateText) {
   if (!year || !month || !day) {
     return "";
   }
-  if (day < 25) {
+  if (day < 26) {
     month -= 1;
     if (month < 1) {
       month = 12;
       year -= 1;
     }
   }
-  return year + "-" + String(month).padStart(2, "0") + "-25";
+  return year + "-" + String(month).padStart(2, "0") + "-26";
 }
 
 function isPunchType(type) {

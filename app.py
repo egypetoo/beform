@@ -78,15 +78,15 @@ def shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
 
 
 def cycle_start_for(day) -> datetime:
-    if day.day >= 25:
-        return datetime(day.year, day.month, 25)
+    if day.day >= 26:
+        return datetime(day.year, day.month, 26)
     year, month = shift_month(day.year, day.month, -1)
-    return datetime(year, month, 25)
+    return datetime(year, month, 26)
 
 
 def cycle_end_for(start: datetime) -> datetime:
     year, month = shift_month(start.year, start.month, 1)
-    return datetime(year, month, 24)
+    return datetime(year, month, 25)
 
 
 def payroll_cycles(count: int = 8) -> list:
@@ -101,7 +101,7 @@ def payroll_cycles(count: int = 8) -> list:
             "end": end.strftime("%Y-%m-%d"),
         })
         year, month = shift_month(start.year, start.month, -1)
-        start = datetime(year, month, 25)
+        start = datetime(year, month, 26)
     return cycles
 
 
@@ -656,7 +656,7 @@ def index():
             return render_template("index.html", **index_context(request.form))
 
         if result.get("saturday_month"):
-            flash("Only one working Saturday is allowed per month (25th to 24th). You already submitted one.", "error")
+            flash("Only one working Saturday is allowed per month (26th to 25th). You already submitted one.", "error")
             return render_template("index.html", **index_context(request.form))
 
         if result.get("duplicate"):
