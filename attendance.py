@@ -41,10 +41,12 @@ COVERING_TYPES = {
     "business mission",
     "sick leave",
     "unpaid leave",
-    "missing punch in",
-    "missing punch out",
     "annual vacation",
     "sickness vacation",
+}
+MISSING_PUNCH_TYPES = {
+    "missing punch in",
+    "missing punch out",
 }
 LATE_EXCUSE_TYPE = "personal excuse"
 SATURDAY_WORK_TYPE = "monthly saturday work"
@@ -324,15 +326,18 @@ def covering_types(index: dict, device: str, fingerprint: str, day: str) -> list
     return found
 
 
-def type_index(requests: list, wanted: str) -> dict:
-    wanted = (wanted or "").strip().lower()
+def type_index(requests: list, wanted) -> dict:
+    if isinstance(wanted, str):
+        wanted = {(wanted or "").strip().lower()}
+    else:
+        wanted = {str(item).strip().lower() for item in wanted}
     index = defaultdict(list)
     for row in requests:
         status = str(row.get("Status") or "Pending").strip().lower()
         if status == "rejected":
             continue
         request_type = str(row.get("Request Type") or "").strip().lower()
-        if request_type != wanted:
+        if request_type not in wanted:
             continue
         fingerprint = user_store.normalize_fingerprint_id(row.get("Fingerprint Number"))
         if not fingerprint:
@@ -351,6 +356,10 @@ def saturday_work_index(requests: list) -> dict:
 
 def late_excuse_index(requests: list) -> dict:
     return type_index(requests, LATE_EXCUSE_TYPE)
+
+
+def missing_punch_index(requests: list) -> dict:
+    return type_index(requests, MISSING_PUNCH_TYPES)
 
 
 def fingerprint_sort_key(value) -> tuple:
@@ -412,29 +421,97 @@ def notes_ar(types: list) -> str:
     return " - ".join(labels)
 
 
+def missing_punch_reason(types: list) -> str:
+    labels = []
+    seen = set()
+    for item in types or []:
+        key = str(item).strip().lower()
+        if key == "missing punch in":
+            label = "نسيان بصمة حضور"
+        elif key == "missing punch out":
+            label = "نسيان بصمة انصراف"
+        else:
+            label = ""
+        if label and label not in seen:
+            seen.add(label)
+            labels.append(label)
+    return " - ".join(labels) or "نسيان بصمة"
+
+
 def classify_day(
     punch: dict,
     types: list,
     saturday_work: bool = False,
     late_excuse: bool = False,
     remaining_allowance: int = MONTHLY_LATE_ALLOWANCE_MINUTES,
+    missing_punch_types: list | None = None,
 ) -> dict:
+    missing_punch_types = list(missing_punch_types or [])
     note_types = list(types or [])
     if late_excuse:
         note_types.append(LATE_EXCUSE_TYPE)
+    note_types.extend(missing_punch_types)
     notes = notes_ar(note_types)
     remaining = max(0, int(remaining_allowance or 0))
     day = punch.get("date") or ""
     clock_in = punch.get("clock_in") or ""
-    empty = {"notes": notes, "deduction": "", "remaining": remaining, "used": 0}
+    clock_out = punch.get("clock_out") or ""
+    empty = {"notes": notes, "deduction": "", "reason": "", "remaining": remaining, "used": 0}
     if is_friday(day):
         return empty
     if is_saturday(day) and not saturday_work and not clock_in:
         return empty
     if types:
         return empty
+    if missing_punch_types:
+        return {
+            **empty,
+            "notes": notes,
+            "deduction": DEDUCTION_HALF,
+            "reason": missing_punch_reason(missing_punch_types),
+        }
     if not clock_in:
-        return {**empty, "notes": notes, "deduction": DEDUCTION_FULL}
+        return {
+            **empty,
+            "notes": notes,
+            "deduction": DEDUCTION_FULL,
+            "reason": "عدم البصمة ولا يوجد طلب",
+        }
+    if not clock_out:
+        return {
+            **empty,
+            "notes": notes,
+            "deduction": DEDUCTION_HALF,
+            "reason": "نسيان بصمة انصراف",
+        }
+    shift = evaluate_shift(clock_in, punch.get("clock_out") or "")
+    late_minutes = shift["late_minutes"]
+    if not late_minutes:
+        return empty
+    needed = ceil_hours_minutes(late_minutes)
+    penalty = late_penalty(clock_in)
+    if late_excuse and remaining >= needed:
+        return {
+            "notes": notes,
+            "deduction": "",
+            "reason": "",
+            "remaining": remaining - needed,
+            "used": needed,
+        }
+    used = remaining if late_excuse else 0
+    if penalty == DEDUCTION_QUARTER:
+        reason = "تأخير من 10:16 إلى 11:00"
+    else:
+        reason = "تأخير بعد 11:00"
+    if late_excuse:
+        reason = f"{reason} - رصيد الإذن لا يكفي"
+    return {
+        "notes": notes,
+        "deduction": penalty,
+        "reason": reason,
+        "remaining": remaining - used,
+        "used": used,
+    }
     shift = evaluate_shift(clock_in, punch.get("clock_out") or "")
     late_minutes = shift["late_minutes"]
     if not late_minutes:
@@ -472,6 +549,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
     covered = coverage_index(requests)
     saturday_work = saturday_work_index(requests)
     late_excuses = late_excuse_index(requests)
+    missing_punches = missing_punch_index(requests)
     punch_dates = [punch["date"] for punch in punches if punch.get("date")]
     from_date = min(punch_dates) if punch_dates else ""
     to_date = max(punch_dates) if punch_dates else ""
@@ -526,7 +604,15 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
             types = covering_types(covered, device, fingerprint, day)
             worked_saturday = bool(covering_types(saturday_work, device, fingerprint, day))
             late_excuse = bool(covering_types(late_excuses, device, fingerprint, day))
-            result = classify_day(punch, types, worked_saturday, late_excuse, remaining)
+            missing_types = covering_types(missing_punches, device, fingerprint, day)
+            result = classify_day(
+                punch,
+                types,
+                worked_saturday,
+                late_excuse,
+                remaining,
+                missing_types,
+            )
             remaining = result["remaining"]
             allowance_used += result["used"]
             notes = result["notes"]
@@ -543,14 +629,15 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                 "clock_out": punch.get("clock_out") or "",
                 "notes": notes,
                 "deduction": deduction,
+                "reason": result.get("reason") or "",
                 "allowance_used": result["used"],
                 "allowance_left": remaining,
             })
-            if types or late_excuse:
+            if types or late_excuse or missing_types:
                 covered_days.append({
                     "date": day,
                     "label": weekday_label(day),
-                    "types": types or [LATE_EXCUSE_TYPE],
+                    "types": types or missing_types or [LATE_EXCUSE_TYPE],
                 })
                 covered_total += 1
             if deduction == DEDUCTION_FULL:
@@ -643,6 +730,7 @@ def report_sheets(report: dict) -> list:
             "",
             item.get("notes") or "",
             item.get("deduction") or "",
+            item.get("reason") or "",
         ])
     totals = {}
     for item in report.get("export_rows") or []:
@@ -695,6 +783,7 @@ def report_sheets(report: dict) -> list:
                 "",
                 "الملاحظات",
                 "الخصومات",
+                "سبب الخصم",
             ],
             "rows": daily_rows,
         },
