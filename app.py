@@ -47,6 +47,8 @@ ROWS_CACHE = {}
 CACHE_SECONDS = 60
 TRACK_CACHE = {}
 TRACK_CACHE_SECONDS = 60
+ATTENDANCE_EXPORTS = {}
+ATTENDANCE_EXPORT_SECONDS = 1800
 RECENT_SUBMISSIONS = {}
 RECENT_LOCK = Lock()
 DEDUP_SECONDS = 90
@@ -1076,7 +1078,7 @@ def _xlsx_cell_ref(row: int, col: int) -> str:
     return f"{letters}{row}"
 
 
-def build_xlsx_bytes(headers: list, rows: list) -> bytes:
+def _xlsx_sheet_xml(headers: list, rows: list) -> str:
     xml_rows = []
     for row_index, values in enumerate([headers, *rows], start=1):
         cells = []
@@ -1085,11 +1087,32 @@ def build_xlsx_bytes(headers: list, rows: list) -> bytes:
             ref = _xlsx_cell_ref(row_index, col_index)
             cells.append(f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>')
         xml_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
-    sheet_xml = (
+    return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
         f'<sheetData>{"".join(xml_rows)}</sheetData></worksheet>'
     )
+
+
+def build_xlsx_workbook(sheets: list) -> bytes:
+    if not sheets:
+        raise ValueError("Workbook has no sheets.")
+    overrides = []
+    workbook_sheets = []
+    rels = []
+    parts = []
+    for index, sheet in enumerate(sheets, start=1):
+        name = escape(str(sheet["name"] or f"Sheet{index}")[:31])
+        overrides.append(
+            f'<Override PartName="/xl/worksheets/sheet{index}.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        )
+        workbook_sheets.append(f'<sheet name="{name}" sheetId="{index}" r:id="rId{index}"/>')
+        rels.append(
+            f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+            f'Target="worksheets/sheet{index}.xml"/>'
+        )
+        parts.append((f"xl/worksheets/sheet{index}.xml", _xlsx_sheet_xml(sheet["headers"], sheet["rows"])))
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", (
@@ -1098,8 +1121,7 @@ def build_xlsx_bytes(headers: list, rows: list) -> bytes:
             '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
             '<Default Extension="xml" ContentType="application/xml"/>'
             '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-            "</Types>"
+            f"{''.join(overrides)}</Types>"
         ))
         archive.writestr("_rels/.rels", (
             '<?xml version="1.0" encoding="UTF-8"?>'
@@ -1111,16 +1133,20 @@ def build_xlsx_bytes(headers: list, rows: list) -> bytes:
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
             'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            '<sheets><sheet name="People" sheetId="1" r:id="rId1"/></sheets></workbook>'
+            f'<sheets>{"".join(workbook_sheets)}</sheets></workbook>'
         ))
         archive.writestr("xl/_rels/workbook.xml.rels", (
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-            "</Relationships>"
+            f"{''.join(rels)}</Relationships>"
         ))
-        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        for path, xml in parts:
+            archive.writestr(path, xml)
     return buffer.getvalue()
+
+
+def build_xlsx_bytes(headers: list, rows: list) -> bytes:
+    return build_xlsx_workbook([{"name": "People", "headers": headers, "rows": rows}])
 
 
 def parse_xlsx_bytes(raw: bytes, max_rows: int = MAX_IMPORT_ROWS) -> list:
@@ -1572,12 +1598,43 @@ def attendance_report():
         report["missing_total"] = sum(len(person["missing"]) for person in report["people"])
         report["late_total"] = sum(len(person["late"]) for person in report["people"])
         report["covered_total"] = sum(len(person["covered"]) for person in report["people"])
+        prune_attendance_exports()
+        token = secrets.token_hex(12)
+        ATTENDANCE_EXPORTS[token] = {
+            "at": time.time(),
+            "bytes": build_xlsx_workbook(attendance.report_sheets(report)),
+        }
+        session["attendance_export"] = token
 
     return render_template(
         "attendance.html",
         report=report,
+        can_download=bool(session.get("attendance_export") and session.get("attendance_export") in ATTENDANCE_EXPORTS),
         departments=all_departments(active_only=False),
         devices=user_store.list_devices(),
+    )
+
+
+def prune_attendance_exports() -> None:
+    now = time.time()
+    expired = [token for token, item in ATTENDANCE_EXPORTS.items() if now - item["at"] > ATTENDANCE_EXPORT_SECONDS]
+    for token in expired:
+        ATTENDANCE_EXPORTS.pop(token, None)
+
+
+@app.route("/attendance/export.xlsx")
+@hr_required
+def attendance_export():
+    prune_attendance_exports()
+    token = session.get("attendance_export")
+    payload = ATTENDANCE_EXPORTS.get(token or "")
+    if not payload:
+        flash("Build the report first, then download the Excel file.", "error")
+        return redirect(url_for("attendance_report"))
+    return Response(
+        payload["bytes"],
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=attendance-gaps.xlsx"},
     )
 
 

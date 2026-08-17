@@ -55,10 +55,17 @@
             <button type="submit">Build report</button>
         </form>
 
+        {% if can_download %}
+            <p class="form-links" style="margin-top: 12px;">
+                <a class="excel-link" href="{{ url_for('attendance_export') }}">Download Excel</a>
+            </p>
+        {% endif %}
+
         {% if report %}
             <section class="form-shell users-shell">
                 <h2 class="section-title">Results</h2>
                 <p class="muted">{{ report.from_date }} → {{ report.to_date }} · {{ report.punch_rows }} machine rows · {{ report.missing_total }} days with no punch and no form · {{ report.covered_total }} days covered by a form · {{ report.late_total }} late arrivals</p>
+                <a class="excel-link" href="{{ url_for('attendance_export') }}">Download Excel</a>
                 {% if report.people %}
                     <div class="table-wrap">
                         <table>

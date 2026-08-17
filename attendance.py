@@ -324,3 +324,87 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         "from_date": min(dates) if dates else "",
         "to_date": max(dates) if dates else "",
     }
+
+
+def report_sheets(report: dict) -> list:
+    people_rows = []
+    day_rows = []
+    for person in report.get("people") or []:
+        registered = "Yes" if person.get("registered") else "No"
+        missing_dates = ", ".join(item["date"] for item in person.get("missing") or [])
+        covered_dates = ", ".join(item["date"] for item in person.get("covered") or [])
+        late_dates = ", ".join(item["date"] for item in person.get("late") or [])
+        people_rows.append([
+            person.get("name") or "",
+            person.get("department") or "",
+            person.get("device") or "",
+            person.get("fingerprint") or "",
+            registered,
+            len(person.get("missing") or []),
+            len(person.get("covered") or []),
+            len(person.get("late") or []),
+            missing_dates,
+            covered_dates,
+            late_dates,
+        ])
+        base = [
+            person.get("name") or "",
+            person.get("department") or "",
+            person.get("device") or "",
+            person.get("fingerprint") or "",
+            registered,
+        ]
+        for item in person.get("missing") or []:
+            day_rows.append([*base, "No punch & no form", item["date"], item.get("label") or "", "", "", ""])
+        for item in person.get("covered") or []:
+            day_rows.append([
+                *base,
+                "Covered by form",
+                item["date"],
+                item.get("label") or "",
+                "",
+                "",
+                ", ".join(item.get("types") or []),
+            ])
+        for item in person.get("late") or []:
+            day_rows.append([
+                *base,
+                "Late",
+                item["date"],
+                item.get("label") or "",
+                item.get("clock_in") or "",
+                item.get("late") or "",
+                "",
+            ])
+    return [
+        {
+            "name": "Summary",
+            "headers": ["Metric", "Value"],
+            "rows": [
+                ["From", report.get("from_date") or ""],
+                ["To", report.get("to_date") or ""],
+                ["Machine rows", report.get("punch_rows") or 0],
+                ["No punch & no form", report.get("missing_total") or 0],
+                ["Covered by form", report.get("covered_total") or 0],
+                ["Late arrivals", report.get("late_total") or 0],
+                ["People in report", len(report.get("people") or [])],
+            ],
+        },
+        {
+            "name": "People",
+            "headers": [
+                "Name", "Department", "Device", "Fingerprint", "In employee list",
+                "Missing days", "Covered days", "Late days",
+                "Missing dates", "Covered dates", "Late dates",
+            ],
+            "rows": people_rows,
+        },
+        {
+            "name": "Days",
+            "headers": [
+                "Name", "Department", "Device", "Fingerprint", "In employee list",
+                "Status", "Date", "Weekday", "Clock In", "Late", "Form types",
+            ],
+            "rows": day_rows,
+        },
+    ]
