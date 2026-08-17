@@ -1072,7 +1072,7 @@ IMPORT_SAMPLE_ROWS = [
     ["team", "Web", "Omar team", "Omar", "omar", "ChangeMe123"],
     ["department", "Marketing", "", "Sara", "marketing", "ChangeMe123"],
 ]
-MAX_IMPORT_BYTES = 200_000
+MAX_IMPORT_BYTES = 2_000_000
 MAX_IMPORT_ROWS = 200
 XLSX_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
@@ -1209,7 +1209,7 @@ def parse_people_file(upload, max_rows: int = MAX_IMPORT_ROWS) -> list:
     filename = (upload.filename or "").lower()
     raw = upload.read(MAX_IMPORT_BYTES + 1)
     if len(raw) > MAX_IMPORT_BYTES:
-        raise ValueError("File is too large. Keep it under 200 KB.")
+        raise ValueError("File is too large. Keep it under 2 MB.")
     if filename.endswith(".xlsx"):
         try:
             return parse_xlsx_bytes(raw, max_rows=max_rows)
