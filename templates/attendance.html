@@ -34,7 +34,7 @@
         <form class="form-shell" method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Upload machine sheets</h2>
-            <p class="muted">Use the original files from the devices, for example <strong>F8 25-7-2026.xls</strong> and <strong>F9 25-7-26.xls</strong>. You can select both at once. Friday is ignored because it is not in those sheets. Any Pending or Approved form on that day counts as an action.</p>
+            <p class="muted">Use the original files from the devices, for example <strong>F8 25-7-2026.xls</strong> and <strong>F9 25-7-26.xls</strong>. Morning punch is on time from 9:00 to 10:00. After 10:00 is late. A work day is 8 hours 30 minutes from clock in. Friday is ignored because it is not in those sheets. Any Pending or Approved form on that day counts as an action.</p>
             <section class="field">
                 <label for="sheets">F8 / F9 attendance files</label>
                 <input id="sheets" name="sheets" type="file" accept=".xls,.xlsx,.csv" multiple required>
@@ -64,7 +64,7 @@
         {% if report %}
             <section class="form-shell users-shell">
                 <h2 class="section-title">Results</h2>
-                <p class="muted">{{ report.from_date }} → {{ report.to_date }} · {{ report.punch_rows }} machine rows · {{ report.missing_total }} days with no punch and no form · {{ report.covered_total }} days covered by a form · {{ report.late_total }} late arrivals</p>
+                <p class="muted">{{ report.from_date }} → {{ report.to_date }} · {{ report.punch_rows }} machine rows · {{ report.missing_total }} days with no punch and no form · {{ report.covered_total }} days covered by a form · {{ report.late_total }} late days ({{ report.late_text_total }} / {{ report.late_hours_total }}h) · {{ report.short_total }} short days ({{ report.short_text_total }})</p>
                 <a class="excel-link" href="{{ url_for('attendance_export') }}">Download Excel</a>
                 {% if report.people %}
                     <div class="table-wrap">
@@ -77,7 +77,8 @@
                                     <th>Fingerprint</th>
                                     <th>No punch & no form</th>
                                     <th>Covered by form</th>
-                                    <th>Late</th>
+                                    <th>Late after 10:00</th>
+                                    <th>Short of 8.5h</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -114,11 +115,24 @@
                                                 <span class="muted">None</span>
                                             {% endif %}
                                         </td>
-                                        <td data-label="Late">
+                                        <td data-label="Late after 10:00">
                                             {% if person.late %}
+                                                <p class="muted">Total {{ person.late_text }} ({{ person.late_hours }}h)</p>
                                                 <div class="date-chips">
                                                     {% for day in person.late %}
-                                                        <span class="badge badge-pending">{{ day.label }} {{ day.clock_in }} ({{ day.late }})</span>
+                                                        <span class="badge badge-pending">{{ day.label }} in {{ day.clock_in }} late {{ day.late }}</span>
+                                                    {% endfor %}
+                                                </div>
+                                            {% else %}
+                                                <span class="muted">None</span>
+                                            {% endif %}
+                                        </td>
+                                        <td data-label="Short of 8.5h">
+                                            {% if person.short %}
+                                                <p class="muted">Total {{ person.short_text }} ({{ person.short_hours }}h)</p>
+                                                <div class="date-chips">
+                                                    {% for day in person.short %}
+                                                        <span class="badge badge-rejected">{{ day.label }} {{ day.clock_in }}–{{ day.clock_out }} short {{ day.short }}</span>
                                                     {% endfor %}
                                                 </div>
                                             {% else %}

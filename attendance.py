@@ -47,6 +47,53 @@ COVERING_TYPES = {
     "annual vacation",
     "sickness vacation",
 }
+WINDOW_START = "09:00"
+WINDOW_END = "10:00"
+REQUIRED_MINUTES = 510  # 8 hours 30 minutes
+
+
+def minutes_of(value: str) -> int | None:
+    text = parse_time(value)
+    if not text:
+        return None
+    hour, minute = text.split(":")
+    return int(hour) * 60 + int(minute)
+
+
+def format_hours(minutes: int) -> str:
+    minutes = max(0, int(minutes or 0))
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}:{mins:02d}"
+
+
+def decimal_hours(minutes: int) -> str:
+    return f"{max(0, int(minutes or 0)) / 60:.2f}"
+
+
+def evaluate_shift(clock_in: str, clock_out: str) -> dict:
+    in_minutes = minutes_of(clock_in)
+    out_minutes = minutes_of(clock_out)
+    late_minutes = 0
+    worked_minutes = None
+    short_minutes = 0
+    if in_minutes is not None:
+        late_minutes = max(0, in_minutes - minutes_of(WINDOW_END))
+        if out_minutes is not None:
+            if out_minutes < in_minutes:
+                out_minutes += 24 * 60
+            worked_minutes = out_minutes - in_minutes
+            short_minutes = max(0, REQUIRED_MINUTES - worked_minutes)
+    return {
+        "late_minutes": late_minutes,
+        "late": format_hours(late_minutes),
+        "late_hours": decimal_hours(late_minutes),
+        "worked_minutes": worked_minutes,
+        "worked": format_hours(worked_minutes) if worked_minutes is not None else "",
+        "worked_hours": decimal_hours(worked_minutes) if worked_minutes is not None else "",
+        "short_minutes": short_minutes,
+        "short": format_hours(short_minutes),
+        "short_hours": decimal_hours(short_minutes),
+    }
 
 
 def parse_day(value) -> str:
@@ -86,13 +133,6 @@ def is_true(value) -> bool:
     return str(value or "").strip().lower() in {"true", "1", "yes", "y"}
 
 
-def is_late_value(value) -> bool:
-    text = str(value or "").strip()
-    if not text or text in {"0", "00:00", "0:00", "0.0"}:
-        return False
-    return bool(parse_time(text) or text)
-
-
 def parse_xls_cells(raw: bytes) -> dict:
     cells = {}
     index = 0
@@ -125,7 +165,6 @@ def rows_from_xls(raw: bytes, fallback_device: str = "") -> list:
         device = user_store.normalize_device(timetable) or fallback_device
         clock_in = parse_time(columns.get(XLS_COLUMNS["clock_in"], ""))
         clock_out = parse_time(columns.get(XLS_COLUMNS["clock_out"], ""))
-        late = parse_time(columns.get(XLS_COLUMNS["late"], "")) or str(columns.get(XLS_COLUMNS["late"], "")).strip()
         rows.append({
             "fingerprint": fingerprint,
             "name": str(columns.get(XLS_COLUMNS["name"], "")).strip(),
@@ -133,7 +172,6 @@ def rows_from_xls(raw: bytes, fallback_device: str = "") -> list:
             "device": device,
             "clock_in": clock_in,
             "clock_out": clock_out,
-            "late": late if is_late_value(late) else "",
             "absent": is_true(columns.get(XLS_COLUMNS["absent"], "")) or not (clock_in or clock_out),
         })
         if len(rows) > MAX_ATTENDANCE_ROWS:
@@ -156,7 +194,6 @@ def rows_from_mapped(raw_rows: list, fallback_device: str = "") -> list:
         device = user_store.normalize_device(mapped.get("device") or mapped.get("timetable") or "") or fallback_device
         clock_in = parse_time(mapped.get("clock_in", ""))
         clock_out = parse_time(mapped.get("clock_out", ""))
-        late_raw = mapped.get("late", "")
         rows.append({
             "fingerprint": fingerprint,
             "name": str(mapped.get("name") or "").strip(),
@@ -164,7 +201,6 @@ def rows_from_mapped(raw_rows: list, fallback_device: str = "") -> list:
             "device": device,
             "clock_in": clock_in,
             "clock_out": clock_out,
-            "late": parse_time(late_raw) if is_late_value(late_raw) else "",
             "absent": is_true(mapped.get("absent", "")) or not (clock_in or clock_out),
         })
         if len(rows) > MAX_ATTENDANCE_ROWS:
@@ -259,7 +295,10 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
     people = []
     missing_total = 0
     late_total = 0
+    short_total = 0
     covered_total = 0
+    late_minutes_total = 0
+    short_minutes_total = 0
 
     for key, days in sorted(
         by_person.items(),
@@ -274,7 +313,10 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         sample = days[0]
         missing = []
         late = []
+        short = []
         covered_days = []
+        late_minutes = 0
+        short_minutes = 0
         for punch in sorted(days, key=lambda item: item["date"]):
             types = covering_types(covered, device, fingerprint, punch["date"])
             has_punch = bool(punch["clock_in"] or punch["clock_out"]) and not punch["absent"]
@@ -292,15 +334,31 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                         "label": weekday_label(punch["date"]),
                     })
                     missing_total += 1
-            elif punch["late"]:
+                continue
+            shift = evaluate_shift(punch["clock_in"], punch["clock_out"])
+            if shift["late_minutes"]:
                 late.append({
                     "date": punch["date"],
                     "label": weekday_label(punch["date"]),
                     "clock_in": punch["clock_in"],
-                    "late": punch["late"],
+                    "clock_out": punch["clock_out"],
+                    **shift,
                 })
                 late_total += 1
-        if not missing and not late and not covered_days:
+                late_minutes += shift["late_minutes"]
+                late_minutes_total += shift["late_minutes"]
+            if shift["short_minutes"]:
+                short.append({
+                    "date": punch["date"],
+                    "label": weekday_label(punch["date"]),
+                    "clock_in": punch["clock_in"],
+                    "clock_out": punch["clock_out"],
+                    **shift,
+                })
+                short_total += 1
+                short_minutes += shift["short_minutes"]
+                short_minutes_total += shift["short_minutes"]
+        if not missing and not late and not short and not covered_days:
             continue
         people.append({
             "name": (employee or {}).get("name") or sample["name"] or fingerprint,
@@ -310,7 +368,14 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
             "registered": bool(employee),
             "missing": missing,
             "late": late,
+            "short": short,
             "covered": covered_days,
+            "late_minutes": late_minutes,
+            "short_minutes": short_minutes,
+            "late_hours": decimal_hours(late_minutes),
+            "short_hours": decimal_hours(short_minutes),
+            "late_text": format_hours(late_minutes),
+            "short_text": format_hours(short_minutes),
         })
 
     people.sort(key=lambda item: (item["department"], item["name"].lower(), item["device"]))
@@ -319,7 +384,14 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         "people": people,
         "missing_total": missing_total,
         "late_total": late_total,
+        "short_total": short_total,
         "covered_total": covered_total,
+        "late_minutes_total": late_minutes_total,
+        "short_minutes_total": short_minutes_total,
+        "late_hours_total": decimal_hours(late_minutes_total),
+        "short_hours_total": decimal_hours(short_minutes_total),
+        "late_text_total": format_hours(late_minutes_total),
+        "short_text_total": format_hours(short_minutes_total),
         "punch_rows": len(punches),
         "from_date": min(dates) if dates else "",
         "to_date": max(dates) if dates else "",
@@ -333,7 +405,6 @@ def report_sheets(report: dict) -> list:
         registered = "Yes" if person.get("registered") else "No"
         missing_dates = ", ".join(item["date"] for item in person.get("missing") or [])
         covered_dates = ", ".join(item["date"] for item in person.get("covered") or [])
-        late_dates = ", ".join(item["date"] for item in person.get("late") or [])
         people_rows.append([
             person.get("name") or "",
             person.get("department") or "",
@@ -343,9 +414,13 @@ def report_sheets(report: dict) -> list:
             len(person.get("missing") or []),
             len(person.get("covered") or []),
             len(person.get("late") or []),
+            person.get("late_hours") or "0.00",
+            person.get("late_text") or "0:00",
+            len(person.get("short") or []),
+            person.get("short_hours") or "0.00",
+            person.get("short_text") or "0:00",
             missing_dates,
             covered_dates,
-            late_dates,
         ])
         base = [
             person.get("name") or "",
@@ -355,7 +430,7 @@ def report_sheets(report: dict) -> list:
             registered,
         ]
         for item in person.get("missing") or []:
-            day_rows.append([*base, "No punch & no form", item["date"], item.get("label") or "", "", "", ""])
+            day_rows.append([*base, "No punch & no form", item["date"], item.get("label") or "", "", "", "", "", "", "", "", ""])
         for item in person.get("covered") or []:
             day_rows.append([
                 *base,
@@ -364,16 +439,39 @@ def report_sheets(report: dict) -> list:
                 item.get("label") or "",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 ", ".join(item.get("types") or []),
             ])
+        shift_days = {}
         for item in person.get("late") or []:
+            shift_days[item["date"]] = item
+        for item in person.get("short") or []:
+            shift_days[item["date"]] = item
+        for day, item in sorted(shift_days.items()):
+            late_min = item.get("late_minutes") or 0
+            short_min = item.get("short_minutes") or 0
+            if late_min and short_min:
+                status = "Late + short day"
+            elif late_min:
+                status = "Late"
+            else:
+                status = "Short day"
             day_rows.append([
                 *base,
-                "Late",
+                status,
                 item["date"],
                 item.get("label") or "",
                 item.get("clock_in") or "",
-                item.get("late") or "",
+                item.get("clock_out") or "",
+                item.get("worked_hours") or "",
+                item.get("late_hours") or "0.00",
+                item.get("late") or "0:00",
+                item.get("short_hours") or "0.00",
+                item.get("short") or "0:00",
                 "",
             ])
     return [
@@ -383,10 +481,16 @@ def report_sheets(report: dict) -> list:
             "rows": [
                 ["From", report.get("from_date") or ""],
                 ["To", report.get("to_date") or ""],
+                ["Morning window", f"{WINDOW_START} to {WINDOW_END}"],
+                ["Required work hours", "8.50"],
                 ["Machine rows", report.get("punch_rows") or 0],
                 ["No punch & no form", report.get("missing_total") or 0],
                 ["Covered by form", report.get("covered_total") or 0],
-                ["Late arrivals", report.get("late_total") or 0],
+                ["Late days", report.get("late_total") or 0],
+                ["Late hours", report.get("late_hours_total") or "0.00"],
+                ["Late hours (h:mm)", report.get("late_text_total") or "0:00"],
+                ["Short days", report.get("short_total") or 0],
+                ["Short hours", report.get("short_hours_total") or "0.00"],
                 ["People in report", len(report.get("people") or [])],
             ],
         },
@@ -394,8 +498,9 @@ def report_sheets(report: dict) -> list:
             "name": "People",
             "headers": [
                 "Name", "Department", "Device", "Fingerprint", "In employee list",
-                "Missing days", "Covered days", "Late days",
-                "Missing dates", "Covered dates", "Late dates",
+                "Missing days", "Covered days", "Late days", "Late hours", "Late (h:mm)",
+                "Short days", "Short hours", "Short (h:mm)",
+                "Missing dates", "Covered dates",
             ],
             "rows": people_rows,
         },
@@ -403,7 +508,9 @@ def report_sheets(report: dict) -> list:
             "name": "Days",
             "headers": [
                 "Name", "Department", "Device", "Fingerprint", "In employee list",
-                "Status", "Date", "Weekday", "Clock In", "Late", "Form types",
+                "Status", "Date", "Weekday", "Clock In", "Clock Out",
+                "Worked hours", "Late hours", "Late (h:mm)", "Short hours", "Short (h:mm)",
+                "Form types",
             ],
             "rows": day_rows,
         },

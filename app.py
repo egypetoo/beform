@@ -1596,8 +1596,17 @@ def attendance_report():
                 if needle in person["name"].lower() or needle in person["fingerprint"]
             ]
         report["missing_total"] = sum(len(person["missing"]) for person in report["people"])
-        report["late_total"] = sum(len(person["late"]) for person in report["people"])
+        report["late_total"] = sum(len(person.get("late") or []) for person in report["people"])
+        report["short_total"] = sum(len(person.get("short") or []) for person in report["people"])
         report["covered_total"] = sum(len(person["covered"]) for person in report["people"])
+        late_minutes = sum(person.get("late_minutes") or 0 for person in report["people"])
+        short_minutes = sum(person.get("short_minutes") or 0 for person in report["people"])
+        report["late_minutes_total"] = late_minutes
+        report["short_minutes_total"] = short_minutes
+        report["late_hours_total"] = attendance.decimal_hours(late_minutes)
+        report["short_hours_total"] = attendance.decimal_hours(short_minutes)
+        report["late_text_total"] = attendance.format_hours(late_minutes)
+        report["short_text_total"] = attendance.format_hours(short_minutes)
         prune_attendance_exports()
         token = secrets.token_hex(12)
         ATTENDANCE_EXPORTS[token] = {
