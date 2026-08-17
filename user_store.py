@@ -584,6 +584,14 @@ def normalize_person_name(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().lower())
 
 
+ENGLISH_NAME_RE = re.compile(r"[A-Za-z]+(?:[ .'\-][A-Za-z]+)*")
+
+
+def is_english_person_name(value: str) -> bool:
+    text = re.sub(r"\s+", " ", (value or "").strip())
+    return bool(text) and bool(ENGLISH_NAME_RE.fullmatch(text))
+
+
 def names_match(left: str, right: str) -> bool:
     first = normalize_person_name(left)
     second = normalize_person_name(right)
@@ -673,6 +681,8 @@ def validate_employee(name: str, department: str, fingerprint: str, device: str,
         errors.append("Employee name is required.")
     elif len(name) > 80:
         errors.append("Employee name is too long.")
+    elif not is_english_person_name(name):
+        errors.append("Employee name must be in English letters only.")
     if department not in departments:
         errors.append("Please choose a valid department.")
     if not fingerprint or not fingerprint.isdigit():

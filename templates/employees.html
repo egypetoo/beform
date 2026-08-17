@@ -49,7 +49,10 @@
             <h2 class="section-title">Add employee</h2>
             <section class="field">
                 <label for="name">Full name</label>
-                <input id="name" name="name" type="text" required maxlength="80" placeholder="Ahmed Essam">
+                <input id="name" name="name" type="text" required maxlength="80"
+                       pattern="[A-Za-z][A-Za-z .'\-]*" title="English letters only"
+                       placeholder="Ahmed Essam">
+                <p class="muted">English letters only.</p>
             </section>
             <section class="field">
                 <label for="department">Department</label>
@@ -102,7 +105,9 @@
                                         </form>
                                         <div class="inline-form">
                                             <input form="edit-employee-{{ employee.id }}" type="text" name="name"
-                                                   value="{{ employee.name }}" required maxlength="80" aria-label="Name">
+                                                   value="{{ employee.name }}" required maxlength="80"
+                                                   pattern="[A-Za-z][A-Za-z .'\-]*" title="English letters only"
+                                                   aria-label="Name">
                                             <button form="edit-employee-{{ employee.id }}" class="btn-sm btn-approve" type="submit">Save</button>
                                         </div>
                                     </td>
@@ -142,6 +147,13 @@
             {% endif %}
         </section>
     </main>
+    <script>
+        document.querySelectorAll('input[name="name"]').forEach((input) => {
+            input.addEventListener('input', () => {
+                input.value = input.value.replace(/[^A-Za-z .'\-]/g, '');
+            });
+        });
+    </script>
     {% include "_pwa_foot.html" %}
 </body>
 </html>

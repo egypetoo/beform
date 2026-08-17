@@ -43,7 +43,10 @@
             <section class="field">
                 <label for="name">Name <span>*</span></label>
                 <input id="name" name="name" type="text" required
-                       value="{{ form.get('name', '') }}" placeholder="Enter full name">
+                       pattern="[A-Za-z][A-Za-z .'\-]*"
+                       title="English letters only"
+                       value="{{ form.get('name', '') }}" placeholder="Enter full name in English">
+                <p class="field-hint">English letters only. Arabic names are not accepted.</p>
             </section>
 
             <section class="field">
@@ -100,7 +103,7 @@
             </section>
 
             <section class="field time-range" id="time-range-card">
-                <p class="field-hint hidden" id="excuse-hint">إذن التأخير بالساعة فقط: ساعة أو ساعتين أو ثلاث ساعات. مفيش نص ساعة أو ربع ساعة.</p>
+                <p class="field-hint hidden" id="excuse-hint">Late excuse is by the hour only: 1, 2, or 3 hours. Half hours and quarter hours are not allowed.</p>
                 <div class="time-grid">
                     <div>
                         <label for="from_time">From Time <span>*</span></label>
@@ -204,6 +207,10 @@
         fingerprint.addEventListener('input', () => {
             fingerprint.value = fingerprint.value.replace(/\D/g, '');
         });
+        const nameInput = document.getElementById('name');
+        nameInput.addEventListener('input', () => {
+            nameInput.value = nameInput.value.replace(/[^A-Za-z .'\-]/g, '');
+        });
 
         const form = document.getElementById('hr-form');
         const submitBtn = document.getElementById('submit-btn');
@@ -240,6 +247,11 @@
                 event.preventDefault();
                 return;
             }
+            if (!/^[A-Za-z]+(?:[ .'\-][A-Za-z]+)*$/.test((nameInput.value || '').trim())) {
+                event.preventDefault();
+                alert('Name must be in English letters only.');
+                return;
+            }
             if (punchTypes.includes(requestType.value) &&
                 (startDate.value > today || endDate.value > today)) {
                 event.preventDefault();
@@ -268,7 +280,7 @@
                 const duration = end - start;
                 if (!Number.isFinite(duration) || duration < 60 || duration % 60 !== 0) {
                     event.preventDefault();
-                    alert('إذن التأخير لازم يكون ساعة كاملة أو أكثر (ساعة، ساعتين، ثلاث ساعات). مفيش كسور.');
+                    alert('Late excuse must be whole hours only (1, 2, or 3 hours). Fractions are not allowed.');
                     return;
                 }
             }

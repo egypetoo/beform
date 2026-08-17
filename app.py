@@ -558,6 +558,8 @@ def index():
             errors.append("Fingerprint number must contain digits only")
         if not name:
             errors.append("Name is required")
+        elif not user_store.is_english_person_name(name):
+            errors.append("Name must be in English letters only")
         if not department:
             errors.append("Department is required")
         elif department not in department_maps()["values"]:
@@ -710,6 +712,8 @@ def track():
 
         if not track_name:
             flash("Name is required.", "error")
+        elif not user_store.is_english_person_name(track_name):
+            flash("Name must be in English letters only.", "error")
         elif not fingerprint_id:
             flash("Fingerprint number is required.", "error")
         elif not fingerprint_id.isdigit():

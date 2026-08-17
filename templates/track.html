@@ -31,7 +31,9 @@
             <section class="field">
                 <label for="name">Name <span>*</span></label>
                 <input id="name" name="name" type="text" required
-                       value="{{ track_name }}" placeholder="Enter full name">
+                       pattern="[A-Za-z][A-Za-z .'\-]*"
+                       title="English letters only"
+                       value="{{ track_name }}" placeholder="Enter full name in English">
             </section>
             <section class="field">
                 <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
@@ -118,6 +120,10 @@
         const fingerprint = document.getElementById('fingerprint_id');
         fingerprint.addEventListener('input', () => {
             fingerprint.value = fingerprint.value.replace(/\D/g, '');
+        });
+        const nameInput = document.getElementById('name');
+        nameInput.addEventListener('input', () => {
+            nameInput.value = nameInput.value.replace(/[^A-Za-z .'\-]/g, '');
         });
     </script>
     {% include "_pwa_foot.html" %}
