@@ -92,8 +92,15 @@ def payroll_cycles(count: int = 8) -> list:
     return cycles
 
 
-def row_date(row: dict) -> str:
-    return str(row.get("Submitted At") or row.get("From Date") or "")[:10]
+def row_matches_date_range(row: dict, date_from: str, date_to: str) -> bool:
+    submitted = str(row.get("Submitted At") or "")[:10]
+    start = str(row.get("From Date") or "")[:10] or submitted
+    end = str(row.get("To Date") or "")[:10] or start
+    if date_from and end and end < date_from:
+        return False
+    if date_to and start and start > date_to:
+        return False
+    return True
 
 
 def current_cycle_value() -> str:
@@ -249,6 +256,17 @@ def record_login_failure(ip: str) -> None:
 def clear_login_failures(ip: str) -> None:
     with LOGIN_LOCK:
         LOGIN_ATTEMPTS.pop(ip, None)
+
+
+def dashboard_redirect_args(form=None) -> dict:
+    source = form if form is not None else request.form
+    return {
+        "status": source.get("status_filter") or source.get("status") or "Pending",
+        "q": source.get("q", ""),
+        "type": source.get("type_filter") or source.get("type") or "",
+        "from": source.get("date_from") or source.get("from") or "",
+        "to": source.get("date_to") or source.get("to") or "",
+    }
 
 
 def can_review_department(manager: dict, department: str) -> bool:
@@ -715,6 +733,12 @@ def dashboard():
     status_filter = request.args.get("status", "Pending")
     search_query = request.args.get("q", "").strip()
     type_filter = request.args.get("type", "").strip()
+    date_from = request.args.get("from", "").strip()
+    date_to = request.args.get("to", "").strip()
+    if len(date_from) != 10:
+        date_from = ""
+    if len(date_to) != 10:
+        date_to = ""
     try:
         rows = list_requests(manager["department"])
     except Exception as exc:
@@ -732,6 +756,8 @@ def dashboard():
         rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
     if type_filter:
         rows = [row for row in rows if (row.get("Request Type") or "") == type_filter]
+    if date_from or date_to:
+        rows = [row for row in rows if row_matches_date_range(row, date_from, date_to)]
     if search_query:
         needle = search_query.lower()
         rows = [
@@ -753,6 +779,8 @@ def dashboard():
         status_filter=status_filter,
         search_query=search_query,
         type_filter=type_filter,
+        date_from=date_from,
+        date_to=date_to,
         request_types=request_types,
         statuses=["Pending", "Approved", "Rejected", "All"],
     )
@@ -785,13 +813,13 @@ def update_status():
 
     if status not in {"Approved", "Rejected"} or not items:
         flash("Select at least one request first.", "error")
-        return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
+        return redirect(url_for("dashboard", **dashboard_redirect_args()))
 
     reason = request.form.get("rejection_reason", "").strip()
     if status == "Rejected":
         if not reason:
             flash("Please enter a rejection reason.", "error")
-            return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
+            return redirect(url_for("dashboard", **dashboard_redirect_args()))
         reason = reason[:300]
     else:
         reason = ""
@@ -801,7 +829,7 @@ def update_status():
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
         flash("Could not verify the selected requests.", "error")
-        return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
+        return redirect(url_for("dashboard", **dashboard_redirect_args()))
 
     visible_by_id = {
         str(row.get("Request ID") or "").strip(): str(row.get("Department") or "").strip()
@@ -821,7 +849,7 @@ def update_status():
 
     if not authorized:
         flash("You can only review requests from your department.", "error")
-        return redirect(url_for("dashboard", status=request.form.get("status_filter", "Pending")))
+        return redirect(url_for("dashboard", **dashboard_redirect_args()))
 
     try:
         set_request_status(authorized, status, manager["name"], reason)
@@ -830,12 +858,7 @@ def update_status():
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
         flash("Could not update the request status.", "error")
 
-    return redirect(url_for(
-        "dashboard",
-        status=request.form.get("status_filter", "Pending"),
-        q=request.form.get("q", ""),
-        type=request.form.get("type_filter", ""),
-    ))
+    return redirect(url_for("dashboard", **dashboard_redirect_args()))
 
 
 if __name__ == "__main__":

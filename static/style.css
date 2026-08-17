@@ -133,6 +133,7 @@ input[type="date"],
 input[type="time"],
 input[type="password"],
 input[type="email"],
+input[type="search"],
 select,
 textarea {
     width: 100%;
@@ -261,13 +262,156 @@ button:disabled {
     margin-bottom: 10px;
 }
 
-@media (max-width: 640px) {
-    h1 {
-        font-size: 24px;
+@media (max-width: 900px) {
+    .page {
+        padding: 18px 12px 40px;
     }
 
-    .filter-bar {
+    h1 {
+        font-size: 22px;
+    }
+
+    .logo {
+        width: min(220px, 62%);
+        margin-bottom: 12px;
+    }
+
+    .hero,
+    .form-shell {
+        border-radius: 18px;
+        padding: 18px 14px;
+    }
+
+    .filter-bar,
+    .dash-filter-bar,
+    .track-filter-bar {
         grid-template-columns: 1fr;
+    }
+
+    .filters {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    a.filter-chip,
+    button.filter-chip {
+        width: 100%;
+        min-height: 42px;
+    }
+
+    .bulk-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .reason-field,
+    .bulk-bar .btn-sm {
+        width: 100%;
+        min-height: 44px;
+        font-size: 14px;
+    }
+
+    .inline-actions {
+        width: 100%;
+    }
+
+    .inline-actions .btn-sm {
+        flex: 1;
+        min-height: 42px;
+        font-size: 13px;
+    }
+
+    .table-wrap {
+        overflow: visible;
+    }
+
+    table thead {
+        display: none;
+    }
+
+    table,
+    tbody {
+        display: block;
+        width: 100%;
+    }
+
+    tbody tr {
+        display: block;
+        background: #141414;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        margin-bottom: 12px;
+        padding: 6px 2px;
+    }
+
+    th,
+    td {
+        white-space: normal;
+    }
+
+    tbody td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        border-bottom: 1px solid var(--border);
+        padding: 10px 12px;
+    }
+
+    tbody td:last-child {
+        border-bottom: none;
+    }
+
+    tbody td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        flex: 0 0 34%;
+        padding-top: 2px;
+    }
+
+    tbody td.card-check {
+        justify-content: flex-start;
+        padding-bottom: 4px;
+    }
+
+    tbody td.card-check::before {
+        content: none;
+    }
+
+    tbody td.card-actions {
+        display: block;
+    }
+
+    tbody td.card-actions::before {
+        display: block;
+        margin-bottom: 8px;
+    }
+
+    .track-toolbar .filters {
+        margin-bottom: 4px;
+    }
+
+    .track-filter-bar button {
+        min-height: 46px;
+    }
+
+    .track-card-head {
+        align-items: flex-start;
+    }
+
+    .track-card-head .badge {
+        flex-shrink: 0;
+    }
+}
+
+@media (max-width: 640px) {
+    h1 {
+        font-size: 22px;
     }
 }
 
@@ -285,6 +429,27 @@ button:disabled {
     gap: 10px;
     margin-bottom: 16px;
     align-items: stretch;
+}
+
+.dash-filter-bar {
+    grid-template-columns: minmax(140px, 1.3fr) minmax(140px, 0.9fr) minmax(130px, 0.8fr) minmax(130px, 0.8fr) 110px;
+}
+
+.filter-date {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.filter-date span {
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.filter-date input {
+    min-height: 46px;
 }
 
 .filter-bar input,
@@ -378,7 +543,84 @@ button.filter-chip.active {
 
 .track-filter-bar {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 120px;
-    margin-top: 4px;
+    margin-top: 12px;
+    align-items: end;
+}
+
+.track-toolbar {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+.track-count {
+    color: var(--muted);
+    font-weight: 700;
+    margin: 16px 4px 10px;
+}
+
+.track-list {
+    display: grid;
+    gap: 12px;
+}
+
+.track-card {
+    background: #141414;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 16px 16px 10px;
+}
+
+.track-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.track-card-head strong {
+    font-size: 16px;
+    line-height: 1.35;
+}
+
+.track-meta {
+    display: grid;
+    margin-top: 8px;
+}
+
+.track-meta > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.track-meta > div:last-child {
+    border-bottom: none;
+}
+
+.track-meta span {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    flex: 0 0 34%;
+    padding-top: 2px;
+}
+
+.track-meta strong {
+    font-weight: 600;
+    text-align: right;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.track-card p {
+    margin: 4px 0;
+    color: var(--muted);
+    font-size: 14px;
 }
 
 .table-wrap {
@@ -464,33 +706,6 @@ th {
     color: var(--muted);
     margin: 8px 0 4px;
     padding: 18px 4px;
-}
-
-.track-list {
-    display: grid;
-    gap: 12px;
-    margin-top: 18px;
-}
-
-.track-card {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    padding: 16px 18px;
-}
-
-.track-card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 8px;
-}
-
-.track-card p {
-    margin: 4px 0;
-    color: var(--muted);
-    font-size: 14px;
 }
 
 .reject-reason {

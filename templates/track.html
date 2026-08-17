@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=10">
 </head>
 <body>
     <div class="glow"></div>
@@ -41,26 +41,34 @@
             <button type="submit">Check status</button>
 
             {% if rows is not none %}
-                <div class="filters">
-                    {% for status in statuses %}
-                        <button class="filter-chip {% if status_filter == status %}active{% endif %}"
-                                type="submit" name="status" value="{{ status }}">{{ status }}</button>
-                    {% endfor %}
-                </div>
-                <input type="hidden" name="status" value="{{ status_filter }}">
-                <div class="filter-bar track-filter-bar">
-                    <select name="month">
-                        {% for cycle in cycles %}
-                            <option value="{{ cycle.value }}" {% if month_filter == cycle.value %}selected{% endif %}>{{ cycle.label }}</option>
+                <div class="track-toolbar">
+                    <div class="filters">
+                        {% for status in statuses %}
+                            <button class="filter-chip {% if status_filter == status %}active{% endif %}"
+                                    type="submit" name="status" value="{{ status }}">{{ status }}</button>
                         {% endfor %}
-                    </select>
-                    <select name="type">
-                        <option value="">All types</option>
-                        {% for request_type in request_types %}
-                            <option value="{{ request_type }}" {% if type_filter == request_type %}selected{% endif %}>{{ request_type }}</option>
-                        {% endfor %}
-                    </select>
-                    <button type="submit">Filter</button>
+                    </div>
+                    <input type="hidden" name="status" value="{{ status_filter }}">
+                    <div class="filter-bar track-filter-bar">
+                        <label class="filter-date">
+                            <span>Month</span>
+                            <select name="month">
+                                {% for cycle in cycles %}
+                                    <option value="{{ cycle.value }}" {% if month_filter == cycle.value %}selected{% endif %}>{{ cycle.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="filter-date">
+                            <span>Type</span>
+                            <select name="type">
+                                <option value="">All types</option>
+                                {% for request_type in request_types %}
+                                    <option value="{{ request_type }}" {% if type_filter == request_type %}selected{% endif %}>{{ request_type }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <button type="submit">Filter</button>
+                    </div>
                 </div>
             {% endif %}
 
@@ -68,6 +76,7 @@
         </form>
 
         {% if rows %}
+            <p class="track-count">{{ rows|length }} request{{ 's' if rows|length != 1 else '' }}</p>
             <section class="track-list">
                 {% for row in rows %}
                     {% set current_status = row.get('Status') or 'Pending' %}
@@ -76,17 +85,34 @@
                             <strong>{{ row.get('Request Type', '') }}</strong>
                             <span class="badge badge-{{ current_status|lower }}">{{ current_status }}</span>
                         </div>
-                        <p>{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</p>
-                        <p>Submitted: {{ row.get('Submitted At', '') }}</p>
-                        {% if row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') %}
-                            <p>Time: {{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') }}</p>
-                        {% endif %}
-                        {% if row.get('Notes') %}
-                            <p>Notes: {{ row.get('Notes') }}</p>
-                        {% endif %}
-                        {% if current_status == 'Rejected' and row.get('Rejection Reason') %}
-                            <p class="reject-reason">Reason: {{ row.get('Rejection Reason') }}</p>
-                        {% endif %}
+                        <div class="track-meta">
+                            <div>
+                                <span>Dates</span>
+                                <strong>{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</strong>
+                            </div>
+                            <div>
+                                <span>Submitted</span>
+                                <strong>{{ row.get('Submitted At', '') }}</strong>
+                            </div>
+                            {% if row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') %}
+                                <div>
+                                    <span>Time</span>
+                                    <strong>{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') }}</strong>
+                                </div>
+                            {% endif %}
+                            {% if row.get('Notes') %}
+                                <div>
+                                    <span>Notes</span>
+                                    <strong>{{ row.get('Notes') }}</strong>
+                                </div>
+                            {% endif %}
+                            {% if current_status == 'Rejected' and row.get('Rejection Reason') %}
+                                <div>
+                                    <span>Reason</span>
+                                    <strong class="reject-reason">{{ row.get('Rejection Reason') }}</strong>
+                                </div>
+                            {% endif %}
+                        </div>
                     </article>
                 {% endfor %}
             </section>

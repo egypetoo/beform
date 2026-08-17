@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=10">
 </head>
 <body>
     <div class="glow"></div>
@@ -32,7 +32,7 @@
         {% endwith %}
 
         <section class="form-shell">
-            <form class="filter-bar" method="get">
+            <form class="filter-bar dash-filter-bar" method="get">
                 <input type="hidden" name="status" value="{{ status_filter }}">
                 <input type="search" name="q" value="{{ search_query }}" placeholder="Search name, fingerprint, type...">
                 <select name="type">
@@ -41,13 +41,21 @@
                         <option value="{{ request_type }}" {% if type_filter == request_type %}selected{% endif %}>{{ request_type }}</option>
                     {% endfor %}
                 </select>
+                <label class="filter-date">
+                    <span>From</span>
+                    <input type="date" name="from" value="{{ date_from }}">
+                </label>
+                <label class="filter-date">
+                    <span>To</span>
+                    <input type="date" name="to" value="{{ date_to }}">
+                </label>
                 <button type="submit">Filter</button>
             </form>
 
             <div class="filters">
                 {% for status in statuses %}
                     <a class="filter-chip {% if status_filter == status %}active{% endif %}"
-                       href="{{ url_for('dashboard', status=status, q=search_query, type=type_filter) }}">{{ status }}</a>
+                       href="{{ url_for('dashboard', status=status, q=search_query, type=type_filter, **{'from': date_from, 'to': date_to}) }}">{{ status }}</a>
                 {% endfor %}
             </div>
 
@@ -57,6 +65,8 @@
                     <input type="hidden" name="status_filter" value="{{ status_filter }}">
                     <input type="hidden" name="q" value="{{ search_query }}">
                     <input type="hidden" name="type_filter" value="{{ type_filter }}">
+                    <input type="hidden" name="date_from" value="{{ date_from }}">
+                    <input type="hidden" name="date_to" value="{{ date_to }}">
                     <input type="hidden" name="request_id" id="single-id" value="">
                     <input type="hidden" name="department" id="single-dept" value="">
                     <input type="hidden" name="status" id="action-status" value="">
@@ -94,25 +104,25 @@
                                 {% for row in rows %}
                                     {% set current_status = row.get('Status') or 'Pending' %}
                                     <tr>
-                                        <td>
+                                        <td class="card-check">
                                             {% if current_status == 'Pending' and row.get('Request ID') %}
                                                 <input class="row-check" type="checkbox" name="selected"
                                                        value="{{ row.get('Request ID') }}||{{ row.get('Department', '') }}">
                                             {% endif %}
                                         </td>
-                                        <td>{{ row.get('Submitted At', '') }}</td>
-                                        <td>{{ row.get('Name', '') }}</td>
-                                        <td>{{ row.get('Fingerprint Number', '') }}</td>
-                                        <td>{{ row.get('Department', '') }}</td>
-                                        <td>{{ row.get('Request Type', '') }}</td>
-                                        <td>{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</td>
-                                        <td>{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') or '-' }}</td>
-                                        <td class="wrap-cell">{{ row.get('Notes', '') }}</td>
-                                        <td>
+                                        <td data-label="Submitted">{{ row.get('Submitted At', '') }}</td>
+                                        <td data-label="Name">{{ row.get('Name', '') }}</td>
+                                        <td data-label="Fingerprint">{{ row.get('Fingerprint Number', '') }}</td>
+                                        <td data-label="Department">{{ row.get('Department', '') }}</td>
+                                        <td data-label="Type">{{ row.get('Request Type', '') }}</td>
+                                        <td data-label="Dates">{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</td>
+                                        <td data-label="Time">{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') or '-' }}</td>
+                                        <td class="wrap-cell" data-label="Notes">{{ row.get('Notes', '') }}</td>
+                                        <td data-label="Status">
                                             <span class="badge badge-{{ current_status|lower }}">{{ current_status }}</span>
                                         </td>
-                                        <td class="wrap-cell">{{ row.get('Rejection Reason', '') if current_status == 'Rejected' else '' }}</td>
-                                        <td>
+                                        <td class="wrap-cell" data-label="Reason">{{ row.get('Rejection Reason', '') if current_status == 'Rejected' else '' }}</td>
+                                        <td class="card-actions" data-label="Action">
                                             {% if current_status == 'Pending' and row.get('Request ID') %}
                                                 <div class="inline-actions">
                                                     <button class="btn-sm btn-approve row-action" type="submit" data-action="Approved"
