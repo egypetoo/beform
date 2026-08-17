@@ -8,7 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=13">
+    {% include "_pwa_head.html" %}
 </head>
 <body>
     <div class="glow"></div>
@@ -49,5 +50,6 @@
             <button type="submit">Sign in</button>
         </form>
     </main>
+    {% include "_pwa_foot.html" %}
 </body>
 </html>

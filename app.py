@@ -10,7 +10,7 @@ import time
 import uuid
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, flash, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 import requests
@@ -430,6 +430,22 @@ def login_required(view):
         return view(*args, **kwargs)
 
     return wrapped
+
+
+@app.route("/manifest.webmanifest")
+def pwa_manifest():
+    response = send_from_directory(BASE_DIR / "static", "manifest.webmanifest")
+    response.headers["Content-Type"] = "application/manifest+json"
+    return response
+
+
+@app.route("/sw.js")
+def pwa_service_worker():
+    response = send_from_directory(BASE_DIR / "static", "sw.js")
+    response.headers["Content-Type"] = "application/javascript"
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.route("/", methods=["GET", "POST"])
