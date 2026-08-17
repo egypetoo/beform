@@ -59,7 +59,7 @@
                 </select>
             </section>
 
-            <section class="field" id="team-card">
+            <section class="field hidden" id="team-card">
                 <label for="team">Team Leader <span>*</span></label>
                 <select id="team" name="team">
                     <option value="">Select department first</option>
@@ -203,6 +203,7 @@
         const submitBtn = document.getElementById('submit-btn');
         const departmentSelect = document.getElementById('department');
         const teamSelect = document.getElementById('team');
+        const teamCard = document.getElementById('team-card');
         const teamsByDepartment = {{ teams_by_department | tojson }};
         const selectedTeam = {{ form.get('team', '') | tojson }};
         let sending = false;
@@ -210,16 +211,13 @@
         function fillTeams() {
             const teams = teamsByDepartment[departmentSelect.value] || [];
             teamSelect.innerHTML = '';
-            if (!departmentSelect.value) {
-                teamSelect.appendChild(new Option('Select department first', ''));
-                teamSelect.required = false;
-                return;
-            }
             if (!teams.length) {
-                teamSelect.appendChild(new Option('No team leaders yet', ''));
+                teamCard.classList.add('hidden');
                 teamSelect.required = false;
+                teamSelect.appendChild(new Option('', ''));
                 return;
             }
+            teamCard.classList.remove('hidden');
             teamSelect.appendChild(new Option('Select team leader', ''));
             teams.forEach((team) => {
                 const option = new Option(team.label, team.value);
