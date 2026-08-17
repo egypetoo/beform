@@ -321,6 +321,9 @@ def fingerprint_sort_key(value) -> tuple:
     if text.isdigit():
         return (0, int(text))
     return (1, text.lower())
+
+
+def weekday_index(day: str) -> int | None:
     try:
         return datetime.strptime(day, "%Y-%m-%d").weekday()
     except ValueError:
