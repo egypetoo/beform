@@ -913,3 +913,14 @@ th {
     flex: 1;
     margin: 0;
 }
+
+.date-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.date-chips .badge {
+    font-weight: 700;
+    font-size: 11px;
+}

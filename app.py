@@ -21,6 +21,7 @@ from werkzeug.security import check_password_hash
 import requests
 
 import user_store
+import attendance
 
 SHEET_SESSION = requests.Session()
 
@@ -39,6 +40,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "1") != "0",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    MAX_CONTENT_LENGTH=12 * 1024 * 1024,
 )
 
 ROWS_CACHE = {}
@@ -1499,6 +1501,84 @@ def employees_delete():
     else:
         flash("Could not delete that employee.", "error")
     return redirect(url_for("employees_admin"))
+
+
+def read_attendance_file(upload) -> list:
+    filename = (upload.filename or "").lower()
+    raw = upload.read(attendance.MAX_ATTENDANCE_BYTES + 1)
+    if len(raw) > attendance.MAX_ATTENDANCE_BYTES:
+        raise ValueError("Attendance file is too large. Keep it under 8 MB.")
+    fallback = attendance.detect_device_from_name(upload.filename or "")
+    if filename.endswith(".xlsx"):
+        return attendance.rows_from_mapped(
+            parse_xlsx_bytes(raw, max_rows=attendance.MAX_ATTENDANCE_ROWS),
+            fallback,
+        )
+    if filename.endswith(".csv"):
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Save the attendance file as CSV UTF-8 or use the machine .xls file.") from exc
+        return attendance.rows_from_mapped(list(csv.DictReader(io.StringIO(text))), fallback)
+    if filename.endswith(".xls"):
+        return attendance.rows_from_xls(raw, fallback)
+    raise ValueError("Upload the F8/F9 .xls file from the fingerprint machine.")
+
+
+@app.route("/attendance", methods=["GET", "POST"])
+@hr_required
+def attendance_report():
+    report = None
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return redirect(url_for("attendance_report"))
+        uploads = [item for item in request.files.getlist("sheets") if item and item.filename]
+        if not uploads:
+            flash("Upload the F8 and/or F9 sheet from the fingerprint machines.", "error")
+            return redirect(url_for("attendance_report"))
+        punches = []
+        try:
+            for upload in uploads:
+                punches.extend(read_attendance_file(upload))
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("attendance_report"))
+        if not punches:
+            flash("No attendance rows were found in the file.", "error")
+            return redirect(url_for("attendance_report"))
+        unknown_device = sum(1 for item in punches if not item.get("device"))
+        if unknown_device:
+            flash("Some rows have no device. Name the files with F8 or F9, or use the machine export.", "error")
+        try:
+            requests_rows = list_requests("ALL")
+        except Exception as exc:
+            (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+            flash("Could not load form requests from the HR sheet.", "error")
+            requests_rows = []
+        report = attendance.build_report(punches, requests_rows, user_store.list_employees())
+        if request.form.get("department"):
+            department = request.form.get("department", "").strip().lower()
+            report["people"] = [
+                person for person in report["people"]
+                if person["department"].strip().lower() == department
+            ]
+        if request.form.get("q", "").strip():
+            needle = request.form.get("q", "").strip().lower()
+            report["people"] = [
+                person for person in report["people"]
+                if needle in person["name"].lower() or needle in person["fingerprint"]
+            ]
+        report["missing_total"] = sum(len(person["missing"]) for person in report["people"])
+        report["late_total"] = sum(len(person["late"]) for person in report["people"])
+        report["covered_total"] = sum(len(person["covered"]) for person in report["people"])
+
+    return render_template(
+        "attendance.html",
+        report=report,
+        departments=all_departments(active_only=False),
+        devices=user_store.list_devices(),
+    )
 
 
 if __name__ == "__main__":
