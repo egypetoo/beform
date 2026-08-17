@@ -44,30 +44,31 @@ function doPost(e) {
     return jsonResponse({ ok: true, conflict: true, conflict_type: "saturday" });
   }
 
-  const row = [
-    data.request_id || "",
-    data.submitted_at || "",
-    data.fingerprint_id || "",
-    data.name || "",
-    data.department || "",
-    data.request_type || "",
-    data.request_date || "",
-    data.punch_in_time || "",
-    data.punch_out_time || "",
-    data.from_time || "",
-    data.to_time || "",
-    data.start_date || "",
-    data.end_date || "",
-    data.notes || "",
-    data.status || "Pending",
-    "",
-    "",
-    "",
-  ];
+  const valuesByHeader = {
+    "Request ID": data.request_id || "",
+    "Submitted At": data.submitted_at || "",
+    "Fingerprint Number": data.fingerprint_id || "",
+    "Name": data.name || "",
+    "Department": data.department || "",
+    "Team": data.team || "",
+    "Request Type": data.request_type || "",
+    "Request Date": data.request_date || "",
+    "Punch In Time": data.punch_in_time || "",
+    "Punch Out Time": data.punch_out_time || "",
+    "From Time": data.from_time || "",
+    "To Time": data.to_time || "",
+    "From Date": data.start_date || "",
+    "To Date": data.end_date || "",
+    "Notes": data.notes || "",
+    "Status": data.status || "Pending",
+    "Reviewed By": "",
+    "Reviewed At": "",
+    "Rejection Reason": "",
+  };
 
   const allSheet = getSheetByName("All");
-  deptSheet.appendRow(row);
-  allSheet.appendRow(row);
+  appendMappedRow(deptSheet, valuesByHeader);
+  appendMappedRow(allSheet, valuesByHeader);
 
   return jsonResponse({ ok: true, duplicate: false });
 }
@@ -365,6 +366,15 @@ function hasRemotePunchConflict(sheet, data) {
   return false;
 }
 
+function appendMappedRow(sheet, valuesByHeader) {
+  ensureHeaders(sheet);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = headers.map(function (header) {
+    return Object.prototype.hasOwnProperty.call(valuesByHeader, header) ? valuesByHeader[header] : "";
+  });
+  sheet.appendRow(row);
+}
+
 function getSheetByName(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(name);
@@ -395,6 +405,7 @@ function headerList() {
     "Reviewed By",
     "Reviewed At",
     "Rejection Reason",
+    "Team",
   ];
 }
 
@@ -415,7 +426,7 @@ function ensureHeaders(sheet) {
   }
 
   headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  ["Status", "Reviewed By", "Reviewed At", "Rejection Reason"].forEach(function (name) {
+  ["Status", "Reviewed By", "Reviewed At", "Rejection Reason", "Team"].forEach(function (name) {
     if (headers.indexOf(name) === -1) {
       sheet.getRange(1, sheet.getLastColumn() + 1).setValue(name);
       headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];

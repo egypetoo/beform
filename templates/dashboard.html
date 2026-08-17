@@ -11,10 +11,15 @@
     <main class="page page-wide">
         <header class="hero dash-hero">
             {% include "_logo.html" %}
-            <p class="eyebrow">{{ manager.department if manager.department != 'ALL' else 'All Departments' }}</p>
+            <p class="eyebrow">{% if manager.role == 'team' %}{{ manager.department }} · {{ manager.team }}{% elif manager.department != 'ALL' %}{{ manager.department }}{% else %}All Departments{% endif %}</p>
             <h1>Request Dashboard</h1>
             <p class="subtitle">{{ manager.name }}</p>
-            <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
+            <div class="form-links">
+                {% if is_hr %}
+                    <a class="excel-link" href="{{ url_for('users_admin') }}">Team leaders</a>
+                {% endif %}
+                <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
+            </div>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -87,6 +92,7 @@
                                     <th>Name</th>
                                     <th>Fingerprint</th>
                                     <th>Department</th>
+                                    <th>Team</th>
                                     <th>Type</th>
                                     <th>Dates</th>
                                     <th>Time</th>
@@ -110,6 +116,7 @@
                                         <td class="card-name" data-label="Name">{{ row.get('Name', '') }}</td>
                                         <td data-label="Fingerprint">{{ row.get('Fingerprint Number', '') }}</td>
                                         <td data-label="Department">{{ row.get('Department', '') }}</td>
+                                        <td data-label="Team">{{ row.get('Team', '') }}</td>
                                         <td data-label="Type">{{ row.get('Request Type', '') }}</td>
                                         <td data-label="Dates">{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</td>
                                         <td data-label="Time">{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') or '-' }}</td>

@@ -30,13 +30,8 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <section class="field">
                 <label for="username">Username</label>
-                <select id="username" name="username" required>
-                    <option value="web">Web Manager</option>
-                    <option value="social">Social Manager</option>
-                    <option value="accounting">Accounting Manager</option>
-                    <option value="sales">Sales Manager</option>
-                    <option value="hr">HR Manager</option>
-                </select>
+                <input id="username" name="username" type="text" required autocomplete="username"
+                       placeholder="Enter username">
             </section>
             <section class="field">
                 <label for="password">Password</label>

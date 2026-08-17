@@ -890,3 +890,25 @@ th {
     font-size: 13px;
     line-height: 1.45;
 }
+
+.section-title {
+    margin: 0 0 16px;
+    font-size: 18px;
+}
+
+.users-shell {
+    margin-top: 18px;
+}
+
+.inline-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.inline-form input {
+    min-width: 0;
+    flex: 1;
+    margin: 0;
+}

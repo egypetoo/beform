@@ -15,6 +15,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 import requests
 
+import user_store
+
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 GOOGLE_SHEET_WEBHOOK = os.getenv("GOOGLE_SHEET_WEBHOOK", "").strip()
@@ -150,6 +152,8 @@ DEPARTMENTS = [
     {"value": "hr", "label": "HR"},
 ]
 DEPARTMENT_VALUES = {item["value"] for item in DEPARTMENTS}
+DEPARTMENT_LABELS = {item["value"]: item["label"] for item in DEPARTMENTS}
+DEPARTMENT_LABEL_SET = {item["label"] for item in DEPARTMENTS}
 
 
 def get_managers():
@@ -158,26 +162,36 @@ def get_managers():
         "web": {
             "name": "Web Manager",
             "department": "Web",
+            "role": "department",
+            "team": "",
             "password": os.getenv("MANAGER_WEB_PASSWORD", ""),
         },
         "social": {
             "name": "Social Manager",
             "department": "Social",
+            "role": "department",
+            "team": "",
             "password": os.getenv("MANAGER_SOCIAL_PASSWORD", ""),
         },
         "accounting": {
             "name": "Accounting Manager",
             "department": "Accounting",
+            "role": "department",
+            "team": "",
             "password": os.getenv("MANAGER_ACCOUNTING_PASSWORD", ""),
         },
         "sales": {
             "name": "Sales Manager",
             "department": "Sales",
+            "role": "department",
+            "team": "",
             "password": os.getenv("MANAGER_SALES_PASSWORD", ""),
         },
         "hr": {
             "name": "HR Manager",
             "department": "ALL",
+            "role": "hr",
+            "team": "",
             "password": os.getenv("MANAGER_HR_PASSWORD", ""),
         },
     }
@@ -264,9 +278,50 @@ def dashboard_redirect_args(form=None) -> dict:
 
 
 def can_review_department(manager: dict, department: str) -> bool:
-    if manager.get("department") == "ALL":
+    if is_hr(manager):
         return True
     return department == manager.get("department")
+
+
+def is_hr(manager: dict) -> bool:
+    return manager.get("role") == "hr" or manager.get("department") == "ALL"
+
+
+def manager_role(manager: dict) -> str:
+    if manager.get("role"):
+        return manager["role"]
+    return "hr" if manager.get("department") == "ALL" else "department"
+
+
+def can_review_row(manager: dict, row: dict) -> bool:
+    department = str(row.get("Department") or "").strip()
+    if not can_review_department(manager, department):
+        return False
+    if manager_role(manager) != "team":
+        return True
+    return str(row.get("Team") or "").strip().lower() == str(manager.get("team") or "").strip().lower()
+
+
+def filter_visible_rows(manager: dict, rows: list) -> list:
+    return [row for row in rows if can_review_row(manager, row)]
+
+
+def teams_for_form() -> dict:
+    by_label = user_store.teams_by_department()
+    return {
+        item["value"]: by_label.get(item["label"], [])
+        for item in DEPARTMENTS
+    }
+
+
+def index_context(form) -> dict:
+    return {
+        "leave_groups": LEAVE_GROUPS,
+        "departments": DEPARTMENTS,
+        "teams_by_department": teams_for_form(),
+        "form": form,
+        **today_values(),
+    }
 
 
 def track_is_limited(ip: str) -> bool:
@@ -282,7 +337,11 @@ def track_is_limited(ip: str) -> bool:
 
 @app.context_processor
 def inject_security():
-    return {"csrf_token": get_csrf_token()}
+    manager = session.get("manager")
+    return {
+        "csrf_token": get_csrf_token(),
+        "is_hr": bool(manager and is_hr(manager)),
+    }
 
 
 def sheet_api(payload: dict) -> dict:
@@ -428,6 +487,20 @@ def login_required(view):
     return wrapped
 
 
+def hr_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        manager = session.get("manager")
+        if not manager:
+            return redirect(url_for("login"))
+        if not is_hr(manager):
+            flash("Only HR can manage team leaders.", "error")
+            return redirect(url_for("dashboard"))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
 @app.route("/manifest.webmanifest")
 def pwa_manifest():
     response = send_from_directory(BASE_DIR / "static", "manifest.webmanifest")
@@ -451,17 +524,12 @@ def index():
     if request.method == "POST":
         if not csrf_is_valid():
             flash("The form expired. Please refresh and try again.", "error")
-            return render_template(
-                "index.html",
-                leave_groups=LEAVE_GROUPS,
-                departments=DEPARTMENTS,
-                form=request.form,
-                **today_values(),
-            )
+            return render_template("index.html", **index_context(request.form))
 
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
         name = request.form.get("name", "").strip()
         department = request.form.get("department", "").strip()
+        team = request.form.get("team", "").strip()
         request_type = request.form.get("request_type", "").strip()
         request_date = request.form.get("request_date", "").strip() or datetime.now().strftime("%Y-%m-%d")
         punch_in_time = request.form.get("punch_in_time", "").strip()
@@ -483,6 +551,12 @@ def index():
             errors.append("Department is required")
         elif department not in DEPARTMENT_VALUES:
             errors.append("Please select a valid department")
+        else:
+            allowed_teams = [item["value"] for item in teams_for_form().get(department, [])]
+            if allowed_teams and team not in allowed_teams:
+                errors.append("Please select your team leader")
+            if not allowed_teams:
+                team = ""
         if request_type not in options:
             errors.append("Request type is required")
         if request_type == "missing_punch_in" and not punch_in_time:
@@ -522,13 +596,7 @@ def index():
         if errors:
             for error in errors:
                 flash(error, "error")
-            return render_template(
-                "index.html",
-                leave_groups=LEAVE_GROUPS,
-                departments=DEPARTMENTS,
-                form=request.form,
-                **today_values(),
-            )
+            return render_template("index.html", **index_context(request.form))
 
         selected = options[request_type]
         department_label = next(item["label"] for item in DEPARTMENTS if item["value"] == department)
@@ -548,72 +616,37 @@ def index():
             "end_date": start_date if request_type in SATURDAY_TYPES else end_date,
             "notes": notes,
             "status": "Pending",
+            "team": team,
         }
         if not claim_submission(submission_fingerprint(row)):
             flash("This request was already submitted.", "error")
-            return render_template(
-                "index.html",
-                leave_groups=LEAVE_GROUPS,
-                departments=DEPARTMENTS,
-                form=request.form,
-                **today_values(),
-            )
+            return render_template("index.html", **index_context(request.form))
 
         try:
             result = save_submission(row)
         except Exception as exc:
             (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
             flash("Could not save the request to the HR sheet. Please try again.", "error")
-            return render_template(
-                "index.html",
-                leave_groups=LEAVE_GROUPS,
-                departments=DEPARTMENTS,
-                form=request.form,
-                **today_values(),
-            )
+            return render_template("index.html", **index_context(request.form))
 
         if result.get("saturday_month"):
             flash("Only one working Saturday is allowed per month (25th to 24th). You already submitted one.", "error")
-            return render_template(
-                "index.html",
-                leave_groups=LEAVE_GROUPS,
-                departments=DEPARTMENTS,
-                form=request.form,
-                **today_values(),
-            )
+            return render_template("index.html", **index_context(request.form))
 
         if result.get("duplicate"):
             flash("This request was already submitted.", "error")
-            return render_template(
-                "index.html",
-                leave_groups=LEAVE_GROUPS,
-                departments=DEPARTMENTS,
-                form=request.form,
-                **today_values(),
-            )
+            return render_template("index.html", **index_context(request.form))
 
         if result.get("conflict"):
             if result.get("conflict_type") == "saturday":
                 flash("This Saturday overlaps another leave request.", "error")
             else:
                 flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
-            return render_template(
-                "index.html",
-                leave_groups=LEAVE_GROUPS,
-                departments=DEPARTMENTS,
-                form=request.form,
-                **today_values(),
-            )
+            return render_template("index.html", **index_context(request.form))
 
         return redirect(url_for("success"))
 
-    return render_template(
-        "index.html",
-        leave_groups=LEAVE_GROUPS,
-        departments=DEPARTMENTS,
-        form={},
-        **today_values(),
-    )
+    return render_template("index.html", **index_context({}))
 
 
 @app.route("/success")
@@ -716,7 +749,16 @@ def login():
         username = request.form.get("username", "").strip().lower()
         password = request.form.get("password", "")
         manager = get_managers().get(username)
-        if not manager or not password_matches(manager["password"], password):
+        if manager:
+            if not password_matches(manager.get("password", ""), password):
+                manager = None
+        else:
+            stored = user_store.find_user(username)
+            if stored and password_matches(stored.get("password_hash", ""), password):
+                manager = stored
+            else:
+                manager = None
+        if not manager:
             record_login_failure(ip)
             flash("Invalid username or password.", "error")
             return render_template("login.html")
@@ -729,6 +771,8 @@ def login():
             "username": username,
             "name": manager["name"],
             "department": manager["department"],
+            "role": manager.get("role") or ("hr" if manager["department"] == "ALL" else "department"),
+            "team": manager.get("team") or "",
         }
         return redirect(url_for("dashboard"))
 
@@ -756,6 +800,7 @@ def dashboard():
         date_to = ""
     try:
         rows = list_requests(manager["department"])
+        rows = filter_visible_rows(manager, rows)
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
         rows = []
@@ -781,6 +826,7 @@ def dashboard():
                 str(row.get("Name") or ""),
                 str(row.get("Fingerprint Number") or ""),
                 str(row.get("Department") or ""),
+                str(row.get("Team") or ""),
                 str(row.get("Request Type") or ""),
                 str(row.get("Notes") or ""),
                 str(row.get("Rejection Reason") or ""),
@@ -840,30 +886,30 @@ def update_status():
         reason = ""
 
     try:
-        visible = list_requests(manager["department"])
+        visible = filter_visible_rows(manager, list_requests(manager["department"]))
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
         flash("Could not verify the selected requests.", "error")
         return redirect(url_for("dashboard", **dashboard_redirect_args()))
 
     visible_by_id = {
-        str(row.get("Request ID") or "").strip(): str(row.get("Department") or "").strip()
+        str(row.get("Request ID") or "").strip(): row
         for row in visible
         if row.get("Request ID")
     }
     authorized = []
     for item in items:
         request_id_value = item["request_id"]
-        actual_department = visible_by_id.get(request_id_value)
-        if not actual_department or not can_review_department(manager, actual_department):
+        row = visible_by_id.get(request_id_value)
+        if not row or not can_review_row(manager, row):
             continue
         authorized.append({
             "request_id": request_id_value,
-            "department": actual_department,
+            "department": str(row.get("Department") or "").strip(),
         })
 
     if not authorized:
-        flash("You can only review requests from your department.", "error")
+        flash("You can only review requests assigned to you.", "error")
         return redirect(url_for("dashboard", **dashboard_redirect_args()))
 
     try:
@@ -874,6 +920,84 @@ def update_status():
         flash("Could not update the request status.", "error")
 
     return redirect(url_for("dashboard", **dashboard_redirect_args()))
+
+
+@app.route("/users", methods=["GET", "POST"])
+@hr_required
+def users_admin():
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return redirect(url_for("users_admin"))
+
+        username = request.form.get("username", "")
+        name = request.form.get("name", "")
+        department_value = request.form.get("department", "").strip()
+        team = request.form.get("team", "")
+        password = request.form.get("password", "")
+        department_label = DEPARTMENT_LABELS.get(department_value, "")
+        errors = user_store.validate_new_user(
+            username,
+            name,
+            department_label,
+            team,
+            password,
+            DEPARTMENT_LABEL_SET,
+        )
+        if errors:
+            for error in errors:
+                flash(error, "error")
+        else:
+            try:
+                user_store.create_user(username, name, department_label, team, password)
+                flash("Team leader added.", "success")
+            except ValueError as exc:
+                flash(str(exc), "error")
+        return redirect(url_for("users_admin"))
+
+    return render_template(
+        "users.html",
+        manager=session["manager"],
+        users=user_store.list_users(),
+        departments=DEPARTMENTS,
+    )
+
+
+@app.route("/users/password", methods=["POST"])
+@hr_required
+def users_password():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    try:
+        user_id = int(request.form.get("user_id", "0"))
+    except ValueError:
+        user_id = 0
+    password = request.form.get("password", "")
+    if len(password) < 8:
+        flash("Password must be at least 8 characters.", "error")
+    elif user_store.set_password(user_id, password):
+        flash("Password updated.", "success")
+    else:
+        flash("Could not update that password.", "error")
+    return redirect(url_for("users_admin"))
+
+
+@app.route("/users/toggle", methods=["POST"])
+@hr_required
+def users_toggle():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    try:
+        user_id = int(request.form.get("user_id", "0"))
+    except ValueError:
+        user_id = 0
+    if user_store.toggle_user(user_id):
+        flash("Account status updated.", "success")
+    else:
+        flash("Could not update that account.", "error")
+    return redirect(url_for("users_admin"))
 
 
 if __name__ == "__main__":

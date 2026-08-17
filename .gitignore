@@ -6,3 +6,5 @@ data/*.xlsx
 .env
 sheet_error.log
 passenger_error.log
+users.db
+users.db-*
