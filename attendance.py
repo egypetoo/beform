@@ -47,9 +47,23 @@ COVERING_TYPES = {
     "annual vacation",
     "sickness vacation",
 }
+SATURDAY_WORK_TYPE = "monthly saturday work"
 WINDOW_START = "09:00"
-WINDOW_END = "10:00"
-REQUIRED_MINUTES = 510  # 8 hours 30 minutes
+WINDOW_END = "10:15"
+REQUIRED_MINUTES = 510
+DEDUCTION_FULL = "يوم"
+DEDUCTION_HALF = "نصف يوم"
+NOTE_AR = {
+    "work remotely": "عمل عن بعد",
+    "business mission": "مأمورية",
+    "sick leave": "إجازة مرضية",
+    "personal excuse": "عذر شخصي",
+    "unpaid leave": "إجازة بدون راتب",
+    "missing punch in": "نسيان بصمة",
+    "missing punch out": "نسيان بصمة",
+    "annual vacation": "اعتيادي",
+    "sickness vacation": "إجازة مرضية",
+}
 
 
 def minutes_of(value: str) -> int | None:
@@ -272,11 +286,94 @@ def covering_types(index: dict, device: str, fingerprint: str, day: str) -> list
     return found
 
 
+def saturday_work_index(requests: list) -> dict:
+    index = defaultdict(list)
+    for row in requests:
+        status = str(row.get("Status") or "Pending").strip().lower()
+        if status == "rejected":
+            continue
+        request_type = str(row.get("Request Type") or "").strip().lower()
+        if request_type != SATURDAY_WORK_TYPE:
+            continue
+        fingerprint = user_store.normalize_fingerprint_id(row.get("Fingerprint Number"))
+        if not fingerprint:
+            continue
+        device = user_store.normalize_device(row.get("Device") or "")
+        for day in date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+            index[(device, fingerprint, day)].append(request_type)
+            if not device:
+                index[("", fingerprint, day)].append(request_type)
+    return index
+
+
+def weekday_index(day: str) -> int | None:
+    try:
+        return datetime.strptime(day, "%Y-%m-%d").weekday()
+    except ValueError:
+        return None
+
+
+def is_friday(day: str) -> bool:
+    return weekday_index(day) == 4
+
+
+def is_saturday(day: str) -> bool:
+    return weekday_index(day) == 5
+
+
+def work_calendar(start: str, end: str) -> list:
+    return [day for day in date_range(start, end) if not is_friday(day)]
+
+
 def weekday_label(day: str) -> str:
     try:
         return datetime.strptime(day, "%Y-%m-%d").strftime("%a %d %b")
     except ValueError:
         return day
+
+
+def weekday_ddd(day: str) -> str:
+    try:
+        return datetime.strptime(day, "%Y-%m-%d").strftime("%a")
+    except ValueError:
+        return ""
+
+
+def sheet_date(day: str) -> str:
+    try:
+        value = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return day
+    return f"{value.month}/{value.day}/{value.year}"
+
+
+def notes_ar(types: list) -> str:
+    labels = []
+    seen = set()
+    for item in types or []:
+        label = NOTE_AR.get(str(item).strip().lower(), str(item).strip())
+        if label and label not in seen:
+            seen.add(label)
+            labels.append(label)
+    return " - ".join(labels)
+
+
+def classify_day(punch: dict, types: list, saturday_work: bool = False) -> tuple[str, str]:
+    notes = notes_ar(types)
+    day = punch.get("date") or ""
+    clock_in = punch.get("clock_in") or ""
+    if is_friday(day):
+        return notes, ""
+    if is_saturday(day) and not saturday_work and not clock_in:
+        return notes, ""
+    if types:
+        return notes, ""
+    if not clock_in:
+        return "", DEDUCTION_FULL
+    shift = evaluate_shift(clock_in, punch.get("clock_out") or "")
+    if shift["late_minutes"]:
+        return "", DEDUCTION_HALF
+    return "", ""
 
 
 def build_report(punches: list, requests: list, employees: list) -> dict:
@@ -292,7 +389,13 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         if item.get("active", True)
     }
     covered = coverage_index(requests)
+    saturday_work = saturday_work_index(requests)
+    punch_dates = [punch["date"] for punch in punches if punch.get("date")]
+    from_date = min(punch_dates) if punch_dates else ""
+    to_date = max(punch_dates) if punch_dates else ""
+    calendar = work_calendar(from_date, to_date)
     people = []
+    all_export = []
     missing_total = 0
     late_total = 0
     short_total = 0
@@ -303,61 +406,84 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
     for key, days in sorted(
         by_person.items(),
         key=lambda item: (
-            item[0][0],
+            int(item[0][1]) if str(item[0][1]).isdigit() else 10**9,
             (item[1][0].get("name") or "").lower(),
-            item[0][1],
+            item[0][0],
         ),
     ):
         device, fingerprint = key
         employee = employees_by_key.get(key)
         sample = days[0]
+        punches_by_day = {}
+        for punch in days:
+            punches_by_day[punch["date"]] = punch
         missing = []
         late = []
         short = []
         covered_days = []
+        export_rows = []
         late_minutes = 0
         short_minutes = 0
-        for punch in sorted(days, key=lambda item: item["date"]):
-            types = covering_types(covered, device, fingerprint, punch["date"])
-            has_punch = bool(punch["clock_in"] or punch["clock_out"]) and not punch["absent"]
-            if punch["absent"] or not has_punch:
-                if types:
-                    covered_days.append({
-                        "date": punch["date"],
-                        "label": weekday_label(punch["date"]),
-                        "types": types,
-                    })
-                    covered_total += 1
-                else:
-                    missing.append({
-                        "date": punch["date"],
-                        "label": weekday_label(punch["date"]),
-                    })
-                    missing_total += 1
-                continue
-            shift = evaluate_shift(punch["clock_in"], punch["clock_out"])
-            if shift["late_minutes"]:
+        full_days = 0
+        half_days = 0
+        name = (employee or {}).get("name") or sample.get("name") or fingerprint
+        department = (employee or {}).get("department") or ""
+        for day in calendar:
+            punch = punches_by_day.get(day) or {
+                "fingerprint": fingerprint,
+                "name": name,
+                "date": day,
+                "device": device,
+                "clock_in": "",
+                "clock_out": "",
+                "absent": True,
+            }
+            types = covering_types(covered, device, fingerprint, day)
+            worked_saturday = bool(covering_types(saturday_work, device, fingerprint, day))
+            notes, deduction = classify_day(punch, types, worked_saturday)
+            export_rows.append({
+                "fingerprint": fingerprint,
+                "name": name,
+                "department": department,
+                "device": device,
+                "date": day,
+                "sheet_date": sheet_date(day),
+                "weekday": weekday_ddd(day),
+                "clock_in": punch.get("clock_in") or "",
+                "clock_out": punch.get("clock_out") or "",
+                "notes": notes,
+                "deduction": deduction,
+            })
+            if types:
+                covered_days.append({
+                    "date": day,
+                    "label": weekday_label(day),
+                    "types": types,
+                })
+                covered_total += 1
+            if deduction == DEDUCTION_FULL:
+                missing.append({
+                    "date": day,
+                    "label": weekday_label(day),
+                    "deduction": DEDUCTION_FULL,
+                })
+                missing_total += 1
+                full_days += 1
+            elif deduction == DEDUCTION_HALF:
+                shift = evaluate_shift(punch.get("clock_in") or "", punch.get("clock_out") or "")
                 late.append({
-                    "date": punch["date"],
-                    "label": weekday_label(punch["date"]),
-                    "clock_in": punch["clock_in"],
-                    "clock_out": punch["clock_out"],
+                    "date": day,
+                    "label": weekday_label(day),
+                    "clock_in": punch.get("clock_in") or "",
+                    "clock_out": punch.get("clock_out") or "",
+                    "deduction": DEDUCTION_HALF,
                     **shift,
                 })
                 late_total += 1
                 late_minutes += shift["late_minutes"]
                 late_minutes_total += shift["late_minutes"]
-            if shift["short_minutes"]:
-                short.append({
-                    "date": punch["date"],
-                    "label": weekday_label(punch["date"]),
-                    "clock_in": punch["clock_in"],
-                    "clock_out": punch["clock_out"],
-                    **shift,
-                })
-                short_total += 1
-                short_minutes += shift["short_minutes"]
-                short_minutes_total += shift["short_minutes"]
+                half_days += 1
+        all_export.extend(export_rows)
         if not missing and not late and not short and not covered_days:
             continue
         people.append({
@@ -376,10 +502,12 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
             "short_hours": decimal_hours(short_minutes),
             "late_text": format_hours(late_minutes),
             "short_text": format_hours(short_minutes),
+            "full_days": full_days,
+            "half_days": half_days,
+            "deduction_total": full_days + half_days * 0.5,
         })
 
     people.sort(key=lambda item: (item["department"], item["name"].lower(), item["device"]))
-    dates = [punch["date"] for punch in punches if punch.get("date")]
     return {
         "people": people,
         "missing_total": missing_total,
@@ -393,125 +521,83 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
         "late_text_total": format_hours(late_minutes_total),
         "short_text_total": format_hours(short_minutes_total),
         "punch_rows": len(punches),
-        "from_date": min(dates) if dates else "",
-        "to_date": max(dates) if dates else "",
+        "from_date": from_date,
+        "to_date": to_date,
+        "export_rows": all_export,
+        "full_days_total": sum(person.get("full_days") or 0 for person in people),
+        "half_days_total": sum(person.get("half_days") or 0 for person in people),
     }
 
 
 def report_sheets(report: dict) -> list:
-    people_rows = []
-    day_rows = []
-    for person in report.get("people") or []:
-        registered = "Yes" if person.get("registered") else "No"
-        missing_dates = ", ".join(item["date"] for item in person.get("missing") or [])
-        covered_dates = ", ".join(item["date"] for item in person.get("covered") or [])
-        people_rows.append([
-            person.get("name") or "",
-            person.get("department") or "",
-            person.get("device") or "",
-            person.get("fingerprint") or "",
-            registered,
-            len(person.get("missing") or []),
-            len(person.get("covered") or []),
-            len(person.get("late") or []),
-            person.get("late_hours") or "0.00",
-            person.get("late_text") or "0:00",
-            len(person.get("short") or []),
-            person.get("short_hours") or "0.00",
-            person.get("short_text") or "0:00",
-            missing_dates,
-            covered_dates,
+    daily_rows = []
+    for item in report.get("export_rows") or []:
+        daily_rows.append([
+            item.get("fingerprint") or "",
+            item.get("name") or "",
+            item.get("sheet_date") or "",
+            item.get("weekday") or "",
+            item.get("clock_in") or "",
+            item.get("clock_out") or "",
+            "",
+            item.get("notes") or "",
+            item.get("deduction") or "",
         ])
-        base = [
-            person.get("name") or "",
-            person.get("department") or "",
-            person.get("device") or "",
-            person.get("fingerprint") or "",
-            registered,
-        ]
-        for item in person.get("missing") or []:
-            day_rows.append([*base, "No punch & no form", item["date"], item.get("label") or "", "", "", "", "", "", "", "", ""])
-        for item in person.get("covered") or []:
-            day_rows.append([
-                *base,
-                "Covered by form",
-                item["date"],
-                item.get("label") or "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                ", ".join(item.get("types") or []),
-            ])
-        shift_days = {}
-        for item in person.get("late") or []:
-            shift_days[item["date"]] = item
-        for item in person.get("short") or []:
-            shift_days[item["date"]] = item
-        for day, item in sorted(shift_days.items()):
-            late_min = item.get("late_minutes") or 0
-            short_min = item.get("short_minutes") or 0
-            if late_min and short_min:
-                status = "Late + short day"
-            elif late_min:
-                status = "Late"
-            else:
-                status = "Short day"
-            day_rows.append([
-                *base,
-                status,
-                item["date"],
-                item.get("label") or "",
-                item.get("clock_in") or "",
-                item.get("clock_out") or "",
-                item.get("worked_hours") or "",
-                item.get("late_hours") or "0.00",
-                item.get("late") or "0:00",
-                item.get("short_hours") or "0.00",
-                item.get("short") or "0:00",
-                "",
-            ])
+    totals = {}
+    for item in report.get("export_rows") or []:
+        key = (item.get("device") or "", item.get("fingerprint") or "", item.get("name") or "")
+        totals.setdefault(key, {
+            "name": item.get("name") or "",
+            "fingerprint": item.get("fingerprint") or "",
+            "device": item.get("device") or "",
+            "department": item.get("department") or "",
+            "full": 0,
+            "half": 0,
+        })
+        if item.get("deduction") == DEDUCTION_FULL:
+            totals[key]["full"] += 1
+        elif item.get("deduction") == DEDUCTION_HALF:
+            totals[key]["half"] += 1
+    summary_rows = []
+    for item in sorted(totals.values(), key=lambda row: (row["department"], row["name"].lower(), row["device"])):
+        if not item["full"] and not item["half"]:
+            continue
+        summary_rows.append([
+            item["name"],
+            item["fingerprint"],
+            item["device"],
+            item["department"],
+            item["full"],
+            item["half"],
+            item["full"] + item["half"] * 0.5,
+        ])
     return [
         {
-            "name": "Summary",
-            "headers": ["Metric", "Value"],
-            "rows": [
-                ["From", report.get("from_date") or ""],
-                ["To", report.get("to_date") or ""],
-                ["Morning window", f"{WINDOW_START} to {WINDOW_END}"],
-                ["Required work hours", "8.50"],
-                ["Machine rows", report.get("punch_rows") or 0],
-                ["No punch & no form", report.get("missing_total") or 0],
-                ["Covered by form", report.get("covered_total") or 0],
-                ["Late days", report.get("late_total") or 0],
-                ["Late hours", report.get("late_hours_total") or "0.00"],
-                ["Late hours (h:mm)", report.get("late_text_total") or "0:00"],
-                ["Short days", report.get("short_total") or 0],
-                ["Short hours", report.get("short_hours_total") or "0.00"],
-                ["People in report", len(report.get("people") or [])],
+            "name": "ادخال مواعيد الحضور والانصراف",
+            "headers": [
+                "رقم البصمه",
+                "الاسم",
+                "التاريخ",
+                "",
+                "بصمة الحضور الفعلي",
+                "بصمة الانصراف الفعلي",
+                "",
+                "الملاحظات",
+                "الخصومات",
             ],
+            "rows": daily_rows,
         },
         {
-            "name": "People",
+            "name": "إجمالي الخصومات",
             "headers": [
-                "Name", "Department", "Device", "Fingerprint", "In employee list",
-                "Missing days", "Covered days", "Late days", "Late hours", "Late (h:mm)",
-                "Short days", "Short hours", "Short (h:mm)",
-                "Missing dates", "Covered dates",
+                "الاسم",
+                "رقم البصمه",
+                "الجهاز",
+                "القسم",
+                "خصم يوم",
+                "خصم نصف يوم",
+                "إجمالي الخصم",
             ],
-            "rows": people_rows,
-        },
-        {
-            "name": "Days",
-            "headers": [
-                "Name", "Department", "Device", "Fingerprint", "In employee list",
-                "Status", "Date", "Weekday", "Clock In", "Clock Out",
-                "Worked hours", "Late hours", "Late (h:mm)", "Short hours", "Short (h:mm)",
-                "Form types",
-            ],
-            "rows": day_rows,
+            "rows": summary_rows,
         },
     ]

@@ -1583,11 +1583,16 @@ def attendance_report():
             flash("Could not load form requests from the HR sheet.", "error")
             requests_rows = []
         report = attendance.build_report(punches, requests_rows, user_store.list_employees())
+        export_rows = report.get("export_rows") or []
         if request.form.get("department"):
             department = request.form.get("department", "").strip().lower()
             report["people"] = [
                 person for person in report["people"]
                 if person["department"].strip().lower() == department
+            ]
+            export_rows = [
+                row for row in export_rows
+                if (row.get("department") or "").strip().lower() == department
             ]
         if request.form.get("q", "").strip():
             needle = request.form.get("q", "").strip().lower()
@@ -1595,10 +1600,17 @@ def attendance_report():
                 person for person in report["people"]
                 if needle in person["name"].lower() or needle in person["fingerprint"]
             ]
+            export_rows = [
+                row for row in export_rows
+                if needle in (row.get("name") or "").lower() or needle in (row.get("fingerprint") or "")
+            ]
+        report["export_rows"] = export_rows
         report["missing_total"] = sum(len(person["missing"]) for person in report["people"])
         report["late_total"] = sum(len(person.get("late") or []) for person in report["people"])
         report["short_total"] = sum(len(person.get("short") or []) for person in report["people"])
         report["covered_total"] = sum(len(person["covered"]) for person in report["people"])
+        report["full_days_total"] = sum(1 for row in export_rows if row.get("deduction") == attendance.DEDUCTION_FULL)
+        report["half_days_total"] = sum(1 for row in export_rows if row.get("deduction") == attendance.DEDUCTION_HALF)
         late_minutes = sum(person.get("late_minutes") or 0 for person in report["people"])
         short_minutes = sum(person.get("short_minutes") or 0 for person in report["people"])
         report["late_minutes_total"] = late_minutes
@@ -1643,7 +1655,7 @@ def attendance_export():
     return Response(
         payload["bytes"],
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=attendance-gaps.xlsx"},
+        headers={"Content-Disposition": "attachment; filename=attendance-calculated.xlsx"},
     )
 
 
