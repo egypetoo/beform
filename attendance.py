@@ -316,7 +316,11 @@ def late_excuse_index(requests: list) -> dict:
     return type_index(requests, LATE_EXCUSE_TYPE)
 
 
-def weekday_index(day: str) -> int | None:
+def fingerprint_sort_key(value) -> tuple:
+    text = str(value or "").strip()
+    if text.isdigit():
+        return (0, int(text))
+    return (1, text.lower())
     try:
         return datetime.strptime(day, "%Y-%m-%d").weekday()
     except ValueError:
@@ -556,7 +560,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
             "allowance_left_text": format_hours(remaining),
         })
 
-    people.sort(key=lambda item: (item["department"], item["name"].lower(), item["device"]))
+    people.sort(key=lambda item: (fingerprint_sort_key(item["fingerprint"]), item["device"]))
     return {
         "people": people,
         "missing_total": missing_total,
@@ -612,7 +616,7 @@ def report_sheets(report: dict) -> list:
         elif item.get("deduction") == DEDUCTION_HALF:
             totals[key]["half"] += 1
     summary_rows = []
-    for item in sorted(totals.values(), key=lambda row: (row["department"], row["name"].lower(), row["device"])):
+    for item in sorted(totals.values(), key=lambda row: (fingerprint_sort_key(row["fingerprint"]), row["device"])):
         if not item["full"] and not item["half"] and not item["used"]:
             continue
         summary_rows.append([
