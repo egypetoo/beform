@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=11">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=12">
 </head>
 <body>
     <div class="glow"></div>
@@ -17,7 +17,7 @@
             <img class="logo" src="{{ url_for('static', filename='logo.webp') }}" alt="BE GROUP">
             <p class="eyebrow">Request Status</p>
             <h1>Track your request</h1>
-            <p class="subtitle">Enter your fingerprint number. The work month runs from the 25th to the 24th.</p>
+            <p class="subtitle">Enter your fingerprint number to see your latest 30 requests.</p>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -50,15 +50,7 @@
                     </div>
                     <input type="hidden" name="status" value="{{ status_filter }}">
                     <div class="filter-bar track-filter-bar">
-                        <label class="filter-date">
-                            <span>Month</span>
-                            <select name="month">
-                                {% for cycle in cycles %}
-                                    <option value="{{ cycle.value }}" {% if month_filter == cycle.value %}selected{% endif %}>{{ cycle.label }}</option>
-                                {% endfor %}
-                            </select>
-                        </label>
-                        <label class="filter-date">
+                        <label class="filter-date filter-span">
                             <span>Type</span>
                             <select name="type">
                                 <option value="">All types</option>
@@ -117,7 +109,7 @@
                 {% endfor %}
             </section>
         {% elif rows is not none %}
-            <p class="empty-state">No requests match this filter for the selected month.</p>
+            <p class="empty-state">No requests match this filter.</p>
         {% endif %}
     </main>
     <script>

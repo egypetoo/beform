@@ -556,7 +556,7 @@ button.filter-chip.active {
 }
 
 .track-filter-bar {
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 120px;
+    grid-template-columns: minmax(0, 1fr) 120px;
     margin-top: 12px;
     align-items: end;
 }

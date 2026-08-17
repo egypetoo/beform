@@ -387,20 +387,24 @@ def normalize_fingerprint(value) -> str:
     return text
 
 
+TRACK_LIMIT = 30
+
+
+def row_submitted_key(row: dict) -> str:
+    return str(row.get("Submitted At") or row.get("From Date") or "")
+
+
 def lookup_by_fingerprint(fingerprint: str) -> list:
     now = time.time()
     cached = TRACK_CACHE.get(fingerprint)
     if cached and now - cached["at"] < TRACK_CACHE_SECONDS:
         return list(cached["rows"])
 
-    cycles = payroll_cycles()
-    cutoff = cycles[-1]["start"]
-    rows = []
     try:
         data = sheet_api({
             "action": "lookup",
             "fingerprint_id": fingerprint,
-            "from_date": cutoff,
+            "limit": TRACK_LIMIT,
         })
         source_rows = data.get("rows", [])
     except Exception:
@@ -408,13 +412,12 @@ def lookup_by_fingerprint(fingerprint: str) -> list:
         source_rows = data.get("rows", [])
 
     wanted = normalize_fingerprint(fingerprint)
-    for row in source_rows:
-        if normalize_fingerprint(row.get("Fingerprint Number")) != wanted:
-            continue
-        submitted = row_date(row)
-        if submitted and submitted < cutoff:
-            continue
-        rows.append(row)
+    rows = [
+        row for row in source_rows
+        if normalize_fingerprint(row.get("Fingerprint Number")) == wanted
+    ]
+    rows.sort(key=row_submitted_key, reverse=True)
+    rows = rows[:TRACK_LIMIT]
     TRACK_CACHE[fingerprint] = {"at": now, "rows": rows}
     return list(rows)
 
@@ -613,9 +616,6 @@ def track():
     status_filter = "All"
     type_filter = ""
     request_types = []
-    cycles = payroll_cycles()
-    month_filter = current_cycle_value()
-    allowed_months = {item["value"] for item in cycles}
 
     if request.method == "POST":
         if not csrf_is_valid():
@@ -627,20 +627,14 @@ def track():
                 status_filter="All",
                 type_filter="",
                 request_types=[],
-                cycles=cycles,
-                month_filter=month_filter,
                 statuses=["Pending", "Approved", "Rejected", "All"],
             )
 
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
         status_filter = request.form.get("status", "All").strip() or "All"
         type_filter = request.form.get("type", "").strip()
-        month_filter = request.form.get("month", month_filter).strip() or month_filter
-        if month_filter not in allowed_months:
-            month_filter = current_cycle_value()
         if status_filter not in {"Pending", "Approved", "Rejected", "All"}:
             status_filter = "All"
-        selected_cycle = next(item for item in cycles if item["value"] == month_filter)
 
         if not fingerprint_id:
             flash("Fingerprint number is required.", "error")
@@ -658,8 +652,6 @@ def track():
                     status_filter=status_filter,
                     type_filter=type_filter,
                     request_types=[],
-                    cycles=cycles,
-                    month_filter=month_filter,
                     statuses=["Pending", "Approved", "Rejected", "All"],
                 )
             try:
@@ -668,16 +660,12 @@ def track():
                     flash("No requests found for this fingerprint.", "error")
                     rows = None
                 else:
-                    month_rows = [
-                        row for row in all_rows
-                        if selected_cycle["start"] <= row_date(row) <= selected_cycle["end"]
-                    ]
                     request_types = sorted({
                         str(row.get("Request Type") or "").strip()
-                        for row in month_rows
+                        for row in all_rows
                         if row.get("Request Type")
                     })
-                    rows = month_rows
+                    rows = all_rows
                     if status_filter != "All":
                         rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
                     if type_filter:
@@ -694,8 +682,6 @@ def track():
         status_filter=status_filter,
         type_filter=type_filter,
         request_types=request_types,
-        cycles=cycles,
-        month_filter=month_filter,
         statuses=["Pending", "Approved", "Rejected", "All"],
     )
 

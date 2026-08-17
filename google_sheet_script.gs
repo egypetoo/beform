@@ -15,7 +15,7 @@ function doPost(e) {
   }
 
   if (action === "lookup") {
-    return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "", data.from_date || "") });
+    return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "", data.limit || 30) });
   }
 
   if (action === "set_status") {
@@ -518,7 +518,7 @@ function normalizeFingerprint(value) {
   return String(value == null ? "" : value).trim().replace(/\.0$/, "");
 }
 
-function lookupByFingerprint(fingerprint, fromDate) {
+function lookupByFingerprint(fingerprint, limit) {
   const fp = normalizeFingerprint(fingerprint);
   if (!fp) {
     return [];
@@ -529,20 +529,10 @@ function lookupByFingerprint(fingerprint, fromDate) {
     return [];
   }
 
-  let cutoff = normalizeDate(fromDate);
-  if (!cutoff) {
-    const cutoffDate = new Date();
-    cutoffDate.setMonth(cutoffDate.getMonth() - 8);
-    cutoff = Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
-  }
-
+  const max = Math.max(1, Math.min(parseInt(limit, 10) || 30, 50));
   return sheetToObjects(sheet).filter(function (row) {
-    if (normalizeFingerprint(row["Fingerprint Number"]) !== fp) {
-      return false;
-    }
-    const submitted = normalizeDate(row["Submitted At"] || row["From Date"] || "");
-    return !submitted || submitted >= cutoff;
-  });
+    return normalizeFingerprint(row["Fingerprint Number"]) === fp;
+  }).slice(0, max);
 }
 
 function updateStatuses(items, status, reviewedBy, reason) {
