@@ -350,6 +350,108 @@ def set_password(user_id: int, password: str) -> bool:
         return updated
 
 
+def ensure_department(label: str) -> str:
+    label = (label or "").strip()
+    value = slug_from_label(label)
+    if not LABEL_RE.match(label) or label.lower() in RESERVED_SHEETS or value in RESERVED_SHEETS:
+        raise ValueError("Invalid department name.")
+    if len(value) < 3:
+        raise ValueError("Department name is too short.")
+    init_db()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with DB_LOCK:
+        conn = db()
+        existing = conn.execute(
+            "SELECT label FROM departments WHERE lower(label) = lower(?) OR value = ?",
+            (label, value),
+        ).fetchone()
+        if existing:
+            canonical = existing["label"]
+            conn.close()
+            return canonical
+        conn.execute(
+            "INSERT INTO departments (value, label, active, created_at) VALUES (?, ?, 1, ?)",
+            (value, label, now),
+        )
+        conn.commit()
+        conn.close()
+    return label
+
+
+def import_people(rows: list) -> tuple[dict, list]:
+    created = {"managers": 0, "teams": 0, "departments": 0}
+    errors = []
+    pending = []
+    seen = set()
+
+    for index, raw in enumerate(rows, start=2):
+        row = {str(key or "").strip().lower(): str(value or "").strip() for key, value in raw.items()}
+        if not any(row.get(key) for key in ("role", "department", "team", "name", "username", "password")):
+            continue
+        role = (row.get("role") or "").lower()
+        if role in {"manager", "dept", "department manager"}:
+            role = "department"
+        if role in {"team_leader", "leader", "team leader"}:
+            role = "team"
+        if role not in {"department", "team"}:
+            errors.append(f"Row {index}: role must be department or team.")
+            continue
+        pending.append({
+            "index": index,
+            "role": role,
+            "department": row.get("department") or "",
+            "team": row.get("team") or "",
+            "name": row.get("name") or "",
+            "username": row.get("username") or "",
+            "password": row.get("password") or "",
+        })
+
+    pending.sort(key=lambda item: 0 if item["role"] == "department" else 1)
+    labels = {item["label"] for item in list_custom_departments(active_only=True)}
+
+    for item in pending:
+        index = item["index"]
+        username = normalize_username(item["username"])
+        if username in seen:
+            errors.append(f"Row {index}: username {username} is duplicated in the file.")
+            continue
+        if item["role"] == "department":
+            issues = validate_new_department(item["department"], item["name"], item["username"], item["password"])
+            if issues:
+                errors.append(f"Row {index}: " + " ".join(issues))
+                continue
+            try:
+                created_dept = create_department(item["department"], item["name"], item["username"], item["password"])
+            except ValueError as exc:
+                errors.append(f"Row {index}: {exc}")
+                continue
+            seen.add(created_dept["username"])
+            labels.add(created_dept["label"])
+            created["managers"] += 1
+            created["departments"] += 1
+            continue
+
+        try:
+            department = ensure_department(item["department"])
+        except ValueError as exc:
+            errors.append(f"Row {index}: {exc}")
+            continue
+        labels.add(department)
+        issues = validate_new_user(item["username"], item["name"], department, item["team"], item["password"], labels)
+        if issues:
+            errors.append(f"Row {index}: " + " ".join(issues))
+            continue
+        try:
+            create_user(item["username"], item["name"], department, item["team"], item["password"])
+        except ValueError as exc:
+            errors.append(f"Row {index}: {exc}")
+            continue
+        seen.add(username)
+        created["teams"] += 1
+
+    return created, errors
+
+
 def toggle_user(user_id: int) -> bool:
     init_db()
     with DB_LOCK:

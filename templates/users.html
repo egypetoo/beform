@@ -30,6 +30,18 @@
             {% endif %}
         {% endwith %}
 
+        <form class="form-shell" method="post" action="{{ url_for('users_import') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h2 class="section-title">Upload sheet</h2>
+            <p class="muted">CSV or Excel with columns: role, department, team, name, username, password. Role is <strong>department</strong> or <strong>team</strong>.</p>
+            <section class="field">
+                <label for="sheet">People file</label>
+                <input id="sheet" name="sheet" type="file" accept=".csv,.xlsx" required>
+            </section>
+            <button type="submit">Import people</button>
+            <a class="excel-link" href="{{ url_for('users_template') }}">Download template CSV</a>
+        </form>
+
         <form class="form-shell" method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Add team leader</h2>

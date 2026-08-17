@@ -2,7 +2,9 @@ from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from threading import Lock
+import csv
 import hmac
+import io
 import json
 import os
 import secrets
@@ -10,7 +12,7 @@ import time
 import uuid
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, Response, flash, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 import requests
@@ -965,6 +967,93 @@ def users_department():
             flash(f"Department {created['label']} added. Manager login: {created['username']}", "success")
         except ValueError as exc:
             flash(str(exc), "error")
+    return redirect(url_for("users_admin"))
+
+
+IMPORT_TEMPLATE = """role,department,team,name,username,password
+department,Web,,Mohamed,web,ChangeMe123
+team,Web,Ahmed team,Ahmed,ahmed,ChangeMe123
+team,Web,Omar team,Omar,omar,ChangeMe123
+department,Marketing,,Sara,marketing,ChangeMe123
+"""
+MAX_IMPORT_BYTES = 200_000
+MAX_IMPORT_ROWS = 200
+
+
+def parse_people_file(upload) -> list:
+    filename = (upload.filename or "").lower()
+    raw = upload.read(MAX_IMPORT_BYTES + 1)
+    if len(raw) > MAX_IMPORT_BYTES:
+        raise ValueError("File is too large. Keep it under 200 KB.")
+    if filename.endswith(".xlsx"):
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:
+            raise ValueError("Excel .xlsx needs openpyxl. Save as CSV UTF-8 instead.") from exc
+        workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        sheet = workbook.active
+        rows_iter = sheet.iter_rows(values_only=True)
+        try:
+            headers = [str(cell or "").strip().lower() for cell in next(rows_iter)]
+        except StopIteration as exc:
+            raise ValueError("The file is empty.") from exc
+        rows = []
+        for values in rows_iter:
+            rows.append({headers[i]: values[i] if i < len(values) else "" for i in range(len(headers))})
+            if len(rows) > MAX_IMPORT_ROWS:
+                raise ValueError("Too many rows. Import up to 200 at a time.")
+        return rows
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Save the file as CSV UTF-8.") from exc
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("The CSV has no header row.")
+    rows = list(reader)
+    if len(rows) > MAX_IMPORT_ROWS:
+        raise ValueError("Too many rows. Import up to 200 at a time.")
+    return rows
+
+
+@app.route("/users/template.csv")
+@hr_required
+def users_template():
+    return Response(
+        IMPORT_TEMPLATE,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=be-people-template.csv"},
+    )
+
+
+@app.route("/users/import", methods=["POST"])
+@hr_required
+def users_import():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    upload = request.files.get("sheet")
+    if not upload or not upload.filename:
+        flash("Choose a CSV or Excel file first.", "error")
+        return redirect(url_for("users_admin"))
+    try:
+        rows = parse_people_file(upload)
+        created, errors = user_store.import_people(rows)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("users_admin"))
+    total = created["managers"] + created["teams"]
+    if total:
+        flash(
+            f"Imported {created['managers']} department manager(s) and {created['teams']} team leader(s).",
+            "success",
+        )
+    elif not errors:
+        flash("No rows found to import.", "error")
+    for message in errors[:12]:
+        flash(message, "error")
+    if len(errors) > 12:
+        flash(f"{len(errors) - 12} more row(s) failed.", "error")
     return redirect(url_for("users_admin"))
 
 
