@@ -15,7 +15,7 @@ function doPost(e) {
   }
 
   if (action === "lookup") {
-    return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "", data.limit || 30) });
+    return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "", data.limit || 30, data.name || "") });
   }
 
   if (action === "set_status") {
@@ -47,6 +47,7 @@ function doPost(e) {
     "Request ID": data.request_id || "",
     "Submitted At": data.submitted_at || "",
     "Fingerprint Number": data.fingerprint_id || "",
+    "Device": data.device || "",
     "Name": data.name || "",
     "Department": data.department || "",
     "Team": data.team || "",
@@ -105,6 +106,7 @@ function checkCreateConflicts(values, data) {
 
   const headers = values[0];
   const fpCol = headers.indexOf("Fingerprint Number");
+  const deviceCol = headers.indexOf("Device");
   const typeCol = headers.indexOf("Request Type");
   const fromCol = headers.indexOf("From Date");
   const toCol = headers.indexOf("To Date");
@@ -118,6 +120,7 @@ function checkCreateConflicts(values, data) {
   }
 
   const fp = normalizeText(data.fingerprint_id);
+  const device = normalizeText(data.device);
   const type = normalizeText(data.request_type);
   const fromDate = normalizeDate(data.start_date);
   const toDate = normalizeDate(data.end_date);
@@ -142,6 +145,9 @@ function checkCreateConflicts(values, data) {
       continue;
     }
     if (normalizeText(row[fpCol]) !== fp) {
+      continue;
+    }
+    if (deviceCol >= 0 && device && normalizeText(row[deviceCol]) && normalizeText(row[deviceCol]) !== device) {
       continue;
     }
 
@@ -275,6 +281,7 @@ function headerList() {
     "Request ID",
     "Submitted At",
     "Fingerprint Number",
+    "Device",
     "Name",
     "Department",
     "Request Type",
@@ -417,7 +424,7 @@ function normalizeFingerprint(value) {
   return String(value == null ? "" : value).trim().replace(/\.0$/, "");
 }
 
-function lookupByFingerprint(fingerprint, limit) {
+function lookupByFingerprint(fingerprint, limit, name) {
   const fp = normalizeFingerprint(fingerprint);
   if (!fp) {
     return [];
@@ -428,9 +435,17 @@ function lookupByFingerprint(fingerprint, limit) {
     return [];
   }
 
+  const wantedName = normalizeText(name || "");
   const max = Math.max(1, Math.min(parseInt(limit, 10) || 30, 50));
   return sheetToObjects(sheet).filter(function (row) {
-    return normalizeFingerprint(row["Fingerprint Number"]) === fp;
+    if (normalizeFingerprint(row["Fingerprint Number"]) !== fp) {
+      return false;
+    }
+    if (!wantedName) {
+      return true;
+    }
+    const rowName = normalizeText(row["Name"]);
+    return rowName === wantedName || (wantedName.length >= 4 && rowName.indexOf(wantedName) !== -1) || (rowName.length >= 4 && wantedName.indexOf(rowName) !== -1);
   }).slice(0, max);
 }
 

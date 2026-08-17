@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BE GROUP | Employees</title>
+    {% include "_pwa_head.html" %}
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page page-wide">
+        <header class="hero dash-hero">
+            {% include "_logo.html" %}
+            <p class="eyebrow">HR Admin</p>
+            <h1>Employees</h1>
+            <p class="subtitle">Register each person with their fingerprint and device (F8 or F9). The form still asks for name and fingerprint only.</p>
+            <div class="form-links">
+                <a class="excel-link" href="{{ url_for('users_admin') }}">Departments & team leaders</a>
+                <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+                <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
+                        <p>{{ message }}</p>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form class="form-shell" method="post" action="{{ url_for('employees_import') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h2 class="section-title">Upload employees</h2>
+            <p class="muted">Excel columns: <strong>name, department, fingerprint, device</strong>. Device is F8 or F9. Re-uploading the same device + fingerprint updates the name and department.</p>
+            <section class="field">
+                <label for="sheet">Employees file</label>
+                <input id="sheet" name="sheet" type="file" accept=".xlsx,.csv" required>
+            </section>
+            <button type="submit">Import employees</button>
+            <a class="excel-link" href="{{ url_for('employees_template') }}">Download template Excel</a>
+        </form>
+
+        <form class="form-shell" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h2 class="section-title">Add employee</h2>
+            <section class="field">
+                <label for="name">Full name</label>
+                <input id="name" name="name" type="text" required maxlength="80" placeholder="Ahmed Essam">
+            </section>
+            <section class="field">
+                <label for="department">Department</label>
+                <select id="department" name="department" required>
+                    <option value="" disabled selected>Select department</option>
+                    {% for dept in departments %}
+                        <option value="{{ dept.value }}">{{ dept.label }}</option>
+                    {% endfor %}
+                </select>
+            </section>
+            <section class="field">
+                <label for="fingerprint">Fingerprint number</label>
+                <input id="fingerprint" name="fingerprint" type="text" required inputmode="numeric"
+                       pattern="[0-9]+" maxlength="10" placeholder="57">
+            </section>
+            <section class="field">
+                <label for="device">Device</label>
+                <select id="device" name="device" required>
+                    <option value="" disabled selected>Select device</option>
+                    {% for device in devices %}
+                        <option value="{{ device }}">{{ device }}</option>
+                    {% endfor %}
+                </select>
+            </section>
+            <button type="submit">Add employee</button>
+        </form>
+
+        <section class="form-shell users-shell">
+            <h2 class="section-title">Registered employees</h2>
+            {% if employees %}
+                <p class="muted">{{ employees|length }} employee{{ 's' if employees|length != 1 else '' }}</p>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Department</th>
+                                <th>Fingerprint</th>
+                                <th>Device</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for employee in employees %}
+                                <tr>
+                                    <td class="card-name" data-label="Name">
+                                        <form id="edit-employee-{{ employee.id }}" method="post" action="{{ url_for('employees_edit') }}">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="employee_id" value="{{ employee.id }}">
+                                        </form>
+                                        <div class="inline-form">
+                                            <input form="edit-employee-{{ employee.id }}" type="text" name="name"
+                                                   value="{{ employee.name }}" required maxlength="80" aria-label="Name">
+                                            <button form="edit-employee-{{ employee.id }}" class="btn-sm btn-approve" type="submit">Save</button>
+                                        </div>
+                                    </td>
+                                    <td data-label="Department">
+                                        <select form="edit-employee-{{ employee.id }}" name="department" required aria-label="Department">
+                                            {% for dept in departments %}
+                                                <option value="{{ dept.value }}" {% if employee.department == dept.label %}selected{% endif %}>{{ dept.label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td data-label="Fingerprint">
+                                        <input form="edit-employee-{{ employee.id }}" class="inline-edit" type="text" name="fingerprint"
+                                               value="{{ employee.fingerprint }}" required inputmode="numeric" maxlength="10" aria-label="Fingerprint">
+                                    </td>
+                                    <td data-label="Device">
+                                        <select form="edit-employee-{{ employee.id }}" name="device" required aria-label="Device">
+                                            {% for device in devices %}
+                                                <option value="{{ device }}" {% if employee.device == device %}selected{% endif %}>{{ device }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td class="card-actions" data-label="Account">
+                                        <form method="post" action="{{ url_for('employees_delete') }}"
+                                              onsubmit="return confirm('Delete this employee?');">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="employee_id" value="{{ employee.id }}">
+                                            <button class="btn-sm btn-reject" type="submit">Delete</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty-state">No employees yet. Upload the Excel sheet or add the first person above.</p>
+            {% endif %}
+        </section>
+    </main>
+    {% include "_pwa_foot.html" %}
+</body>
+</html>

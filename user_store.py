@@ -58,6 +58,20 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                department TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                device TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                UNIQUE(device, fingerprint)
+            )
+            """
+        )
         conn.commit()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for value, label in SEED_DEPARTMENTS:
@@ -313,6 +327,7 @@ def rename_department(dept_id: int, new_label: str) -> str:
             raise ValueError("Another department already uses this name.")
         conn.execute("UPDATE departments SET label = ? WHERE id = ?", (new_label, dept_id))
         conn.execute("UPDATE users SET department = ? WHERE department = ?", (new_label, old_label))
+        conn.execute("UPDATE employees SET department = ? WHERE department = ?", (new_label, old_label))
         conn.commit()
         conn.close()
     return new_label
@@ -545,3 +560,272 @@ def delete_user(user_id: int) -> bool:
         deleted = cursor.rowcount > 0
         conn.close()
         return deleted
+
+
+DEFAULT_DEVICES = ["F8", "F9"]
+MAX_EMPLOYEE_IMPORT_ROWS = 800
+
+
+def normalize_fingerprint_id(value) -> str:
+    text = str(value or "").strip()
+    if text.endswith(".0") and text[:-2].replace(".", "", 1).isdigit():
+        text = text[:-2]
+    return re.sub(r"\D", "", text)
+
+
+def normalize_device(value: str) -> str:
+    text = re.sub(r"\s+", "", (value or "").strip().upper())
+    if re.fullmatch(r"F\d{1,3}", text):
+        return text
+    return ""
+
+
+def normalize_person_name(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def names_match(left: str, right: str) -> bool:
+    first = normalize_person_name(left)
+    second = normalize_person_name(right)
+    if not first or not second:
+        return False
+    if first == second:
+        return True
+    return len(first) >= 4 and len(second) >= 4 and (first in second or second in first)
+
+
+def _row_to_employee(row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "department": row["department"],
+        "fingerprint": row["fingerprint"],
+        "device": row["device"],
+        "active": bool(row["active"]),
+        "created_at": row["created_at"],
+    }
+
+
+def employee_count() -> int:
+    init_db()
+    conn = db()
+    total = conn.execute("SELECT COUNT(*) FROM employees WHERE active = 1").fetchone()[0]
+    conn.close()
+    return int(total)
+
+
+def list_employees() -> list:
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM employees ORDER BY department, name, device"
+    ).fetchall()
+    conn.close()
+    return [_row_to_employee(row) for row in rows]
+
+
+def list_devices() -> list:
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT DISTINCT device FROM employees ORDER BY device"
+    ).fetchall()
+    conn.close()
+    devices = [row["device"] for row in rows if row["device"]]
+    for item in DEFAULT_DEVICES:
+        if item not in devices:
+            devices.append(item)
+    return devices
+
+
+def match_employee(name: str, fingerprint: str, department: str) -> dict | None:
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint:
+        return None
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM employees WHERE fingerprint = ? AND active = 1",
+        (fingerprint,),
+    ).fetchall()
+    conn.close()
+    people = [_row_to_employee(row) for row in rows]
+    if not people:
+        return None
+    department_key = (department or "").strip().lower()
+    in_department = [person for person in people if person["department"].strip().lower() == department_key]
+    candidates = in_department or people
+    if len(candidates) == 1:
+        return candidates[0]
+    named = [person for person in candidates if names_match(name, person["name"])]
+    if len(named) == 1:
+        return named[0]
+    return None
+
+
+def validate_employee(name: str, department: str, fingerprint: str, device: str, departments: set, employee_id: int | None = None) -> list:
+    errors = []
+    name = (name or "").strip()
+    department = (department or "").strip()
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    device = normalize_device(device)
+    if not name:
+        errors.append("Employee name is required.")
+    elif len(name) > 80:
+        errors.append("Employee name is too long.")
+    if department not in departments:
+        errors.append("Please choose a valid department.")
+    if not fingerprint or not fingerprint.isdigit():
+        errors.append("Fingerprint number must contain digits only.")
+    elif len(fingerprint) > 10:
+        errors.append("Fingerprint number is too long.")
+    if not device:
+        errors.append("Device must be F8, F9, or similar (F then numbers).")
+    if errors:
+        return errors
+    init_db()
+    conn = db()
+    clash = conn.execute(
+        "SELECT id FROM employees WHERE device = ? AND fingerprint = ? AND id != ?",
+        (device, fingerprint, employee_id or 0),
+    ).fetchone()
+    conn.close()
+    if clash:
+        errors.append(f"Fingerprint {fingerprint} is already registered on {device}.")
+    return errors
+
+
+def create_employee(name: str, department: str, fingerprint: str, device: str) -> dict:
+    name = name.strip()
+    department = department.strip()
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    device = normalize_device(device)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO employees (name, department, fingerprint, device, active, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                """,
+                (name, department, fingerprint, device, now),
+            )
+            conn.commit()
+            employee_id = cursor.lastrowid
+        except sqlite3.IntegrityError as exc:
+            conn.close()
+            raise ValueError(f"Fingerprint {fingerprint} is already registered on {device}.") from exc
+        conn.close()
+    return {
+        "id": employee_id,
+        "name": name,
+        "department": department,
+        "fingerprint": fingerprint,
+        "device": device,
+    }
+
+
+def update_employee(employee_id: int, name: str, department: str, fingerprint: str, device: str) -> bool:
+    name = name.strip()
+    department = department.strip()
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    device = normalize_device(device)
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE employees
+                SET name = ?, department = ?, fingerprint = ?, device = ?
+                WHERE id = ?
+                """,
+                (name, department, fingerprint, device, employee_id),
+            )
+            conn.commit()
+            updated = cursor.rowcount > 0
+        except sqlite3.IntegrityError as exc:
+            conn.close()
+            raise ValueError(f"Fingerprint {fingerprint} is already registered on {device}.") from exc
+        conn.close()
+    return updated
+
+
+def delete_employee(employee_id: int) -> bool:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        cursor = conn.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        conn.close()
+        return deleted
+
+
+def import_employees(rows: list, departments: set) -> tuple[dict, list]:
+    created = {"added": 0, "updated": 0}
+    errors = []
+    seen = set()
+
+    for index, raw in enumerate(rows, start=2):
+        row = {str(key or "").strip().lower(): str(value or "").strip() for key, value in raw.items()}
+        if not any(row.get(key) for key in ("name", "department", "fingerprint", "device")):
+            continue
+        name = row.get("name") or ""
+        department = row.get("department") or ""
+        fingerprint = normalize_fingerprint_id(row.get("fingerprint") or row.get("ac-no.") or row.get("ac-no") or "")
+        device = normalize_device(row.get("device") or row.get("machine") or "")
+        if department not in departments:
+            canonical = next((item for item in departments if item.lower() == department.lower()), "")
+            department = canonical or department
+        key = (device, fingerprint)
+        if fingerprint and device and key in seen:
+            errors.append(f"Row {index}: fingerprint {fingerprint} on {device} is duplicated in the file.")
+            continue
+        init_db()
+        conn = db()
+        existing = conn.execute(
+            "SELECT id FROM employees WHERE device = ? AND fingerprint = ?",
+            (device, fingerprint),
+        ).fetchone() if device and fingerprint else None
+        conn.close()
+        issues = validate_employee(
+            name,
+            department,
+            fingerprint,
+            device,
+            departments,
+            existing["id"] if existing else None,
+        )
+        if issues:
+            errors.append(f"Row {index}: " + " ".join(issues))
+            continue
+        seen.add(key)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with DB_LOCK:
+            conn = db()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE employees
+                    SET name = ?, department = ?, active = 1
+                    WHERE id = ?
+                    """,
+                    (name.strip(), department.strip(), existing["id"]),
+                )
+                created["updated"] += 1
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO employees (name, department, fingerprint, device, active, created_at)
+                    VALUES (?, ?, ?, ?, 1, ?)
+                    """,
+                    (name.strip(), department.strip(), fingerprint, device, now),
+                )
+                created["added"] += 1
+            conn.commit()
+            conn.close()
+
+    return created, errors

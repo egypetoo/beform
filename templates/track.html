@@ -13,7 +13,7 @@
             {% include "_logo.html" %}
             <p class="eyebrow">Request Status</p>
             <h1>Track your request</h1>
-            <p class="subtitle">Enter your fingerprint number to see your latest 30 requests.</p>
+            <p class="subtitle">Enter your name and fingerprint number to see your latest 30 requests.</p>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -28,6 +28,11 @@
 
         <form class="form-shell" method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <section class="field">
+                <label for="name">Name <span>*</span></label>
+                <input id="name" name="name" type="text" required
+                       value="{{ track_name }}" placeholder="Enter full name">
+            </section>
             <section class="field">
                 <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
                 <input id="fingerprint_id" name="fingerprint_id" type="text" required

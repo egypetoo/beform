@@ -387,6 +387,7 @@ def save_submission(row: dict) -> dict:
 def submission_fingerprint(row: dict) -> str:
     return "|".join([
         str(row.get("fingerprint_id") or ""),
+        str(row.get("device") or ""),
         str(row.get("department") or ""),
         str(row.get("request_type") or ""),
         str(row.get("start_date") or ""),
@@ -449,9 +450,10 @@ def row_submitted_key(row: dict) -> str:
     return str(row.get("Submitted At") or row.get("From Date") or "")
 
 
-def lookup_by_fingerprint(fingerprint: str) -> list:
+def lookup_by_fingerprint(fingerprint: str, name: str = "") -> list:
     now = time.time()
-    cached = TRACK_CACHE.get(fingerprint)
+    cache_key = f"{normalize_fingerprint(fingerprint)}|{user_store.normalize_person_name(name)}"
+    cached = TRACK_CACHE.get(cache_key)
     if cached and now - cached["at"] < TRACK_CACHE_SECONDS:
         return list(cached["rows"])
 
@@ -459,6 +461,7 @@ def lookup_by_fingerprint(fingerprint: str) -> list:
         data = sheet_api({
             "action": "lookup",
             "fingerprint_id": fingerprint,
+            "name": name,
             "limit": TRACK_LIMIT,
         })
         source_rows = data.get("rows", [])
@@ -467,13 +470,17 @@ def lookup_by_fingerprint(fingerprint: str) -> list:
         source_rows = data.get("rows", [])
 
     wanted = normalize_fingerprint(fingerprint)
-    rows = [
-        row for row in source_rows
-        if normalize_fingerprint(row.get("Fingerprint Number")) == wanted
-    ]
+    wanted_name = user_store.normalize_person_name(name)
+    rows = []
+    for row in source_rows:
+        if normalize_fingerprint(row.get("Fingerprint Number")) != wanted:
+            continue
+        if wanted_name and not user_store.names_match(wanted_name, str(row.get("Name") or "")):
+            continue
+        rows.append(row)
     rows.sort(key=row_submitted_key, reverse=True)
     rows = rows[:TRACK_LIMIT]
-    TRACK_CACHE[fingerprint] = {"at": now, "rows": rows}
+    TRACK_CACHE[cache_key] = {"at": now, "rows": rows}
     return list(rows)
 
 
@@ -557,6 +564,15 @@ def index():
                 errors.append("Please select your team leader")
             if not allowed_teams:
                 team = ""
+        device = ""
+        if user_store.employee_count() and department in department_maps()["values"]:
+            department_label = department_maps()["labels"].get(department, "")
+            matched = user_store.match_employee(name, fingerprint_id, department_label)
+            if not matched:
+                errors.append("Name or fingerprint is not registered. Please contact HR.")
+            else:
+                fingerprint_id = matched["fingerprint"]
+                device = matched["device"]
         if request_type not in options:
             errors.append("Request type is required")
         if request_type == "missing_punch_in" and not punch_in_time:
@@ -606,6 +622,7 @@ def index():
             "fingerprint_id": fingerprint_id,
             "name": name,
             "department": department_label,
+            "device": device,
             "request_type": selected["en"],
             "request_date": request_date,
             "punch_in_time": punch_in_time if request_type == "missing_punch_in" else "",
@@ -658,6 +675,7 @@ def success():
 def track():
     rows = None
     fingerprint_id = ""
+    track_name = ""
     status_filter = "All"
     type_filter = ""
     request_types = []
@@ -669,6 +687,7 @@ def track():
                 "track.html",
                 rows=None,
                 fingerprint_id="",
+                track_name="",
                 status_filter="All",
                 type_filter="",
                 request_types=[],
@@ -676,17 +695,21 @@ def track():
             )
 
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
+        track_name = request.form.get("name", "").strip()
         status_filter = request.form.get("status", "All").strip() or "All"
         type_filter = request.form.get("type", "").strip()
         if status_filter not in {"Pending", "Approved", "Rejected", "All"}:
             status_filter = "All"
 
-        if not fingerprint_id:
+        if not track_name:
+            flash("Name is required.", "error")
+        elif not fingerprint_id:
             flash("Fingerprint number is required.", "error")
         elif not fingerprint_id.isdigit():
             flash("Fingerprint number must contain digits only.", "error")
         else:
-            cached = TRACK_CACHE.get(fingerprint_id)
+            cache_key = f"{fingerprint_id}|{user_store.normalize_person_name(track_name)}"
+            cached = TRACK_CACHE.get(cache_key)
             cache_fresh = bool(cached and time.time() - cached["at"] < TRACK_CACHE_SECONDS)
             if not cache_fresh and track_is_limited(client_ip()):
                 flash("Too many searches. Please wait 5 minutes and try again.", "error")
@@ -694,15 +717,16 @@ def track():
                     "track.html",
                     rows=None,
                     fingerprint_id=fingerprint_id,
+                    track_name=track_name,
                     status_filter=status_filter,
                     type_filter=type_filter,
                     request_types=[],
                     statuses=["Pending", "Approved", "Rejected", "All"],
                 )
             try:
-                all_rows = lookup_by_fingerprint(fingerprint_id)
+                all_rows = lookup_by_fingerprint(fingerprint_id, track_name)
                 if not all_rows:
-                    flash("No requests found for this fingerprint.", "error")
+                    flash("No requests found for this name and fingerprint.", "error")
                     rows = None
                 else:
                     request_types = sorted({
@@ -724,6 +748,7 @@ def track():
         "track.html",
         rows=rows,
         fingerprint_id=fingerprint_id,
+        track_name=track_name,
         status_filter=status_filter,
         type_filter=type_filter,
         request_types=request_types,
@@ -860,6 +885,7 @@ def dashboard():
             if needle in " ".join([
                 str(row.get("Name") or ""),
                 str(row.get("Fingerprint Number") or ""),
+                str(row.get("Device") or ""),
                 str(row.get("Department") or ""),
                 str(row.get("Team") or ""),
                 str(row.get("Request Type") or ""),
@@ -1095,7 +1121,7 @@ def build_xlsx_bytes(headers: list, rows: list) -> bytes:
     return buffer.getvalue()
 
 
-def parse_xlsx_bytes(raw: bytes) -> list:
+def parse_xlsx_bytes(raw: bytes, max_rows: int = MAX_IMPORT_ROWS) -> list:
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         names = archive.namelist()
         shared = []
@@ -1139,19 +1165,19 @@ def parse_xlsx_bytes(raw: bytes) -> list:
     rows = []
     for row in parsed_rows[1:]:
         rows.append({headers[index]: row.get(index, "") for index in range(width) if headers[index]})
-        if len(rows) > MAX_IMPORT_ROWS:
-            raise ValueError("Too many rows. Import up to 200 at a time.")
+        if len(rows) > max_rows:
+            raise ValueError(f"Too many rows. Import up to {max_rows} at a time.")
     return rows
 
 
-def parse_people_file(upload) -> list:
+def parse_people_file(upload, max_rows: int = MAX_IMPORT_ROWS) -> list:
     filename = (upload.filename or "").lower()
     raw = upload.read(MAX_IMPORT_BYTES + 1)
     if len(raw) > MAX_IMPORT_BYTES:
         raise ValueError("File is too large. Keep it under 200 KB.")
     if filename.endswith(".xlsx"):
         try:
-            return parse_xlsx_bytes(raw)
+            return parse_xlsx_bytes(raw, max_rows=max_rows)
         except (zipfile.BadZipFile, ET.ParseError, KeyError, IndexError, ValueError) as exc:
             if isinstance(exc, ValueError) and str(exc):
                 raise
@@ -1164,8 +1190,8 @@ def parse_people_file(upload) -> list:
     if not reader.fieldnames:
         raise ValueError("The CSV has no header row.")
     rows = list(reader)
-    if len(rows) > MAX_IMPORT_ROWS:
-        raise ValueError("Too many rows. Import up to 200 at a time.")
+    if len(rows) > max_rows:
+        raise ValueError(f"Too many rows. Import up to {max_rows} at a time.")
     return rows
 
 
@@ -1318,6 +1344,161 @@ def users_delete():
     else:
         flash("Could not delete that account.", "error")
     return redirect(url_for("users_admin"))
+
+
+EMPLOYEE_HEADERS = ["name", "department", "fingerprint", "device"]
+EMPLOYEE_SAMPLE_ROWS = [
+    ["Ahmed Essam", "Web", "57", "F8"],
+    ["Mohamed", "Sales", "57", "F9"],
+]
+
+
+def employees_admin_context() -> dict:
+    departments = all_departments(active_only=False)
+    return {
+        "manager": session["manager"],
+        "employees": user_store.list_employees(),
+        "departments": departments,
+        "devices": user_store.list_devices(),
+    }
+
+
+def employee_department_maps() -> dict:
+    departments = all_departments(active_only=False)
+    return {
+        "items": departments,
+        "labels": {item["value"]: item["label"] for item in departments},
+        "label_set": {item["label"] for item in departments},
+    }
+
+
+@app.route("/employees", methods=["GET", "POST"])
+@hr_required
+def employees_admin():
+    maps = employee_department_maps()
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return redirect(url_for("employees_admin"))
+        name = request.form.get("name", "")
+        department_value = request.form.get("department", "").strip()
+        fingerprint = request.form.get("fingerprint", "")
+        device = request.form.get("device", "")
+        department_label = maps["labels"].get(department_value, "")
+        errors = user_store.validate_employee(
+            name,
+            department_label,
+            fingerprint,
+            device,
+            maps["label_set"],
+        )
+        if errors:
+            for error in errors:
+                flash(error, "error")
+        else:
+            try:
+                user_store.create_employee(name, department_label, fingerprint, device)
+                flash("Employee added.", "success")
+            except ValueError as exc:
+                flash(str(exc), "error")
+        return redirect(url_for("employees_admin"))
+    return render_template("employees.html", **employees_admin_context())
+
+
+@app.route("/employees/template.xlsx")
+@hr_required
+def employees_template():
+    payload = build_xlsx_bytes(EMPLOYEE_HEADERS, EMPLOYEE_SAMPLE_ROWS)
+    return Response(
+        payload,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=be-employees-template.xlsx"},
+    )
+
+
+@app.route("/employees/import", methods=["POST"])
+@hr_required
+def employees_import():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    upload = request.files.get("sheet")
+    if not upload or not upload.filename:
+        flash("Choose an Excel or CSV file first.", "error")
+        return redirect(url_for("employees_admin"))
+    try:
+        rows = parse_people_file(upload, max_rows=user_store.MAX_EMPLOYEE_IMPORT_ROWS)
+        created, errors = user_store.import_employees(rows, employee_department_maps()["label_set"])
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("employees_admin"))
+    if created["added"] or created["updated"]:
+        flash(
+            f"Imported {created['added']} new employee(s) and updated {created['updated']}.",
+            "success",
+        )
+    elif not errors:
+        flash("No employee rows found in the file.", "error")
+    for error in errors[:12]:
+        flash(error, "error")
+    if len(errors) > 12:
+        flash(f"{len(errors) - 12} more row(s) failed.", "error")
+    return redirect(url_for("employees_admin"))
+
+
+@app.route("/employees/edit", methods=["POST"])
+@hr_required
+def employees_edit():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    maps = employee_department_maps()
+    try:
+        employee_id = int(request.form.get("employee_id", "0"))
+    except ValueError:
+        employee_id = 0
+    name = request.form.get("name", "")
+    department_value = request.form.get("department", "").strip()
+    fingerprint = request.form.get("fingerprint", "")
+    device = request.form.get("device", "")
+    department_label = maps["labels"].get(department_value, department_value)
+    errors = user_store.validate_employee(
+        name,
+        department_label,
+        fingerprint,
+        device,
+        maps["label_set"],
+        employee_id,
+    )
+    if errors:
+        for error in errors:
+            flash(error, "error")
+        return redirect(url_for("employees_admin"))
+    try:
+        if user_store.update_employee(employee_id, name, department_label, fingerprint, device):
+            flash("Employee updated.", "success")
+        else:
+            flash("Could not update that employee.", "error")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("employees_admin"))
+
+
+@app.route("/employees/delete", methods=["POST"])
+@hr_required
+def employees_delete():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    try:
+        employee_id = int(request.form.get("employee_id", "0"))
+    except ValueError:
+        employee_id = 0
+    if user_store.delete_employee(employee_id):
+        flash("Employee deleted.", "success")
+    else:
+        flash("Could not delete that employee.", "error")
+    return redirect(url_for("employees_admin"))
 
 
 if __name__ == "__main__":

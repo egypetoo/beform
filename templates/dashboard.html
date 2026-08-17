@@ -17,6 +17,7 @@
             <div class="form-links">
                 {% if is_hr %}
                     <a class="excel-link" href="{{ url_for('users_admin') }}">Departments & team leaders</a>
+                    <a class="excel-link" href="{{ url_for('employees_admin') }}">Employees</a>
                 {% endif %}
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
             </div>
@@ -108,6 +109,7 @@
                                     <th>Submitted</th>
                                     <th>Name</th>
                                     <th>Fingerprint</th>
+                                    <th>Device</th>
                                     <th>Department</th>
                                     <th>Team</th>
                                     <th>Type</th>
@@ -132,6 +134,7 @@
                                         <td data-label="Submitted">{{ row.get('Submitted At', '') }}</td>
                                         <td class="card-name" data-label="Name">{{ row.get('Name', '') }}</td>
                                         <td data-label="Fingerprint">{{ row.get('Fingerprint Number', '') }}</td>
+                                        <td data-label="Device">{{ row.get('Device', '') }}</td>
                                         <td data-label="Department">{{ row.get('Department', '') }}</td>
                                         <td data-label="Team">{{ row.get('Team', '') }}</td>
                                         <td data-label="Type">{{ row.get('Request Type', '') }}</td>
