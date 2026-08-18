@@ -318,11 +318,32 @@ def teams_for_form() -> dict:
     }
 
 
+def form_employee_directory() -> list:
+    labels_to_value = {
+        item["label"].strip().lower(): item["value"]
+        for item in all_departments(active_only=True)
+    }
+    rows = []
+    for employee in user_store.list_employees():
+        if not employee.get("active", True):
+            continue
+        department_value = labels_to_value.get((employee.get("department") or "").strip().lower(), "")
+        if not department_value:
+            continue
+        rows.append({
+            "fingerprint": employee["fingerprint"],
+            "name": employee["name"],
+            "department": department_value,
+        })
+    return rows
+
+
 def index_context(form) -> dict:
     return {
         "leave_groups": LEAVE_GROUPS,
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
+        "employee_directory": form_employee_directory(),
         "form": form,
         **today_values(),
     }
@@ -571,14 +592,22 @@ def index():
             if not allowed_teams:
                 team = ""
         device = ""
+        matched_department = ""
         if user_store.employee_count() and department in department_maps()["values"]:
             department_label = department_maps()["labels"].get(department, "")
             matched = user_store.match_employee(name, fingerprint_id, department_label)
             if not matched:
-                errors.append("Name or fingerprint is not registered. Please contact HR.")
+                registered = user_store.departments_for_person(name, fingerprint_id)
+                if registered:
+                    errors.append(
+                        f"This employee is registered in {registered[0]}. You cannot submit under another department."
+                    )
+                else:
+                    errors.append("This name and fingerprint are not registered in the selected department.")
             else:
                 fingerprint_id = matched["fingerprint"]
                 device = matched["device"]
+                matched_department = matched["department"] or department_label
         if request_type not in options:
             errors.append("Request type is required")
         if request_type == "missing_punch_in" and not punch_in_time:
@@ -624,7 +653,7 @@ def index():
             return render_template("index.html", **index_context(request.form))
 
         selected = options[request_type]
-        department_label = department_maps()["labels"].get(department, "")
+        department_label = matched_department or department_maps()["labels"].get(department, "")
         row = {
             "request_id": uuid.uuid4().hex[:12].upper(),
             "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

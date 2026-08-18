@@ -660,15 +660,41 @@ def match_employee(name: str, fingerprint: str, department: str) -> dict | None:
     people = [_row_to_employee(row) for row in rows]
     if not people:
         return None
+    named = [person for person in people if names_match(name, person["name"])]
+    if not named:
+        return None
     department_key = (department or "").strip().lower()
-    in_department = [person for person in people if person["department"].strip().lower() == department_key]
-    candidates = in_department or people
-    if len(candidates) == 1:
-        return candidates[0]
-    named = [person for person in candidates if names_match(name, person["name"])]
-    if len(named) == 1:
-        return named[0]
+    in_department = [
+        person for person in named
+        if person["department"].strip().lower() == department_key
+    ]
+    if len(in_department) == 1:
+        return in_department[0]
+    if len(in_department) > 1:
+        return in_department[0]
     return None
+
+
+def departments_for_person(name: str, fingerprint: str) -> list:
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint:
+        return []
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM employees WHERE fingerprint = ? AND active = 1",
+        (fingerprint,),
+    ).fetchall()
+    conn.close()
+    departments = []
+    for row in rows:
+        person = _row_to_employee(row)
+        if not names_match(name, person["name"]):
+            continue
+        label = (person["department"] or "").strip()
+        if label and label not in departments:
+            departments.append(label)
+    return departments
 
 
 def validate_employee(name: str, department: str, fingerprint: str, device: str, departments: set, employee_id: int | None = None) -> list:
@@ -699,9 +725,20 @@ def validate_employee(name: str, department: str, fingerprint: str, device: str,
         "SELECT id FROM employees WHERE device = ? AND fingerprint = ? AND id != ?",
         (device, fingerprint, employee_id or 0),
     ).fetchone()
+    others = conn.execute(
+        "SELECT name, department FROM employees WHERE fingerprint = ? AND active = 1 AND id != ?",
+        (fingerprint, employee_id or 0),
+    ).fetchall()
     conn.close()
     if clash:
         errors.append(f"Fingerprint {fingerprint} is already registered on {device}.")
+    for other in others:
+        if names_match(name, other["name"]) and (other["department"] or "").strip().lower() != department.strip().lower():
+            errors.append(
+                f"{name} (fingerprint {fingerprint}) is already registered in {other['department']} "
+                "and cannot be assigned to another department."
+            )
+            break
     return errors
 
 

@@ -60,6 +60,7 @@
                         </option>
                     {% endfor %}
                 </select>
+                <p class="field-hint">Your department is locked to the employee record. You cannot choose another department.</p>
             </section>
 
             <section class="field hidden" id="team-card">
@@ -218,8 +219,55 @@
         const teamSelect = document.getElementById('team');
         const teamCard = document.getElementById('team-card');
         const teamsByDepartment = {{ teams_by_department | tojson }};
+        const employeeDirectory = {{ employee_directory | tojson }};
         const selectedTeam = {{ form.get('team', '') | tojson }};
         let sending = false;
+        let lockedDepartment = '';
+
+        function namesMatch(left, right) {
+            const first = (left || '').trim().toLowerCase().replace(/\s+/g, ' ');
+            const second = (right || '').trim().toLowerCase().replace(/\s+/g, ' ');
+            if (!first || !second) return false;
+            if (first === second) return true;
+            return first.length >= 4 && second.length >= 4 && (first.includes(second) || second.includes(first));
+        }
+
+        function matchedDepartments() {
+            const fp = (fingerprint.value || '').replace(/\D/g, '');
+            const person = (nameInput.value || '').trim();
+            if (!fp || !person || !employeeDirectory.length) return [];
+            const found = [];
+            employeeDirectory.forEach((row) => {
+                if (row.fingerprint === fp && namesMatch(person, row.name) && !found.includes(row.department)) {
+                    found.push(row.department);
+                }
+            });
+            return found;
+        }
+
+        function lockDepartment() {
+            const allowed = matchedDepartments();
+            Array.from(departmentSelect.options).forEach((option) => {
+                if (!option.value) return;
+                const blocked = allowed.length ? !allowed.includes(option.value) : false;
+                option.hidden = blocked;
+                option.disabled = blocked;
+            });
+            if (allowed.length === 1) {
+                departmentSelect.value = allowed[0];
+                lockedDepartment = allowed[0];
+                departmentSelect.dataset.locked = '1';
+                departmentSelect.disabled = true;
+            } else {
+                lockedDepartment = '';
+                departmentSelect.dataset.locked = '';
+                departmentSelect.disabled = false;
+                if (allowed.length && !allowed.includes(departmentSelect.value)) {
+                    departmentSelect.value = '';
+                }
+            }
+            fillTeams();
+        }
 
         function fillTeams() {
             const teams = teamsByDepartment[departmentSelect.value] || [];
@@ -240,8 +288,16 @@
             teamSelect.required = true;
         }
 
-        departmentSelect.addEventListener('change', fillTeams);
+        departmentSelect.addEventListener('change', () => {
+            if (lockedDepartment && departmentSelect.value !== lockedDepartment) {
+                departmentSelect.value = lockedDepartment;
+            }
+            fillTeams();
+        });
+        fingerprint.addEventListener('input', lockDepartment);
+        nameInput.addEventListener('input', lockDepartment);
         fillTeams();
+        lockDepartment();
         form.addEventListener('submit', (event) => {
             if (sending) {
                 event.preventDefault();
@@ -283,6 +339,10 @@
                     alert('Late excuse must be whole hours only (1, 2, or 3 hours). Fractions are not allowed.');
                     return;
                 }
+            }
+            if (lockedDepartment) {
+                departmentSelect.disabled = false;
+                departmentSelect.value = lockedDepartment;
             }
             sending = true;
             submitBtn.disabled = true;
