@@ -1565,6 +1565,29 @@ def employees_delete():
     return redirect(url_for("employees_admin"))
 
 
+@app.route("/employees/bulk-delete", methods=["POST"])
+@hr_required
+def employees_bulk_delete():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    scope = (request.form.get("scope") or "selected").strip().lower()
+    if scope == "all":
+        deleted = user_store.delete_all_employees()
+        if deleted:
+            flash(f"Deleted all {deleted} employees.", "success")
+        else:
+            flash("No employees to delete.", "error")
+        return redirect(url_for("employees_admin"))
+    selected = request.form.getlist("selected")
+    deleted = user_store.delete_employees(selected)
+    if deleted:
+        flash(f"Deleted {deleted} employee{'s' if deleted != 1 else ''}.", "success")
+    else:
+        flash("Select at least one employee to delete.", "error")
+    return redirect(url_for("employees_admin"))
+
+
 def read_attendance_file(upload) -> list:
     filename = (upload.filename or "").lower()
     raw = upload.read(attendance.MAX_ATTENDANCE_BYTES + 1)

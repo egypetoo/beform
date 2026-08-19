@@ -801,12 +801,38 @@ def update_employee(employee_id: int, name: str, department: str, fingerprint: s
 
 
 def delete_employee(employee_id: int) -> bool:
+    return delete_employees([employee_id]) == 1
+
+
+def delete_employees(employee_ids: list) -> int:
+    ids = []
+    for value in employee_ids:
+        try:
+            employee_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if employee_id > 0 and employee_id not in ids:
+            ids.append(employee_id)
+    if not ids:
+        return 0
     init_db()
     with DB_LOCK:
         conn = db()
-        cursor = conn.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
+        placeholders = ",".join("?" * len(ids))
+        cursor = conn.execute(f"DELETE FROM employees WHERE id IN ({placeholders})", ids)
         conn.commit()
-        deleted = cursor.rowcount > 0
+        deleted = cursor.rowcount
+        conn.close()
+        return deleted
+
+
+def delete_all_employees() -> int:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        cursor = conn.execute("DELETE FROM employees")
+        conn.commit()
+        deleted = cursor.rowcount
         conn.close()
         return deleted
 

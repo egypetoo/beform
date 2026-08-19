@@ -95,10 +95,23 @@
                                placeholder="Search by fingerprint" autocomplete="off">
                     </label>
                 </div>
+                <form method="post" action="{{ url_for('employees_bulk_delete') }}" id="employee-bulk-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="scope" id="employee-delete-scope" value="selected">
+                    <div class="bulk-bar">
+                        <label class="select-all-label">
+                            <input type="checkbox" id="employee-select-all">
+                            Select all
+                        </label>
+                        <button class="btn-sm btn-reject" type="submit" id="employee-delete-selected">Delete selected</button>
+                        <button class="btn-sm btn-reject" type="submit" id="employee-delete-all">Delete all</button>
+                    </div>
+                </form>
                 <div class="table-wrap">
                     <table>
                         <thead>
                             <tr>
+                                <th></th>
                                 <th>Name</th>
                                 <th>Department</th>
                                 <th>Fingerprint</th>
@@ -109,6 +122,10 @@
                         <tbody>
                             {% for employee in employees %}
                                 <tr data-name="{{ employee.name|lower }}" data-fingerprint="{{ employee.fingerprint }}">
+                                    <td class="card-check">
+                                        <input form="employee-bulk-form" class="row-check" type="checkbox"
+                                               name="selected" value="{{ employee.id }}" aria-label="Select {{ employee.name }}">
+                                    </td>
                                     <td class="card-name" data-label="Name">
                                         <form id="edit-employee-{{ employee.id }}" method="post" action="{{ url_for('employees_edit') }}">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -172,6 +189,25 @@
         const employeeCount = document.getElementById('employee-count');
         const employeeEmpty = document.getElementById('employee-filter-empty');
         const employeeTotal = employeeRows.length;
+        const selectAll = document.getElementById('employee-select-all');
+        const bulkForm = document.getElementById('employee-bulk-form');
+        const deleteScope = document.getElementById('employee-delete-scope');
+
+        function visibleEmployeeRows() {
+            return Array.from(employeeRows).filter((row) => !row.hidden);
+        }
+
+        function visibleChecks() {
+            return visibleEmployeeRows()
+                .map((row) => row.querySelector('.row-check'))
+                .filter(Boolean);
+        }
+
+        function syncSelectAll() {
+            if (!selectAll) return;
+            const checks = visibleChecks();
+            selectAll.checked = checks.length > 0 && checks.every((checkbox) => checkbox.checked);
+        }
 
         function filterEmployees() {
             if (!nameFilter || !fingerprintFilter) return;
@@ -193,6 +229,7 @@
                 }
             }
             if (employeeEmpty) employeeEmpty.classList.toggle('hidden', visible > 0);
+            syncSelectAll();
         }
 
         if (fingerprintFilter) {
@@ -202,6 +239,49 @@
             });
         }
         if (nameFilter) nameFilter.addEventListener('input', filterEmployees);
+
+        if (selectAll) {
+            selectAll.addEventListener('change', () => {
+                visibleChecks().forEach((checkbox) => {
+                    checkbox.checked = selectAll.checked;
+                });
+            });
+        }
+        document.querySelectorAll('.row-check').forEach((checkbox) => {
+            checkbox.addEventListener('change', syncSelectAll);
+        });
+        if (bulkForm) {
+            bulkForm.addEventListener('submit', (event) => {
+                const scope = deleteScope ? deleteScope.value : 'selected';
+                if (scope === 'all') {
+                    if (!confirm('Delete ALL ' + employeeTotal + ' employees? This cannot be undone.')) {
+                        event.preventDefault();
+                    }
+                    return;
+                }
+                const selectedCount = document.querySelectorAll('.row-check:checked').length;
+                if (!selectedCount) {
+                    event.preventDefault();
+                    alert('Select at least one employee to delete.');
+                    return;
+                }
+                if (!confirm('Delete ' + selectedCount + ' selected employee' + (selectedCount === 1 ? '' : 's') + '?')) {
+                    event.preventDefault();
+                }
+            });
+            const deleteSelected = document.getElementById('employee-delete-selected');
+            const deleteAll = document.getElementById('employee-delete-all');
+            if (deleteSelected) {
+                deleteSelected.addEventListener('click', () => {
+                    if (deleteScope) deleteScope.value = 'selected';
+                });
+            }
+            if (deleteAll) {
+                deleteAll.addEventListener('click', () => {
+                    if (deleteScope) deleteScope.value = 'all';
+                });
+            }
+        }
     </script>
     {% include "_pwa_foot.html" %}
 </body>
