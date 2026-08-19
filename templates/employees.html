@@ -83,7 +83,18 @@
         <section class="form-shell users-shell">
             <h2 class="section-title">Registered employees</h2>
             {% if employees %}
-                <p class="muted">{{ employees|length }} employee{{ 's' if employees|length != 1 else '' }}</p>
+                <p class="muted" id="employee-count">{{ employees|length }} employee{{ 's' if employees|length != 1 else '' }}</p>
+                <div class="filter-bar employee-filter-bar">
+                    <label class="filter-date">
+                        <span>Name</span>
+                        <input id="employee-filter-name" type="search" placeholder="Search by name" autocomplete="off">
+                    </label>
+                    <label class="filter-date">
+                        <span>Fingerprint</span>
+                        <input id="employee-filter-fingerprint" type="search" inputmode="numeric"
+                               placeholder="Search by fingerprint" autocomplete="off">
+                    </label>
+                </div>
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -97,7 +108,7 @@
                         </thead>
                         <tbody>
                             {% for employee in employees %}
-                                <tr>
+                                <tr data-name="{{ employee.name|lower }}" data-fingerprint="{{ employee.fingerprint }}">
                                     <td class="card-name" data-label="Name">
                                         <form id="edit-employee-{{ employee.id }}" method="post" action="{{ url_for('employees_edit') }}">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -142,6 +153,7 @@
                         </tbody>
                     </table>
                 </div>
+                <p class="empty-state hidden" id="employee-filter-empty">No employees match this name or fingerprint.</p>
             {% else %}
                 <p class="empty-state">No employees yet. Upload the Excel sheet or add the first person above.</p>
             {% endif %}
@@ -153,6 +165,43 @@
                 input.value = input.value.replace(/[^A-Za-z .'\-]/g, '');
             });
         });
+
+        const nameFilter = document.getElementById('employee-filter-name');
+        const fingerprintFilter = document.getElementById('employee-filter-fingerprint');
+        const employeeRows = document.querySelectorAll('tr[data-fingerprint]');
+        const employeeCount = document.getElementById('employee-count');
+        const employeeEmpty = document.getElementById('employee-filter-empty');
+        const employeeTotal = employeeRows.length;
+
+        function filterEmployees() {
+            if (!nameFilter || !fingerprintFilter) return;
+            const nameQuery = (nameFilter.value || '').trim().toLowerCase();
+            const fingerprintQuery = (fingerprintFilter.value || '').replace(/\D/g, '');
+            let visible = 0;
+            employeeRows.forEach((row) => {
+                const nameMatch = !nameQuery || (row.dataset.name || '').includes(nameQuery);
+                const fingerprintMatch = !fingerprintQuery || (row.dataset.fingerprint || '').includes(fingerprintQuery);
+                const show = nameMatch && fingerprintMatch;
+                row.hidden = !show;
+                if (show) visible += 1;
+            });
+            if (employeeCount) {
+                if (!nameQuery && !fingerprintQuery) {
+                    employeeCount.textContent = visible + (visible === 1 ? ' employee' : ' employees');
+                } else {
+                    employeeCount.textContent = 'Showing ' + visible + ' of ' + employeeTotal;
+                }
+            }
+            if (employeeEmpty) employeeEmpty.classList.toggle('hidden', visible > 0);
+        }
+
+        if (fingerprintFilter) {
+            fingerprintFilter.addEventListener('input', () => {
+                fingerprintFilter.value = fingerprintFilter.value.replace(/\D/g, '');
+                filterEmployees();
+            });
+        }
+        if (nameFilter) nameFilter.addEventListener('input', filterEmployees);
     </script>
     {% include "_pwa_foot.html" %}
 </body>
