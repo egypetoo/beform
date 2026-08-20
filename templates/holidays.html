@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BE GROUP | Official holidays</title>
+    {% include "_pwa_head.html" %}
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page page-wide">
+        <header class="hero dash-hero">
+            {% include "_logo.html" %}
+            <p class="eyebrow">HR Admin</p>
+            <h1>Official holidays</h1>
+            <p class="subtitle">These days are skipped in the attendance report. No absence or late deduction is applied.</p>
+            <div class="form-links">
+                <a class="excel-link" href="{{ url_for('attendance_report') }}">Attendance gaps</a>
+                <a class="excel-link" href="{{ url_for('employees_admin') }}">Employees</a>
+                <a class="excel-link" href="{{ url_for('users_admin') }}">Departments & team leaders</a>
+                <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+                <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
+                        <p>{{ message }}</p>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form class="form-shell" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h2 class="section-title">Add holiday</h2>
+            <p class="muted">Add one day or a range (for example Eid). The attendance Excel will show the holiday note and will not deduct.</p>
+            <section class="field">
+                <label for="start_date">From date</label>
+                <input id="start_date" name="start_date" type="date" required>
+            </section>
+            <section class="field">
+                <label for="end_date">To date</label>
+                <input id="end_date" name="end_date" type="date">
+                <p class="muted">Leave empty for a single day.</p>
+            </section>
+            <section class="field">
+                <label for="name">Name</label>
+                <input id="name" name="name" type="text" maxlength="80" placeholder="Eid al-Fitr">
+            </section>
+            <button type="submit">Save holiday</button>
+        </form>
+
+        <section class="form-shell users-shell">
+            <h2 class="section-title">Saved holidays</h2>
+            {% if holidays %}
+                <p class="muted">{{ holidays|length }} day{{ 's' if holidays|length != 1 else '' }}</p>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Name</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for holiday in holidays %}
+                                <tr>
+                                    <td class="card-name" data-label="Date">{{ holiday.day }}</td>
+                                    <td data-label="Name">{{ holiday.name or 'Official holiday' }}</td>
+                                    <td class="card-actions" data-label="Account">
+                                        <form method="post" action="{{ url_for('holidays_delete') }}"
+                                              onsubmit="return confirm('Remove this official holiday?');">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="holiday_id" value="{{ holiday.id }}">
+                                            <button class="btn-sm btn-reject" type="submit">Delete</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty-state">No official holidays yet. Add Eid, Revolution Day, or any paid public holiday.</p>
+            {% endif %}
+        </section>
+    </main>
+    {% include "_pwa_foot.html" %}
+</body>
+</html>

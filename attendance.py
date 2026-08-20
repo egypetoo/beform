@@ -513,6 +513,7 @@ def classify_day(
     remaining_allowance: int = MONTHLY_LATE_ALLOWANCE_MINUTES,
     missing_punch_types: list | None = None,
     department: str = "",
+    holiday: str = "",
 ) -> dict:
     missing_punch_types = list(missing_punch_types or [])
     skip_out = skips_clock_out(department)
@@ -534,6 +535,10 @@ def classify_day(
     empty = {"notes": notes, "deduction": "", "reason": "", "remaining": remaining, "used": 0}
     if is_friday(day):
         return empty
+    if holiday:
+        holiday_note = str(holiday).strip() or "إجازة رسمية"
+        notes = f"{holiday_note} - {notes}" if notes else holiday_note
+        return {**empty, "notes": notes}
     if is_saturday(day) and not clock_in and not clock_out:
         return empty
     if types:
@@ -606,7 +611,7 @@ def classify_day(
     }
 
 
-def build_report(punches: list, requests: list, employees: list) -> dict:
+def build_report(punches: list, requests: list, employees: list, holidays: dict | None = None) -> dict:
     by_person = defaultdict(list)
     for punch in punches:
         if not punch.get("device"):
@@ -625,6 +630,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
     punch_dates = [punch["date"] for punch in punches if punch.get("date")]
     from_date = min(punch_dates) if punch_dates else ""
     to_date = max(punch_dates) if punch_dates else ""
+    holidays = holidays or {}
     calendar = work_calendar(from_date, to_date)
     people = []
     all_export = []
@@ -677,6 +683,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
             worked_saturday = bool(covering_types(saturday_work, device, fingerprint, day))
             late_excuse = bool(covering_types(late_excuses, device, fingerprint, day))
             missing_types = covering_types(missing_punches, device, fingerprint, day)
+            holiday_label = (holidays.get(day) or "إجازة رسمية") if day in holidays else ""
             result = classify_day(
                 punch,
                 types,
@@ -685,6 +692,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                 remaining,
                 missing_types,
                 department,
+                holiday_label,
             )
             remaining = result["remaining"]
             allowance_used += result["used"]
@@ -738,7 +746,7 @@ def build_report(punches: list, requests: list, employees: list) -> dict:
                     half_days += 1
                 else:
                     quarter_days += 1
-        saturday_days = [day for day in calendar if is_saturday(day)]
+        saturday_days = [day for day in calendar if is_saturday(day) and day not in holidays]
         has_monthly_saturday = False
         for day in saturday_days:
             punch = punches_by_day.get(day) or {}

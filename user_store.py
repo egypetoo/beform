@@ -1,6 +1,6 @@
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
 
@@ -69,6 +69,16 @@ def init_db() -> None:
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 UNIQUE(device, fingerprint)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS holidays (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                day TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -902,3 +912,77 @@ def import_employees(rows: list, departments: set) -> tuple[dict, list]:
             conn.close()
 
     return created, errors
+
+
+def parse_holiday_day(value: str) -> str:
+    text = (value or "").strip()
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
+
+
+def list_holidays() -> list:
+    init_db()
+    conn = db()
+    rows = conn.execute("SELECT * FROM holidays ORDER BY day DESC").fetchall()
+    conn.close()
+    return [
+        {"id": row["id"], "day": row["day"], "name": row["name"] or "", "created_at": row["created_at"]}
+        for row in rows
+    ]
+
+
+def holiday_map() -> dict:
+    return {item["day"]: item["name"] for item in list_holidays()}
+
+
+def add_holidays(start: str, end: str, name: str) -> tuple[int, list]:
+    start_day = parse_holiday_day(start)
+    end_day = parse_holiday_day(end or start)
+    title = (name or "").strip()[:80]
+    errors = []
+    if not start_day:
+        errors.append("Choose a valid start date.")
+    if not end_day:
+        errors.append("Choose a valid end date.")
+    if start_day and end_day and start_day > end_day:
+        errors.append("From date cannot be after To date.")
+    if errors:
+        return 0, errors
+    start_date = datetime.strptime(start_day, "%Y-%m-%d")
+    end_date = datetime.strptime(end_day, "%Y-%m-%d")
+    days = []
+    current = start_date
+    while current <= end_date:
+        days.append(current.strftime("%Y-%m-%d"))
+        if len(days) > 31:
+            return 0, ["A holiday range cannot be longer than 31 days."]
+        current += timedelta(days=1)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    added = 0
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        for day in days:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO holidays (day, name, created_at) VALUES (?, ?, ?)",
+                (day, title, now),
+            )
+            added += cursor.rowcount
+        conn.commit()
+        conn.close()
+    if not added:
+        errors.append("Those dates are already saved as official holidays.")
+    return added, errors
+
+
+def delete_holiday(holiday_id: int) -> bool:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        cursor = conn.execute("DELETE FROM holidays WHERE id = ?", (holiday_id,))
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        conn.close()
+        return deleted

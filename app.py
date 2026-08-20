@@ -1588,6 +1588,47 @@ def employees_bulk_delete():
     return redirect(url_for("employees_admin"))
 
 
+@app.route("/holidays", methods=["GET", "POST"])
+@hr_required
+def holidays_admin():
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return redirect(url_for("holidays_admin"))
+        added, errors = user_store.add_holidays(
+            request.form.get("start_date", ""),
+            request.form.get("end_date", ""),
+            request.form.get("name", ""),
+        )
+        for error in errors:
+            flash(error, "error")
+        if added:
+            flash(f"Added {added} official holiday{'s' if added != 1 else ''}. These days will not be deducted.", "success")
+        return redirect(url_for("holidays_admin"))
+    return render_template(
+        "holidays.html",
+        manager=session["manager"],
+        holidays=user_store.list_holidays(),
+    )
+
+
+@app.route("/holidays/delete", methods=["POST"])
+@hr_required
+def holidays_delete():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("holidays_admin"))
+    try:
+        holiday_id = int(request.form.get("holiday_id", "0"))
+    except ValueError:
+        holiday_id = 0
+    if user_store.delete_holiday(holiday_id):
+        flash("Holiday removed.", "success")
+    else:
+        flash("Could not delete that holiday.", "error")
+    return redirect(url_for("holidays_admin"))
+
+
 def read_attendance_file(upload) -> list:
     filename = (upload.filename or "").lower()
     raw = upload.read(attendance.MAX_ATTENDANCE_BYTES + 1)
@@ -1641,7 +1682,12 @@ def attendance_report():
             (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
             flash("Could not load form requests from the HR sheet.", "error")
             requests_rows = []
-        report = attendance.build_report(punches, requests_rows, user_store.list_employees())
+        report = attendance.build_report(
+            punches,
+            requests_rows,
+            user_store.list_employees(),
+            user_store.holiday_map(),
+        )
         export_rows = report.get("export_rows") or []
         if request.form.get("department"):
             department = request.form.get("department", "").strip().lower()
