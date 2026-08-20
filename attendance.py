@@ -55,6 +55,7 @@ WINDOW_START = "09:00"
 WINDOW_END = "10:15"
 QUARTER_UNTIL = "11:00"
 REQUIRED_MINUTES = 510
+QUARTER_WORKED_MINUTES = 7 * 60 + 30
 DAILY_GRACE_MINUTES = 15
 SHIFT_END = "18:30"
 OUT_OK_FROM = "18:30"
@@ -120,14 +121,18 @@ def late_penalty(clock_in: str) -> str:
     return DEDUCTION_HALF
 
 
-def early_penalty(clock_out: str) -> str:
-    out_minutes = minutes_of(clock_out)
-    ok_from = minutes_of(OUT_OK_FROM)
-    if out_minutes is None or ok_from is None:
-        return ""
-    if out_minutes >= ok_from:
-        return ""
-    return DEDUCTION_HALF
+def clock_out_penalty(shift: dict) -> tuple[str, str]:
+    early = int(shift.get("early_out") or 0)
+    if early <= 0:
+        return "", ""
+    late = int(shift.get("late_minutes") or 0)
+    remaining_early = max(0, early - max(0, DAILY_GRACE_MINUTES - late))
+    if remaining_early <= 0:
+        return "", ""
+    worked = shift.get("worked_minutes")
+    if worked is not None and int(worked) >= QUARTER_WORKED_MINUTES:
+        return DEDUCTION_QUARTER, "انصراف قبل 18:30"
+    return DEDUCTION_HALF, "عدم إكمال 7 ساعات ونصف"
 
 
 def worse_penalty(left: str, right: str) -> str:
@@ -174,7 +179,7 @@ def evaluate_shift(clock_in: str, clock_out: str) -> dict:
             short_minutes = max(0, REQUIRED_MINUTES - worked_minutes)
             if end is not None:
                 early_out = max(0, end - out_minutes)
-            deviation = late_from_start + early_out
+            deviation = late_minutes + early_out
             grace_used = min(DAILY_GRACE_MINUTES, deviation)
             short_after_grace = max(0, short_minutes - DAILY_GRACE_MINUTES)
     return {
@@ -570,9 +575,7 @@ def classify_day(
     evening = ""
     evening_reason = ""
     if not skip_out:
-        evening = early_penalty(clock_out)
-        if evening:
-            evening_reason = "انصراف قبل 18:30"
+        evening, evening_reason = clock_out_penalty(shift)
     deduction = worse_penalty(morning, evening)
     if not deduction:
         return {
