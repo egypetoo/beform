@@ -63,6 +63,12 @@ MONTHLY_LATE_ALLOWANCE_MINUTES = 4 * 60
 DEDUCTION_FULL = "يوم"
 DEDUCTION_HALF = "نصف يوم"
 DEDUCTION_QUARTER = "ربع يوم"
+DEDUCTION_RANK = {
+    "": 0,
+    DEDUCTION_QUARTER: 1,
+    DEDUCTION_HALF: 2,
+    DEDUCTION_FULL: 3,
+}
 NOTE_AR = {
     "work remotely": "عمل عن بعد",
     "business mission": "مأمورية",
@@ -126,6 +132,12 @@ def early_penalty(clock_out: str) -> str:
     if out_minutes >= quarter_from:
         return DEDUCTION_QUARTER
     return DEDUCTION_HALF
+
+
+def worse_penalty(left: str, right: str) -> str:
+    if DEDUCTION_RANK.get(right, 0) > DEDUCTION_RANK.get(left, 0):
+        return right
+    return left
 
 
 def excuse_duration_minutes(from_time: str, to_time: str) -> int | None:
@@ -544,47 +556,52 @@ def classify_day(
         }
     shift = evaluate_shift(clock_in, clock_out)
     morning = late_penalty(clock_in)
+    used = 0
+    morning_reason = ""
     if morning:
         late_minutes = shift["late_minutes"]
         needed = ceil_hours_minutes(late_minutes)
         if late_excuse and remaining >= needed:
-            return {
-                "notes": notes,
-                "deduction": "",
-                "reason": "",
-                "remaining": remaining - needed,
-                "used": needed,
-            }
-        used = remaining if late_excuse else 0
-        reason = "تأخير من 10:16 إلى 11:00" if morning == DEDUCTION_QUARTER else "تأخير بعد 11:00"
-        if late_excuse:
-            reason = f"{reason} - رصيد الإذن لا يكفي"
+            morning = ""
+            remaining -= needed
+            used = needed
+        else:
+            morning_reason = "تأخير من 10:16 إلى 11:00" if morning == DEDUCTION_QUARTER else "تأخير بعد 11:00"
+            if late_excuse:
+                morning_reason = f"{morning_reason} - رصيد الإذن لا يكفي"
+            used = remaining if late_excuse else 0
+            remaining -= used
+    evening = ""
+    evening_reason = ""
+    short = ""
+    if not skip_out:
+        evening = early_penalty(clock_out)
+        if evening:
+            evening_reason = "انصراف من 16:30 إلى 17:14" if evening == DEDUCTION_QUARTER else "انصراف قبل 16:30"
+        if shift["short_after_grace"]:
+            short = DEDUCTION_HALF
+    deduction = worse_penalty(worse_penalty(morning, evening), short)
+    if not deduction:
         return {
             "notes": notes,
-            "deduction": morning,
-            "reason": reason,
-            "remaining": remaining - used,
+            "deduction": "",
+            "reason": "",
+            "remaining": remaining,
             "used": used,
         }
-    if skip_out:
-        return empty
-    evening = early_penalty(clock_out)
-    if evening:
-        reason = "انصراف من 16:30 إلى 17:14" if evening == DEDUCTION_QUARTER else "انصراف قبل 16:30"
-        return {
-            **empty,
-            "notes": notes,
-            "deduction": evening,
-            "reason": reason,
-        }
-    if shift["short_after_grace"]:
-        return {
-            **empty,
-            "notes": notes,
-            "deduction": DEDUCTION_HALF,
-            "reason": "عدم إكمال 8 ساعات ونصف",
-        }
-    return empty
+    if morning and deduction == morning:
+        reason = morning_reason
+    elif evening and deduction == evening:
+        reason = evening_reason
+    else:
+        reason = "عدم إكمال 8 ساعات ونصف"
+    return {
+        "notes": notes,
+        "deduction": deduction,
+        "reason": reason,
+        "remaining": remaining,
+        "used": used,
+    }
 
 
 def build_report(punches: list, requests: list, employees: list) -> dict:
