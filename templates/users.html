@@ -105,8 +105,14 @@
 
         <section class="form-shell users-shell">
             <h2 class="section-title">Departments</h2>
-            <p class="muted">Change a department name here. Manager and team names are edited in the list below.</p>
+            <p class="muted">Change department names, then save once. Manager and team names are edited in the list below.</p>
             {% if custom_departments %}
+                <form method="post" action="{{ url_for('users_departments_bulk_edit') }}" id="department-save-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="bulk-bar">
+                        <button class="btn-sm btn-approve" type="submit">Save all department names</button>
+                    </div>
+                </form>
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -121,12 +127,8 @@
                             {% for dept in custom_departments %}
                                 <tr>
                                     <td class="card-name" data-label="Department">
-                                        <form method="post" action="{{ url_for('users_department_rename') }}" class="inline-form">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                            <input type="hidden" name="department_id" value="{{ dept.id }}">
-                                            <input type="text" name="label" value="{{ dept.label }}" required maxlength="40" aria-label="Department name">
-                                            <button class="btn-sm btn-approve" type="submit">Save</button>
-                                        </form>
+                                        <input type="hidden" form="department-save-form" name="department_id" value="{{ dept.id }}">
+                                        <input form="department-save-form" type="text" name="label" value="{{ dept.label }}" required maxlength="40" aria-label="Department name">
                                     </td>
                                     <td data-label="Manager">
                                         {% if dept.manager %}
@@ -172,6 +174,12 @@
         <section class="form-shell users-shell">
             <h2 class="section-title">Managers & team leaders</h2>
             {% if users %}
+                <form method="post" action="{{ url_for('users_bulk_edit') }}" id="people-save-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="bulk-bar">
+                        <button class="btn-sm btn-approve" type="submit">Save all names & teams</button>
+                    </div>
+                </form>
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -189,23 +197,18 @@
                             {% for user in users %}
                                 <tr>
                                     <td class="card-name" data-label="Name">
-                                        <form id="edit-user-{{ user.id }}" method="post" action="{{ url_for('users_edit') }}">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                            <input type="hidden" name="user_id" value="{{ user.id }}">
-                                        </form>
-                                        <div class="inline-form">
-                                            <input form="edit-user-{{ user.id }}" type="text" name="name"
-                                                   value="{{ user.name }}" required maxlength="80" aria-label="Name">
-                                            <button form="edit-user-{{ user.id }}" class="btn-sm btn-approve" type="submit">Save</button>
-                                        </div>
+                                        <input type="hidden" form="people-save-form" name="user_id" value="{{ user.id }}">
+                                        <input form="people-save-form" type="text" name="name"
+                                               value="{{ user.name }}" required maxlength="80" aria-label="Name">
                                     </td>
                                     <td data-label="Username">{{ user.username }}</td>
                                     <td data-label="Department">{{ user.department }}</td>
                                     <td data-label="Team">
                                         {% if user.role == 'team' %}
-                                            <input form="edit-user-{{ user.id }}" class="inline-edit" type="text" name="team"
+                                            <input form="people-save-form" class="inline-edit" type="text" name="team"
                                                    value="{{ user.team }}" required maxlength="60" aria-label="Team name">
                                         {% else %}
+                                            <input type="hidden" form="people-save-form" name="team" value="">
                                             All teams
                                         {% endif %}
                                     </td>

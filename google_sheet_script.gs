@@ -33,11 +33,7 @@ function doPost(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const deptSheet = getOrCreateSheet(ss, data.department || "Other");
   const deptHeaders = ensureHeaders(deptSheet);
-  const lastRow = deptSheet.getLastRow();
-  const values = lastRow >= 2
-    ? deptSheet.getRange(1, 1, lastRow, deptSheet.getLastColumn()).getValues()
-    : [deptHeaders];
-
+  const values = recentSheetValues(deptSheet, deptHeaders, 800);
   const blocked = checkCreateConflicts(values, data);
   if (blocked) {
     return jsonResponse(blocked);
@@ -252,6 +248,17 @@ function datesOverlap(fromA, toA, fromB, toB) {
   return startA <= endB && startB <= endA;
 }
 
+function recentSheetValues(sheet, headers, limit) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return [headers];
+  }
+  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  const count = Math.min(Math.max(limit || 800, 1), lastRow - 1);
+  const startRow = lastRow - count + 1;
+  return [headers].concat(sheet.getRange(startRow, 1, count, lastCol).getValues());
+}
+
 function appendMappedRow(sheet, valuesByHeader, headers) {
   if (!headers || !headers.length) {
     headers = ensureHeaders(sheet);
@@ -259,7 +266,8 @@ function appendMappedRow(sheet, valuesByHeader, headers) {
   const row = headers.map(function (header) {
     return Object.prototype.hasOwnProperty.call(valuesByHeader, header) ? valuesByHeader[header] : "";
   });
-  sheet.appendRow(row);
+  const nextRow = Math.max(sheet.getLastRow(), 1) + 1;
+  sheet.getRange(nextRow, 1, 1, row.length).setValues([row]);
 }
 
 function getOrCreateSheet(ss, name) {
@@ -303,15 +311,25 @@ function headerList() {
 
 function ensureHeaders(sheet) {
   const needed = headerList();
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(needed);
+  const lastRow = sheet.getLastRow();
+  if (lastRow === 0) {
+    sheet.getRange(1, 1, 1, needed.length).setValues([needed]);
     formatHeader(sheet);
     return needed;
   }
 
   let headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
-  let changed = false;
+  const trimmed = headers.map(function (item) {
+    return String(item == null ? "" : item).trim();
+  });
+  const complete = trimmed[0] === "Request ID" && needed.every(function (name) {
+    return trimmed.indexOf(name) !== -1;
+  });
+  if (complete) {
+    return headers;
+  }
 
+  let changed = false;
   if (String(headers[0]).trim() !== "Request ID") {
     sheet.insertColumnBefore(1);
     sheet.getRange(1, 1).setValue("Request ID");

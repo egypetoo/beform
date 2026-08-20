@@ -60,6 +60,12 @@ TRACK_ATTEMPTS = {}
 TRACK_LOCK = Lock()
 MAX_TRACK_ATTEMPTS = 8
 TRACK_WINDOW_SECONDS = 300
+FORM_META_CACHE = {"at": 0, "directory": [], "holidays": {}}
+FORM_META_SECONDS = 60
+
+
+def invalidate_form_meta() -> None:
+    FORM_META_CACHE["at"] = 0
 
 
 def today_values():
@@ -319,6 +325,9 @@ def teams_for_form() -> dict:
 
 
 def form_employee_directory() -> list:
+    now = time.time()
+    if now - FORM_META_CACHE["at"] < FORM_META_SECONDS:
+        return FORM_META_CACHE["directory"]
     labels_to_value = {
         item["label"].strip().lower(): item["value"]
         for item in all_departments(active_only=True)
@@ -335,7 +344,18 @@ def form_employee_directory() -> list:
             "name": employee["name"],
             "department": department_value,
         })
+    FORM_META_CACHE["directory"] = rows
+    FORM_META_CACHE["holidays"] = user_store.holiday_map()
+    FORM_META_CACHE["at"] = now
     return rows
+
+
+def official_holidays_for_form() -> dict:
+    now = time.time()
+    if now - FORM_META_CACHE["at"] < FORM_META_SECONDS:
+        return FORM_META_CACHE["holidays"]
+    form_employee_directory()
+    return FORM_META_CACHE["holidays"]
 
 
 def index_context(form) -> dict:
@@ -344,7 +364,7 @@ def index_context(form) -> dict:
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
         "employee_directory": form_employee_directory(),
-        "official_holidays": user_store.holiday_map(),
+        "official_holidays": official_holidays_for_form(),
         "form": form,
         **today_values(),
     }
@@ -380,7 +400,7 @@ def sheet_api(payload: dict) -> dict:
     if not payload["secret"]:
         raise RuntimeError("Sheet secret is not configured")
 
-    response = SHEET_SESSION.post(webhook, json=payload, timeout=20)
+    response = SHEET_SESSION.post(webhook, json=payload, timeout=(5, 15))
     response.raise_for_status()
     try:
         data = json.loads(response.text or "{}")
@@ -1355,6 +1375,72 @@ def users_edit():
     return redirect(url_for("users_admin"))
 
 
+@app.route("/users/bulk-edit", methods=["POST"])
+@hr_required
+def users_bulk_edit():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    ids = request.form.getlist("user_id")
+    names = request.form.getlist("name")
+    teams = request.form.getlist("team")
+    if not ids or len(ids) != len(names) or len(ids) != len(teams):
+        flash("Could not save the people list. Refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    updated = 0
+    errors = []
+    for index, raw_id in enumerate(ids):
+        try:
+            user_id = int(raw_id)
+        except ValueError:
+            continue
+        try:
+            if user_store.update_person(user_id, names[index], teams[index]):
+                updated += 1
+        except ValueError as exc:
+            errors.append(str(exc))
+    if updated:
+        flash(f"Saved {updated} account{'s' if updated != 1 else ''}.", "success")
+    elif not errors:
+        flash("No account changes to save.", "error")
+    for error in errors[:12]:
+        flash(error, "error")
+    return redirect(url_for("users_admin"))
+
+
+@app.route("/users/departments/bulk-edit", methods=["POST"])
+@hr_required
+def users_departments_bulk_edit():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    ids = request.form.getlist("department_id")
+    labels = request.form.getlist("label")
+    if not ids or len(ids) != len(labels):
+        flash("Could not save the department list. Refresh and try again.", "error")
+        return redirect(url_for("users_admin"))
+    updated = 0
+    errors = []
+    for index, raw_id in enumerate(ids):
+        try:
+            dept_id = int(raw_id)
+        except ValueError:
+            continue
+        try:
+            user_store.rename_department(dept_id, labels[index])
+            updated += 1
+        except ValueError as exc:
+            errors.append(str(exc))
+    if updated:
+        invalidate_form_meta()
+        flash(f"Saved {updated} department{'s' if updated != 1 else ''}.", "success")
+    elif not errors:
+        flash("No department changes to save.", "error")
+    for error in errors[:12]:
+        flash(error, "error")
+    return redirect(url_for("users_admin"))
+
+
 @app.route("/users/department/toggle", methods=["POST"])
 @hr_required
 def users_department_toggle():
@@ -1478,6 +1564,7 @@ def employees_admin():
         else:
             try:
                 user_store.create_employee(name, department_label, fingerprint, device)
+                invalidate_form_meta()
                 flash("Employee added.", "success")
             except ValueError as exc:
                 flash(str(exc), "error")
@@ -1513,6 +1600,7 @@ def employees_import():
         flash(str(exc), "error")
         return redirect(url_for("employees_admin"))
     if created["added"] or created["updated"]:
+        invalidate_form_meta()
         flash(
             f"Imported {created['added']} new employee(s) and updated {created['updated']}.",
             "success",
@@ -1556,11 +1644,82 @@ def employees_edit():
         return redirect(url_for("employees_admin"))
     try:
         if user_store.update_employee(employee_id, name, department_label, fingerprint, device):
+            invalidate_form_meta()
             flash("Employee updated.", "success")
         else:
             flash("Could not update that employee.", "error")
     except ValueError as exc:
         flash(str(exc), "error")
+    return redirect(url_for("employees_admin"))
+
+
+@app.route("/employees/bulk-edit", methods=["POST"])
+@hr_required
+def employees_bulk_edit():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    maps = employee_department_maps()
+    ids = request.form.getlist("employee_id")
+    names = request.form.getlist("name")
+    departments = request.form.getlist("department")
+    fingerprints = request.form.getlist("fingerprint")
+    devices = request.form.getlist("device")
+    if not ids or len({len(ids), len(names), len(departments), len(fingerprints), len(devices)}) != 1:
+        flash("Could not save the employee list. Refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    errors = []
+    pending = []
+    seen = {}
+    for index, raw_id in enumerate(ids):
+        try:
+            employee_id = int(raw_id)
+        except ValueError:
+            continue
+        name = names[index]
+        department_value = (departments[index] or "").strip()
+        fingerprint = fingerprints[index]
+        device = devices[index]
+        department_label = maps["labels"].get(department_value, department_value)
+        issues = user_store.validate_employee(
+            name,
+            department_label,
+            fingerprint,
+            device,
+            maps["label_set"],
+            employee_id,
+        )
+        key = (
+            user_store.normalize_device(device),
+            user_store.normalize_fingerprint_id(fingerprint),
+        )
+        if key[0] and key[1]:
+            if key in seen:
+                issues = list(issues) + [
+                    f"Fingerprint {key[1]} on {key[0]} is used twice in this list."
+                ]
+            else:
+                seen[key] = employee_id
+        if issues:
+            errors.append(f"{(name or 'Employee').strip()}: " + " ".join(issues))
+            continue
+        pending.append((employee_id, name, department_label, fingerprint, device))
+    updated = 0
+    for employee_id, name, department_label, fingerprint, device in pending:
+        try:
+            if user_store.update_employee(employee_id, name, department_label, fingerprint, device):
+                updated += 1
+        except ValueError as exc:
+            errors.append(str(exc))
+    if updated:
+        invalidate_form_meta()
+        flash(f"Saved {updated} employee{'s' if updated != 1 else ''}.", "success")
+    elif not errors:
+        flash("No employee changes to save.", "error")
+    for error in errors[:12]:
+        flash(error, "error")
+    if len(errors) > 12:
+        flash(f"{len(errors) - 12} more row(s) failed.", "error")
     return redirect(url_for("employees_admin"))
 
 
@@ -1575,6 +1734,7 @@ def employees_delete():
     except ValueError:
         employee_id = 0
     if user_store.delete_employee(employee_id):
+        invalidate_form_meta()
         flash("Employee deleted.", "success")
     else:
         flash("Could not delete that employee.", "error")
@@ -1591,6 +1751,7 @@ def employees_bulk_delete():
     if scope == "all":
         deleted = user_store.delete_all_employees()
         if deleted:
+            invalidate_form_meta()
             flash(f"Deleted all {deleted} employees.", "success")
         else:
             flash("No employees to delete.", "error")
@@ -1598,6 +1759,7 @@ def employees_bulk_delete():
     selected = request.form.getlist("selected")
     deleted = user_store.delete_employees(selected)
     if deleted:
+        invalidate_form_meta()
         flash(f"Deleted {deleted} employee{'s' if deleted != 1 else ''}.", "success")
     else:
         flash("Select at least one employee to delete.", "error")
@@ -1619,6 +1781,7 @@ def holidays_admin():
         for error in errors:
             flash(error, "error")
         if added:
+            invalidate_form_meta()
             flash(f"Added {added} official holiday{'s' if added != 1 else ''}. These days will not be deducted.", "success")
         return redirect(url_for("holidays_admin"))
     return render_template(
@@ -1639,6 +1802,7 @@ def holidays_delete():
     except ValueError:
         holiday_id = 0
     if user_store.delete_holiday(holiday_id):
+        invalidate_form_meta()
         flash("Holiday removed.", "success")
     else:
         flash("Could not delete that holiday.", "error")

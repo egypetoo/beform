@@ -104,9 +104,13 @@
                             <input type="checkbox" id="employee-select-all">
                             Select all
                         </label>
+                        <button class="btn-sm btn-approve" form="employee-save-form" type="submit">Save all changes</button>
                         <button class="btn-sm btn-reject" type="submit" id="employee-delete-selected">Delete selected</button>
                         <button class="btn-sm btn-reject" type="submit" id="employee-delete-all">Delete all</button>
                     </div>
+                </form>
+                <form method="post" action="{{ url_for('employees_bulk_edit') }}" id="employee-save-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 </form>
                 <div class="table-wrap">
                     <table>
@@ -128,31 +132,25 @@
                                                name="selected" value="{{ employee.id }}" aria-label="Select {{ employee.name }}">
                                     </td>
                                     <td class="card-name" data-label="Name">
-                                        <form id="edit-employee-{{ employee.id }}" method="post" action="{{ url_for('employees_edit') }}">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                            <input type="hidden" name="employee_id" value="{{ employee.id }}">
-                                        </form>
-                                        <div class="inline-form">
-                                            <input form="edit-employee-{{ employee.id }}" type="text" name="name"
-                                                   value="{{ employee.name }}" required maxlength="80"
-                                                   pattern="[A-Za-z][A-Za-z .'\-]*" title="English letters only"
-                                                   aria-label="Name">
-                                            <button form="edit-employee-{{ employee.id }}" class="btn-sm btn-approve" type="submit">Save</button>
-                                        </div>
+                                        <input type="hidden" form="employee-save-form" name="employee_id" value="{{ employee.id }}">
+                                        <input form="employee-save-form" type="text" name="name"
+                                               value="{{ employee.name }}" required maxlength="80"
+                                               pattern="[A-Za-z][A-Za-z .'\-]*" title="English letters only"
+                                               aria-label="Name">
                                     </td>
                                     <td data-label="Department">
-                                        <select form="edit-employee-{{ employee.id }}" name="department" required aria-label="Department">
+                                        <select form="employee-save-form" name="department" required aria-label="Department">
                                             {% for dept in departments %}
                                                 <option value="{{ dept.value }}" {% if employee.department == dept.label %}selected{% endif %}>{{ dept.label }}</option>
                                             {% endfor %}
                                         </select>
                                     </td>
                                     <td data-label="Fingerprint">
-                                        <input form="edit-employee-{{ employee.id }}" class="inline-edit" type="text" name="fingerprint"
+                                        <input form="employee-save-form" class="inline-edit" type="text" name="fingerprint"
                                                value="{{ employee.fingerprint }}" required inputmode="numeric" maxlength="10" aria-label="Fingerprint">
                                     </td>
                                     <td data-label="Device">
-                                        <select form="edit-employee-{{ employee.id }}" name="device" required aria-label="Device">
+                                        <select form="employee-save-form" name="device" required aria-label="Device">
                                             {% for device in devices %}
                                                 <option value="{{ device }}" {% if employee.device == device %}selected{% endif %}>{{ device }}</option>
                                             {% endfor %}
