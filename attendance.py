@@ -56,9 +56,8 @@ WINDOW_END = "10:15"
 QUARTER_UNTIL = "11:00"
 REQUIRED_MINUTES = 510
 DAILY_GRACE_MINUTES = 15
-SHIFT_END = "17:30"
-OUT_OK_FROM = "17:15"
-OUT_QUARTER_FROM = "16:30"
+SHIFT_END = "18:30"
+OUT_OK_FROM = "18:30"
 MONTHLY_LATE_ALLOWANCE_MINUTES = 4 * 60
 DEDUCTION_FULL = "يوم"
 DEDUCTION_HALF = "نصف يوم"
@@ -124,13 +123,10 @@ def late_penalty(clock_in: str) -> str:
 def early_penalty(clock_out: str) -> str:
     out_minutes = minutes_of(clock_out)
     ok_from = minutes_of(OUT_OK_FROM)
-    quarter_from = minutes_of(OUT_QUARTER_FROM)
-    if out_minutes is None or ok_from is None or quarter_from is None:
+    if out_minutes is None or ok_from is None:
         return ""
     if out_minutes >= ok_from:
         return ""
-    if out_minutes >= quarter_from:
-        return DEDUCTION_QUARTER
     return DEDUCTION_HALF
 
 
@@ -573,14 +569,11 @@ def classify_day(
             remaining -= used
     evening = ""
     evening_reason = ""
-    short = ""
     if not skip_out:
         evening = early_penalty(clock_out)
         if evening:
-            evening_reason = "انصراف من 16:30 إلى 17:14" if evening == DEDUCTION_QUARTER else "انصراف قبل 16:30"
-        if shift["short_after_grace"]:
-            short = DEDUCTION_HALF
-    deduction = worse_penalty(worse_penalty(morning, evening), short)
+            evening_reason = "انصراف قبل 18:30"
+    deduction = worse_penalty(morning, evening)
     if not deduction:
         return {
             "notes": notes,
@@ -589,12 +582,7 @@ def classify_day(
             "remaining": remaining,
             "used": used,
         }
-    if morning and deduction == morning:
-        reason = morning_reason
-    elif evening and deduction == evening:
-        reason = evening_reason
-    else:
-        reason = "عدم إكمال 8 ساعات ونصف"
+    reason = morning_reason if morning and deduction == morning else evening_reason
     return {
         "notes": notes,
         "deduction": deduction,
