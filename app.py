@@ -1124,7 +1124,23 @@ def users_department():
     else:
         try:
             created = user_store.create_department(label, name, username, password)
-            flash(f"Department {created['label']} added. Manager login: {created['username']}", "success")
+            invalidate_form_meta()
+            if created.get("username"):
+                if created.get("created_department"):
+                    flash(
+                        f"Department {created['label']} added. Manager login: {created['username']}",
+                        "success",
+                    )
+                else:
+                    flash(
+                        f"Manager login added for {created['label']}: {created['username']}",
+                        "success",
+                    )
+            else:
+                flash(
+                    f"Department {created['label']} added. It is managed by HR Admin until you assign a manager.",
+                    "success",
+                )
         except ValueError as exc:
             flash(str(exc), "error")
     return redirect(url_for("users_admin"))

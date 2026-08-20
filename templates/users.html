@@ -81,26 +81,26 @@
         <form class="form-shell users-shell" method="post" action="{{ url_for('users_department') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Add department / manager</h2>
-            <p class="muted">Web, Social, Sales, Accounting, and HR already exist. Type the same department name here to give it a manager login.</p>
+            <p class="muted">Manager login is optional. Leave the manager fields empty and the department will be managed by HR Admin. Fill them only if this department needs its own login.</p>
             <section class="field">
                 <label for="label">Department name</label>
-                <input id="label" name="label" type="text" required placeholder="Marketing">
+                <input id="label" name="label" type="text" required placeholder="Buffet">
             </section>
             <section class="field">
                 <label for="manager_name">Department manager name</label>
-                <input id="manager_name" name="manager_name" type="text" required placeholder="Mohamed">
+                <input id="manager_name" name="manager_name" type="text" placeholder="Optional">
             </section>
             <section class="field">
                 <label for="manager_username">Manager username</label>
-                <input id="manager_username" name="manager_username" type="text" required maxlength="20"
-                       placeholder="marketing">
+                <input id="manager_username" name="manager_username" type="text" maxlength="20"
+                       placeholder="Optional">
             </section>
             <section class="field">
                 <label for="manager_password">Manager password</label>
-                <input id="manager_password" name="manager_password" type="password" required minlength="8"
-                       placeholder="At least 8 characters">
+                <input id="manager_password" name="manager_password" type="password" minlength="8"
+                       placeholder="Optional, at least 8 characters">
             </section>
-            <button type="submit">Save manager</button>
+            <button type="submit">Save department</button>
         </form>
 
         <section class="form-shell users-shell">
@@ -134,7 +134,7 @@
                                         {% if dept.manager %}
                                             {{ dept.manager.name }} ({{ dept.manager.username }})
                                         {% else %}
-                                            <span class="muted">No manager yet</span>
+                                            <span class="muted">HR Admin</span>
                                         {% endif %}
                                     </td>
                                     <td data-label="Status">

@@ -230,6 +230,7 @@ def validate_new_department(label: str, name: str, username: str, password: str)
     username = normalize_username(username)
     password = password or ""
     value = slug_from_label(label)
+    wants_manager = bool(name or username or password)
 
     if not LABEL_RE.match(label):
         errors.append("Department name must be 2-40 characters: letters, numbers, spaces, &, / or dash.")
@@ -237,26 +238,33 @@ def validate_new_department(label: str, name: str, username: str, password: str)
         errors.append("This department name is reserved.")
     elif len(value) < 3:
         errors.append("Department name is too short.")
-    if not name:
-        errors.append("Manager name is required.")
-    if not USERNAME_RE.match(username):
-        errors.append("Username must be 3-20 characters: letters, numbers, dot, dash, or underscore.")
-    elif username_taken(username):
-        errors.append("This username is reserved or already exists.")
-    if len(password) < 8:
-        errors.append("Password must be at least 8 characters.")
     existing = find_department(label)
-    if existing and department_manager(existing["label"]):
-        errors.append("This department already has a manager. Reset their password from the list below.")
+    if existing and not wants_manager:
+        errors.append("This department already exists. Add a manager below if you want a separate login.")
+    if wants_manager:
+        if not name:
+            errors.append("Manager name is required, or leave all manager fields empty to keep it under HR Admin.")
+        if not USERNAME_RE.match(username):
+            errors.append("Username must be 3-20 characters: letters, numbers, dot, dash, or underscore.")
+        elif username_taken(username):
+            errors.append("This username is reserved or already exists.")
+        if len(password) < 8:
+            errors.append("Password must be at least 8 characters.")
+        if existing and department_manager(existing["label"]):
+            errors.append("This department already has a manager. Reset their password from the list below.")
     return errors
 
 
 def create_department(label: str, name: str, username: str, password: str) -> dict:
     init_db()
     label = label.strip()
+    name = (name or "").strip()
     username = normalize_username(username)
+    password = password or ""
+    wants_manager = bool(name or username or password)
     value = slug_from_label(label)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    created_department = False
     with DB_LOCK:
         conn = db()
         try:
@@ -271,6 +279,14 @@ def create_department(label: str, name: str, username: str, password: str) -> di
                     "INSERT INTO departments (value, label, active, created_at) VALUES (?, ?, 1, ?)",
                     (value, label, now),
                 )
+                created_department = True
+            if not wants_manager:
+                if not created_department:
+                    conn.close()
+                    raise ValueError("This department already exists.")
+                conn.commit()
+                conn.close()
+                return {"value": value, "label": label, "username": "", "created_department": True}
             manager = conn.execute(
                 "SELECT id FROM users WHERE department = ? AND role = 'department' AND active = 1",
                 (label,),
@@ -283,7 +299,7 @@ def create_department(label: str, name: str, username: str, password: str) -> di
                 INSERT INTO users (username, name, department, team, role, password_hash, active, created_at)
                 VALUES (?, ?, ?, '', 'department', ?, 1, ?)
                 """,
-                (username, name.strip(), label, generate_password_hash(password), now),
+                (username, name, label, generate_password_hash(password), now),
             )
             conn.commit()
         except sqlite3.IntegrityError as exc:
@@ -291,7 +307,12 @@ def create_department(label: str, name: str, username: str, password: str) -> di
             conn.close()
             raise ValueError("Department or username already exists.") from exc
         conn.close()
-    return {"value": value, "label": label, "username": username}
+    return {
+        "value": value,
+        "label": label,
+        "username": username,
+        "created_department": created_department,
+    }
 
 
 def toggle_department(dept_id: int) -> bool:
