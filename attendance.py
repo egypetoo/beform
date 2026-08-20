@@ -52,13 +52,12 @@ LATE_EXCUSE_TYPE = "personal excuse"
 SATURDAY_WORK_TYPE = "monthly saturday work"
 NO_CLOCK_OUT_DEPARTMENTS = {"sales", "مبيعات"}
 WINDOW_START = "09:00"
+FLEX_END = "10:00"
 WINDOW_END = "10:15"
 QUARTER_UNTIL = "11:00"
 REQUIRED_MINUTES = 510
 QUARTER_WORKED_MINUTES = 7 * 60 + 30
 DAILY_GRACE_MINUTES = 15
-SHIFT_END = "18:30"
-OUT_OK_FROM = "18:30"
 MONTHLY_LATE_ALLOWANCE_MINUTES = 4 * 60
 DEDUCTION_FULL = "يوم"
 DEDUCTION_HALF = "نصف يوم"
@@ -125,13 +124,15 @@ def clock_out_penalty(shift: dict) -> tuple[str, str]:
     early = int(shift.get("early_out") or 0)
     if early <= 0:
         return "", ""
-    late = int(shift.get("late_minutes") or 0)
-    remaining_early = max(0, early - max(0, DAILY_GRACE_MINUTES - late))
+    late_flex = int(shift.get("late_past_flex") or 0)
+    remaining_early = max(0, early - max(0, DAILY_GRACE_MINUTES - late_flex))
     if remaining_early <= 0:
         return "", ""
-    worked = shift.get("worked_minutes")
+    worked = shift.get("credited_minutes")
+    if worked is None:
+        worked = shift.get("worked_minutes")
     if worked is not None and int(worked) >= QUARTER_WORKED_MINUTES:
-        return DEDUCTION_QUARTER, "انصراف قبل 18:30"
+        return DEDUCTION_QUARTER, "عدم إكمال 8 ساعات ونصف"
     return DEDUCTION_HALF, "عدم إكمال 7 ساعات ونصف"
 
 
@@ -160,26 +161,33 @@ def evaluate_shift(clock_in: str, clock_out: str) -> dict:
     in_minutes = minutes_of(clock_in)
     out_minutes = minutes_of(clock_out)
     start = minutes_of(WINDOW_START)
-    end = minutes_of(SHIFT_END)
+    flex_end = minutes_of(FLEX_END)
+    allowed = minutes_of(WINDOW_END)
     late_minutes = 0
     late_from_start = 0
+    late_past_flex = 0
     early_out = 0
     worked_minutes = None
+    credited_minutes = None
     short_minutes = 0
     grace_used = 0
     short_after_grace = 0
+    expected_out = 0
     if in_minutes is not None:
-        late_minutes = max(0, in_minutes - minutes_of(WINDOW_END))
+        late_minutes = max(0, in_minutes - allowed) if allowed is not None else 0
         late_from_start = max(0, in_minutes - start) if start is not None else 0
+        late_past_flex = max(0, in_minutes - flex_end) if flex_end is not None else 0
+        effective_start = in_minutes if start is None else max(in_minutes, start)
+        expected_out = effective_start + REQUIRED_MINUTES
         if out_minutes is not None:
             raw_out = out_minutes
             if raw_out < in_minutes:
                 raw_out += 24 * 60
             worked_minutes = raw_out - in_minutes
-            short_minutes = max(0, REQUIRED_MINUTES - worked_minutes)
-            if end is not None:
-                early_out = max(0, end - out_minutes)
-            deviation = late_minutes + early_out
+            credited_minutes = max(0, raw_out - effective_start)
+            short_minutes = max(0, REQUIRED_MINUTES - credited_minutes)
+            early_out = max(0, expected_out - raw_out)
+            deviation = late_past_flex + early_out
             grace_used = min(DAILY_GRACE_MINUTES, deviation)
             short_after_grace = max(0, short_minutes - DAILY_GRACE_MINUTES)
     return {
@@ -187,9 +195,12 @@ def evaluate_shift(clock_in: str, clock_out: str) -> dict:
         "late": format_hours(late_minutes),
         "late_hours": decimal_hours(late_minutes),
         "late_from_start": late_from_start,
+        "late_past_flex": late_past_flex,
         "early_out": early_out,
         "grace_used": grace_used,
         "worked_minutes": worked_minutes,
+        "credited_minutes": credited_minutes,
+        "expected_out": expected_out,
         "worked": format_hours(worked_minutes) if worked_minutes is not None else "",
         "worked_hours": decimal_hours(worked_minutes) if worked_minutes is not None else "",
         "short_minutes": short_minutes,
