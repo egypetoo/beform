@@ -124,8 +124,8 @@ def clock_out_penalty(shift: dict) -> tuple[str, str]:
     early = int(shift.get("early_out") or 0)
     if early <= 0:
         return "", ""
-    late_flex = int(shift.get("late_past_flex") or 0)
-    remaining_early = max(0, early - max(0, DAILY_GRACE_MINUTES - late_flex))
+    late = int(shift.get("late_minutes") or 0)
+    remaining_early = max(0, early - max(0, DAILY_GRACE_MINUTES - late))
     if remaining_early <= 0:
         return "", ""
     worked = shift.get("credited_minutes")
@@ -187,7 +187,7 @@ def evaluate_shift(clock_in: str, clock_out: str) -> dict:
             credited_minutes = max(0, raw_out - effective_start)
             short_minutes = max(0, REQUIRED_MINUTES - credited_minutes)
             early_out = max(0, expected_out - raw_out)
-            deviation = late_past_flex + early_out
+            deviation = late_minutes + early_out
             grace_used = min(DAILY_GRACE_MINUTES, deviation)
             short_after_grace = max(0, short_minutes - DAILY_GRACE_MINUTES)
     return {
