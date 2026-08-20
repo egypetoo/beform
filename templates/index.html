@@ -101,6 +101,7 @@
                                value="{{ form.get('end_date') or today }}">
                     </div>
                 </div>
+                <p class="field-hint">Official holidays cannot be used for missions, leave, remote work, or any other request.</p>
             </section>
 
             <section class="field time-range" id="time-range-card">
@@ -168,6 +169,33 @@
             return new Date(year, month - 1, day).getDay();
         }
 
+        function nextDay(value) {
+            const [year, month, day] = (value || '').split('-').map(Number);
+            if (!year || !month || !day) return '';
+            const next = new Date(year, month - 1, day + 1);
+            const yyyy = String(next.getFullYear());
+            const mm = String(next.getMonth() + 1).padStart(2, '0');
+            const dd = String(next.getDate()).padStart(2, '0');
+            return yyyy + '-' + mm + '-' + dd;
+        }
+
+        function holidaysInRange(start, end) {
+            if (!start || !officialHolidays) return [];
+            let last = end || start;
+            if (last < start) last = start;
+            const hits = [];
+            let current = start;
+            while (current && current <= last) {
+                if (Object.prototype.hasOwnProperty.call(officialHolidays, current)) {
+                    hits.push({ day: current, name: officialHolidays[current] || '' });
+                }
+                const following = nextDay(current);
+                if (!following || following === current) break;
+                current = following;
+            }
+            return hits;
+        }
+
         function updateFields() {
             const value = requestType.value;
             const isPunch = punchTypes.includes(value);
@@ -220,6 +248,7 @@
         const teamCard = document.getElementById('team-card');
         const teamsByDepartment = {{ teams_by_department | tojson }};
         const employeeDirectory = {{ employee_directory | tojson }};
+        const officialHolidays = {{ official_holidays | tojson }};
         const selectedTeam = {{ form.get('team', '') | tojson }};
         let sending = false;
         let lockedDepartment = '';
@@ -327,6 +356,17 @@
                     return;
                 }
                 endDate.value = startDate.value;
+            }
+            const holidayHits = holidaysInRange(startDate.value, endDate.value || startDate.value);
+            if (holidayHits.length) {
+                event.preventDefault();
+                const labels = holidayHits.slice(0, 3).map((item) => {
+                    const name = (item.name || '').trim();
+                    return name ? item.day + ' (' + name + ')' : item.day;
+                });
+                const extra = holidayHits.length > 3 ? ' and ' + (holidayHits.length - 3) + ' more' : '';
+                alert('Requests cannot be submitted on official holidays: ' + labels.join(', ') + extra + '.');
+                return;
             }
             if (requestType.value === personalExcuse) {
                 const startParts = (fromTime.value || '').split(':');

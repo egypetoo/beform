@@ -937,6 +937,28 @@ def holiday_map() -> dict:
     return {item["day"]: item["name"] for item in list_holidays()}
 
 
+def holidays_touching(start: str, end: str) -> list:
+    start_day = parse_holiday_day(start)
+    end_day = parse_holiday_day(end or start)
+    if not start_day:
+        return []
+    if not end_day:
+        end_day = start_day
+    if start_day > end_day:
+        start_day, end_day = end_day, start_day
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT day, name FROM holidays WHERE day >= ? AND day <= ? ORDER BY day",
+        (start_day, end_day),
+    ).fetchall()
+    conn.close()
+    return [
+        {"day": row["day"], "name": (row["name"] or "").strip() or "Official holiday"}
+        for row in rows
+    ]
+
+
 def add_holidays(start: str, end: str, name: str) -> tuple[int, list]:
     start_day = parse_holiday_day(start)
     end_day = parse_holiday_day(end or start)

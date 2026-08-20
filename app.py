@@ -344,6 +344,7 @@ def index_context(form) -> dict:
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
         "employee_directory": form_employee_directory(),
+        "official_holidays": user_store.holiday_map(),
         "form": form,
         **today_values(),
     }
@@ -646,6 +647,21 @@ def index():
                     errors.append("Friday is an off day. Choose the working Saturday instead.")
                 elif saturday.weekday() != 5:
                     errors.append("Monthly Saturday Work must be a Saturday. Friday and Saturday are off except one Saturday per month.")
+        if start_date:
+            holiday_hits = user_store.holidays_touching(start_date, end_date or start_date)
+            if holiday_hits:
+                shown = holiday_hits[:3]
+                labels = [
+                    f"{item['day']}" + (f" ({item['name']})" if item["name"] != "Official holiday" else "")
+                    for item in shown
+                ]
+                extra = f" and {len(holiday_hits) - 3} more" if len(holiday_hits) > 3 else ""
+                errors.append(
+                    "Requests cannot be submitted on official holidays: "
+                    + ", ".join(labels)
+                    + extra
+                    + "."
+                )
 
         if errors:
             for error in errors:
