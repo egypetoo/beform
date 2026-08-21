@@ -82,6 +82,46 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS form_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT UNIQUE NOT NULL,
+                submitted_at TEXT NOT NULL,
+                fingerprint_id TEXT NOT NULL,
+                device TEXT NOT NULL DEFAULT '',
+                name TEXT NOT NULL,
+                department TEXT NOT NULL,
+                team TEXT NOT NULL DEFAULT '',
+                request_type TEXT NOT NULL,
+                request_date TEXT NOT NULL DEFAULT '',
+                punch_in_time TEXT NOT NULL DEFAULT '',
+                punch_out_time TEXT NOT NULL DEFAULT '',
+                from_time TEXT NOT NULL DEFAULT '',
+                to_time TEXT NOT NULL DEFAULT '',
+                start_date TEXT NOT NULL DEFAULT '',
+                end_date TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'Pending',
+                reviewed_by TEXT NOT NULL DEFAULT '',
+                reviewed_at TEXT NOT NULL DEFAULT '',
+                rejection_reason TEXT NOT NULL DEFAULT '',
+                sync_status TEXT NOT NULL DEFAULT 'pending',
+                sync_error TEXT NOT NULL DEFAULT '',
+                sync_attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_form_requests_fp ON form_requests(fingerprint_id, start_date)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_form_requests_sync ON form_requests(sync_status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_form_requests_dept ON form_requests(department)"
+        )
         conn.commit()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for value, label in SEED_DEPARTMENTS:
@@ -1018,6 +1058,257 @@ def add_holidays(start: str, end: str, name: str) -> tuple[int, list]:
     if not added:
         errors.append("Those dates are already saved as official holidays.")
     return added, errors
+
+
+def _form_request_dict(row) -> dict:
+    return dict(row) if row is not None else {}
+
+
+def form_request_to_sheet_row(row) -> dict:
+    item = _form_request_dict(row)
+    return {
+        "Request ID": item.get("request_id") or "",
+        "Submitted At": item.get("submitted_at") or "",
+        "Fingerprint Number": item.get("fingerprint_id") or "",
+        "Device": item.get("device") or "",
+        "Name": item.get("name") or "",
+        "Department": item.get("department") or "",
+        "Request Type": item.get("request_type") or "",
+        "Request Date": item.get("request_date") or "",
+        "Punch In Time": item.get("punch_in_time") or "",
+        "Punch Out Time": item.get("punch_out_time") or "",
+        "From Time": item.get("from_time") or "",
+        "To Time": item.get("to_time") or "",
+        "From Date": item.get("start_date") or "",
+        "To Date": item.get("end_date") or "",
+        "Notes": item.get("notes") or "",
+        "Status": item.get("status") or "Pending",
+        "Reviewed By": item.get("reviewed_by") or "",
+        "Reviewed At": item.get("reviewed_at") or "",
+        "Rejection Reason": item.get("rejection_reason") or "",
+        "Team": item.get("team") or "",
+    }
+
+
+def form_request_to_payload(row) -> dict:
+    item = _form_request_dict(row)
+    return {
+        "request_id": item.get("request_id") or "",
+        "submitted_at": item.get("submitted_at") or "",
+        "fingerprint_id": item.get("fingerprint_id") or "",
+        "device": item.get("device") or "",
+        "name": item.get("name") or "",
+        "department": item.get("department") or "",
+        "team": item.get("team") or "",
+        "request_type": item.get("request_type") or "",
+        "request_date": item.get("request_date") or "",
+        "punch_in_time": item.get("punch_in_time") or "",
+        "punch_out_time": item.get("punch_out_time") or "",
+        "from_time": item.get("from_time") or "",
+        "to_time": item.get("to_time") or "",
+        "start_date": item.get("start_date") or "",
+        "end_date": item.get("end_date") or "",
+        "notes": item.get("notes") or "",
+        "status": item.get("status") or "Pending",
+    }
+
+
+def create_form_request(row: dict) -> None:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            conn.execute(
+                """
+                INSERT INTO form_requests (
+                    request_id, submitted_at, fingerprint_id, device, name, department, team,
+                    request_type, request_date, punch_in_time, punch_out_time, from_time, to_time,
+                    start_date, end_date, notes, status, reviewed_by, reviewed_at, rejection_reason,
+                    sync_status, sync_error, sync_attempts, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', 'pending', '', 0, ?)
+                """,
+                (
+                    row.get("request_id") or "",
+                    row.get("submitted_at") or now,
+                    normalize_fingerprint_id(row.get("fingerprint_id")),
+                    normalize_device(row.get("device") or ""),
+                    (row.get("name") or "").strip(),
+                    (row.get("department") or "").strip(),
+                    (row.get("team") or "").strip(),
+                    (row.get("request_type") or "").strip(),
+                    row.get("request_date") or "",
+                    row.get("punch_in_time") or "",
+                    row.get("punch_out_time") or "",
+                    row.get("from_time") or "",
+                    row.get("to_time") or "",
+                    row.get("start_date") or "",
+                    row.get("end_date") or "",
+                    row.get("notes") or "",
+                    row.get("status") or "Pending",
+                    now,
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            raise ValueError("This request was already submitted.") from exc
+        finally:
+            conn.close()
+
+
+def has_pending_form_requests() -> bool:
+    init_db()
+    conn = db()
+    row = conn.execute(
+        "SELECT 1 FROM form_requests WHERE sync_status = 'pending' LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return bool(row)
+
+
+def pending_form_requests(limit: int = 8) -> list:
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        """
+        SELECT * FROM form_requests
+        WHERE sync_status = 'pending'
+        ORDER BY id ASC
+        LIMIT ?
+        """,
+        (max(1, int(limit)),),
+    ).fetchall()
+    conn.close()
+    return [_form_request_dict(row) for row in rows]
+
+
+def form_requests_as_sheet_rows(fingerprint: str = "") -> list:
+    init_db()
+    conn = db()
+    fp = normalize_fingerprint_id(fingerprint)
+    if fp:
+        rows = conn.execute(
+            "SELECT * FROM form_requests WHERE fingerprint_id = ? ORDER BY submitted_at DESC, id DESC",
+            (fp,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM form_requests ORDER BY submitted_at DESC, id DESC"
+        ).fetchall()
+    conn.close()
+    return [form_request_to_sheet_row(row) for row in rows]
+
+
+def unsynced_form_request_sheet_rows(department: str = "ALL") -> list:
+    init_db()
+    conn = db()
+    sql = "SELECT * FROM form_requests WHERE sync_status != 'synced'"
+    params = []
+    if department and department != "ALL":
+        sql += " AND lower(department) = lower(?)"
+        params.append(department.strip())
+    sql += " ORDER BY submitted_at DESC, id DESC"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [form_request_to_sheet_row(row) for row in rows]
+
+
+def lookup_form_request_sheet_rows(fingerprint: str, name: str = "") -> list:
+    rows = form_requests_as_sheet_rows(fingerprint)
+    wanted_name = normalize_person_name(name)
+    if not wanted_name:
+        return rows
+    return [
+        row for row in rows
+        if names_match(wanted_name, str(row.get("Name") or ""))
+    ]
+
+
+def get_form_requests_by_ids(request_ids: list) -> dict:
+    ids = [str(item or "").strip() for item in request_ids if str(item or "").strip()]
+    if not ids:
+        return {}
+    init_db()
+    conn = db()
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT * FROM form_requests WHERE request_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    conn.close()
+    return {row["request_id"]: _form_request_dict(row) for row in rows}
+
+
+def mark_form_request_synced(request_id: str) -> None:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        conn.execute(
+            """
+            UPDATE form_requests
+            SET sync_status = 'synced', sync_error = '', sync_attempts = sync_attempts + 1
+            WHERE request_id = ?
+            """,
+            (request_id,),
+        )
+        conn.commit()
+        conn.close()
+
+
+def mark_form_request_blocked(request_id: str, reason: str) -> None:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        conn.execute(
+            """
+            UPDATE form_requests
+            SET sync_status = 'blocked', sync_error = ?, sync_attempts = sync_attempts + 1
+            WHERE request_id = ?
+            """,
+            ((reason or "").strip()[:300], request_id),
+        )
+        conn.commit()
+        conn.close()
+
+
+def bump_form_request_sync_attempt(request_id: str, error: str) -> None:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        conn.execute(
+            """
+            UPDATE form_requests
+            SET sync_error = ?, sync_attempts = sync_attempts + 1
+            WHERE request_id = ? AND sync_status = 'pending'
+            """,
+            ((error or "").strip()[:300], request_id),
+        )
+        conn.commit()
+        conn.close()
+
+
+def update_form_request_statuses(items: list, status: str, reviewed_by: str, reason: str = "") -> None:
+    ids = [str(item.get("request_id") or "").strip() for item in items if item.get("request_id")]
+    ids = [item for item in ids if item]
+    if not ids:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rejection = reason if status == "Rejected" else ""
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(
+            f"""
+            UPDATE form_requests
+            SET status = ?, reviewed_by = ?, reviewed_at = ?, rejection_reason = ?
+            WHERE request_id IN ({placeholders})
+            """,
+            [status, reviewed_by or "", now, rejection, *ids],
+        )
+        conn.commit()
+        conn.close()
 
 
 def delete_holiday(holiday_id: int) -> bool:

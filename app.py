@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 import csv
 import hmac
 import io
@@ -62,6 +62,7 @@ MAX_TRACK_ATTEMPTS = 8
 TRACK_WINDOW_SECONDS = 300
 FORM_META_CACHE = {"at": 0, "directory": [], "holidays": {}}
 FORM_META_SECONDS = 60
+SHEET_SYNC_LOCK = Lock()
 
 
 def invalidate_form_meta() -> None:
@@ -427,7 +428,219 @@ def save_submission(row: dict) -> dict:
     payload["action"] = "create"
     data = sheet_api(payload)
     ROWS_CACHE.clear()
+    TRACK_CACHE.clear()
     return data
+
+
+def merge_local_requests(sheet_rows: list, department: str = "ALL") -> list:
+    seen = {str(row.get("Request ID") or "").strip() for row in sheet_rows}
+    extra = []
+    for row in user_store.unsynced_form_request_sheet_rows(department):
+        request_id = str(row.get("Request ID") or "").strip()
+        if request_id and request_id in seen:
+            continue
+        extra.append(row)
+        if request_id:
+            seen.add(request_id)
+    extra.sort(key=row_submitted_key, reverse=True)
+    return extra + list(sheet_rows)
+
+
+def merge_local_lookup(sheet_rows: list, fingerprint: str, name: str = "") -> list:
+    seen = {str(row.get("Request ID") or "").strip() for row in sheet_rows}
+    extra = []
+    for row in user_store.lookup_form_request_sheet_rows(fingerprint, name):
+        request_id = str(row.get("Request ID") or "").strip()
+        if request_id and request_id in seen:
+            continue
+        extra.append(row)
+        if request_id:
+            seen.add(request_id)
+    rows = extra + list(sheet_rows)
+    rows.sort(key=row_submitted_key, reverse=True)
+    return rows[:TRACK_LIMIT]
+
+
+def _norm_conflict_text(value) -> str:
+    return str(value or "").strip().lower()
+
+
+def _norm_conflict_date(value) -> str:
+    return str(value or "").strip().split(" ")[0]
+
+
+def _dates_overlap(from_a, to_a, from_b, to_b) -> bool:
+    start_a = from_a or to_a
+    end_a = to_a or from_a
+    start_b = from_b or to_b
+    end_b = to_b or from_b
+    if not start_a or not start_b:
+        return False
+    return start_a <= end_b and start_b <= end_a
+
+
+def _payroll_cycle_start(date_text: str) -> str:
+    text = _norm_conflict_date(date_text)
+    try:
+        day = datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        return ""
+    return cycle_start_for(day).strftime("%Y-%m-%d")
+
+
+def check_create_conflicts(data: dict, existing_rows: list) -> dict:
+    fingerprint = normalize_fingerprint(data.get("fingerprint_id"))
+    device = str(data.get("device") or "").strip()
+    request_type = _norm_conflict_text(data.get("request_type"))
+    from_date = _norm_conflict_date(data.get("start_date"))
+    to_date = _norm_conflict_date(data.get("end_date"))
+    punch_in = _norm_conflict_text(data.get("punch_in_time"))
+    punch_out = _norm_conflict_text(data.get("punch_out_time"))
+    from_time = _norm_conflict_text(data.get("from_time"))
+    to_time = _norm_conflict_text(data.get("to_time"))
+    new_is_saturday = request_type == "monthly saturday work"
+    new_is_leave = request_type in {
+        "work remotely",
+        "annual vacation",
+        "sickness vacation",
+        "sick leave",
+        "unpaid leave",
+    }
+    new_is_punch = request_type in {"missing punch in", "missing punch out"}
+    new_is_remote = request_type == "work remotely"
+    cycle = _payroll_cycle_start(from_date) if new_is_saturday else ""
+
+    duplicate = False
+    remote_conflict = False
+    saturday_conflict = False
+
+    for row in existing_rows:
+        if str(row.get("Status") or "").strip() == "Rejected":
+            continue
+        if normalize_fingerprint(row.get("Fingerprint Number")) != fingerprint:
+            continue
+        row_device = str(row.get("Device") or "").strip()
+        if device and row_device and row_device.lower() != device.lower():
+            continue
+
+        existing_type = _norm_conflict_text(row.get("Request Type"))
+        existing_from = _norm_conflict_date(row.get("From Date"))
+        existing_to = _norm_conflict_date(row.get("To Date"))
+
+        if (
+            new_is_saturday
+            and cycle
+            and existing_type == "monthly saturday work"
+            and _payroll_cycle_start(existing_from) == cycle
+        ):
+            return {"duplicate": True, "saturday_month": True}
+
+        if (
+            not duplicate
+            and existing_type == request_type
+            and existing_from == from_date
+            and existing_to == to_date
+            and _norm_conflict_text(row.get("Punch In Time")) == punch_in
+            and _norm_conflict_text(row.get("Punch Out Time")) == punch_out
+            and _norm_conflict_text(row.get("From Time")) == from_time
+            and _norm_conflict_text(row.get("To Time")) == to_time
+        ):
+            duplicate = True
+
+        if (new_is_punch or new_is_remote or new_is_saturday or new_is_leave) and _dates_overlap(
+            from_date, to_date, existing_from, existing_to
+        ):
+            if new_is_punch and existing_type == "work remotely":
+                remote_conflict = True
+            if new_is_remote and existing_type in {"missing punch in", "missing punch out"}:
+                remote_conflict = True
+            if new_is_saturday and existing_type in {
+                "work remotely",
+                "annual vacation",
+                "sickness vacation",
+                "sick leave",
+                "unpaid leave",
+            }:
+                saturday_conflict = True
+            if new_is_leave and existing_type == "monthly saturday work":
+                saturday_conflict = True
+
+    if duplicate:
+        return {"duplicate": True}
+    if remote_conflict:
+        return {"conflict": True}
+    if saturday_conflict:
+        return {"conflict": True, "conflict_type": "saturday"}
+    return {}
+
+
+def conflict_source_rows(fingerprint: str) -> list:
+    rows = user_store.form_requests_as_sheet_rows(fingerprint)
+    seen = {str(row.get("Request ID") or "").strip() for row in rows}
+    wanted = normalize_fingerprint(fingerprint)
+    for cached in ROWS_CACHE.values():
+        for row in cached.get("rows") or []:
+            request_id = str(row.get("Request ID") or "").strip()
+            if request_id and request_id in seen:
+                continue
+            if normalize_fingerprint(row.get("Fingerprint Number")) != wanted:
+                continue
+            rows.append(row)
+            if request_id:
+                seen.add(request_id)
+    return rows
+
+
+def sync_pending_form_requests(limit: int = 8) -> None:
+    if not SHEET_SYNC_LOCK.acquire(blocking=False):
+        return
+    try:
+        for row in user_store.pending_form_requests(limit):
+            request_id = row.get("request_id") or ""
+            payload = user_store.form_request_to_payload(row)
+            try:
+                result = save_submission(payload)
+            except Exception as exc:
+                user_store.bump_form_request_sync_attempt(request_id, str(exc))
+                (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+                continue
+
+            if result.get("saturday_month"):
+                user_store.mark_form_request_blocked(request_id, "saturday_month")
+            elif result.get("conflict"):
+                reason = result.get("conflict_type") or "conflict"
+                user_store.mark_form_request_blocked(request_id, str(reason))
+            else:
+                user_store.mark_form_request_synced(request_id)
+                status = (row.get("status") or "Pending").strip() or "Pending"
+                if status in {"Approved", "Rejected"}:
+                    try:
+                        sheet_api(
+                            {
+                                "action": "set_status",
+                                "items": [{
+                                    "request_id": request_id,
+                                    "department": row.get("department") or "",
+                                }],
+                                "status": status,
+                                "reviewed_by": row.get("reviewed_by") or "",
+                                "reason": row.get("rejection_reason") or "",
+                            }
+                        )
+                        ROWS_CACHE.clear()
+                        TRACK_CACHE.clear()
+                    except Exception as exc:
+                        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+    finally:
+        SHEET_SYNC_LOCK.release()
+
+
+def schedule_sheet_sync() -> None:
+    if SHEET_SYNC_LOCK.locked():
+        return
+    if not user_store.has_pending_form_requests():
+        return
+    Thread(target=sync_pending_form_requests, daemon=True).start()
 
 
 def submission_fingerprint(row: dict) -> str:
@@ -458,28 +671,51 @@ def claim_submission(key: str) -> bool:
 
 
 def list_requests(department: str) -> list:
+    schedule_sheet_sync()
     now = time.time()
     cached = ROWS_CACHE.get(department)
+    sheet_rows = []
+    error = None
     if cached and now - cached["at"] < CACHE_SECONDS:
-        return cached["rows"]
-
-    data = sheet_api({"action": "list", "department": department})
-    rows = data.get("rows", [])
-    ROWS_CACHE[department] = {"at": now, "rows": rows}
-    return rows
+        sheet_rows = cached["rows"]
+    else:
+        try:
+            data = sheet_api({"action": "list", "department": department})
+            sheet_rows = data.get("rows", [])
+            ROWS_CACHE[department] = {"at": now, "rows": sheet_rows}
+        except Exception as exc:
+            error = exc
+            sheet_rows = cached["rows"] if cached else []
+    merged = merge_local_requests(sheet_rows, department)
+    if error and not merged:
+        raise error
+    return merged
 
 
 def set_request_status(items: list, status: str, reviewed_by: str, reason: str = "") -> None:
-    sheet_api(
-        {
-            "action": "set_status",
-            "items": items,
-            "status": status,
-            "reviewed_by": reviewed_by,
-            "reason": reason,
-        }
+    local_by_id = user_store.get_form_requests_by_ids(
+        [item.get("request_id") for item in items]
     )
+    user_store.update_form_request_statuses(items, status, reviewed_by, reason)
+    google_items = []
+    for item in items:
+        request_id = str(item.get("request_id") or "").strip()
+        local = local_by_id.get(request_id)
+        if local and local.get("sync_status") != "synced":
+            continue
+        google_items.append(item)
+    if google_items:
+        sheet_api(
+            {
+                "action": "set_status",
+                "items": google_items,
+                "status": status,
+                "reviewed_by": reviewed_by,
+                "reason": reason,
+            }
+        )
     ROWS_CACHE.clear()
+    TRACK_CACHE.clear()
 
 
 def normalize_fingerprint(value) -> str:
@@ -497,37 +733,44 @@ def row_submitted_key(row: dict) -> str:
 
 
 def lookup_by_fingerprint(fingerprint: str, name: str = "") -> list:
+    schedule_sheet_sync()
     now = time.time()
     cache_key = f"{normalize_fingerprint(fingerprint)}|{user_store.normalize_person_name(name)}"
     cached = TRACK_CACHE.get(cache_key)
+    sheet_rows = []
+
     if cached and now - cached["at"] < TRACK_CACHE_SECONDS:
-        return list(cached["rows"])
+        sheet_rows = list(cached["rows"])
+    else:
+        source_rows = []
+        try:
+            data = sheet_api({
+                "action": "lookup",
+                "fingerprint_id": fingerprint,
+                "name": name,
+                "limit": TRACK_LIMIT,
+            })
+            source_rows = data.get("rows", [])
+        except Exception:
+            try:
+                data = sheet_api({"action": "list", "department": "ALL"})
+                source_rows = data.get("rows", [])
+            except Exception:
+                source_rows = []
 
-    try:
-        data = sheet_api({
-            "action": "lookup",
-            "fingerprint_id": fingerprint,
-            "name": name,
-            "limit": TRACK_LIMIT,
-        })
-        source_rows = data.get("rows", [])
-    except Exception:
-        data = sheet_api({"action": "list", "department": "ALL"})
-        source_rows = data.get("rows", [])
+        wanted = normalize_fingerprint(fingerprint)
+        wanted_name = user_store.normalize_person_name(name)
+        for row in source_rows:
+            if normalize_fingerprint(row.get("Fingerprint Number")) != wanted:
+                continue
+            if wanted_name and not user_store.names_match(wanted_name, str(row.get("Name") or "")):
+                continue
+            sheet_rows.append(row)
+        sheet_rows.sort(key=row_submitted_key, reverse=True)
+        sheet_rows = sheet_rows[:TRACK_LIMIT]
+        TRACK_CACHE[cache_key] = {"at": now, "rows": sheet_rows}
 
-    wanted = normalize_fingerprint(fingerprint)
-    wanted_name = user_store.normalize_person_name(name)
-    rows = []
-    for row in source_rows:
-        if normalize_fingerprint(row.get("Fingerprint Number")) != wanted:
-            continue
-        if wanted_name and not user_store.names_match(wanted_name, str(row.get("Name") or "")):
-            continue
-        rows.append(row)
-    rows.sort(key=row_submitted_key, reverse=True)
-    rows = rows[:TRACK_LIMIT]
-    TRACK_CACHE[cache_key] = {"at": now, "rows": rows}
-    return list(rows)
+    return merge_local_lookup(sheet_rows, fingerprint, name)
 
 
 def login_required(view):
@@ -572,6 +815,7 @@ def pwa_service_worker():
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    schedule_sheet_sync()
     options = option_lookup()
 
     if request.method == "POST":
@@ -713,28 +957,28 @@ def index():
             flash("This request was already submitted.", "error")
             return render_template("index.html", **index_context(request.form))
 
-        try:
-            result = save_submission(row)
-        except Exception as exc:
-            (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-            flash("Could not save the request to the HR sheet. Please try again.", "error")
-            return render_template("index.html", **index_context(request.form))
-
-        if result.get("saturday_month"):
+        conflict = check_create_conflicts(row, conflict_source_rows(fingerprint_id))
+        if conflict.get("saturday_month"):
             flash("Only one working Saturday is allowed per month (26th to 25th). You already submitted one.", "error")
             return render_template("index.html", **index_context(request.form))
-
-        if result.get("duplicate"):
+        if conflict.get("duplicate"):
             flash("This request was already submitted.", "error")
             return render_template("index.html", **index_context(request.form))
-
-        if result.get("conflict"):
-            if result.get("conflict_type") == "saturday":
+        if conflict.get("conflict"):
+            if conflict.get("conflict_type") == "saturday":
                 flash("This Saturday overlaps another leave request.", "error")
             else:
                 flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
             return render_template("index.html", **index_context(request.form))
 
+        try:
+            user_store.create_form_request(row)
+        except Exception as exc:
+            (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+            flash("Could not save the request. Please try again.", "error")
+            return render_template("index.html", **index_context(request.form))
+
+        schedule_sheet_sync()
         return redirect(url_for("success"))
 
     return render_template("index.html", **index_context({}))
@@ -906,8 +1150,9 @@ def dashboard():
         rows = filter_visible_rows(manager, rows)
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-        rows = []
-        flash("Could not load requests from the HR sheet.", "error")
+        rows = filter_visible_rows(manager, merge_local_requests([], manager["department"]))
+        if not rows:
+            flash("Could not load requests from the HR sheet.", "error")
 
     request_types = sorted({
         str(row.get("Request Type") or "").strip()
@@ -1876,8 +2121,9 @@ def attendance_report():
             requests_rows = list_requests("ALL")
         except Exception as exc:
             (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-            flash("Could not load form requests from the HR sheet.", "error")
-            requests_rows = []
+            requests_rows = merge_local_requests([], "ALL")
+            if not requests_rows:
+                flash("Could not load form requests from the HR sheet.", "error")
         report = attendance.build_report(
             punches,
             requests_rows,
