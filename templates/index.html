@@ -200,31 +200,31 @@
             const value = requestType.value;
             const isPunch = punchTypes.includes(value);
             const isSaturday = value === saturdayType;
+            const isSingleDate = isPunch || isSaturday;
 
             punchIn.classList.toggle('hidden', value !== 'missing_punch_in');
             punchOut.classList.toggle('hidden', value !== 'missing_punch_out');
             timeRange.classList.toggle('hidden', !timeRangeTypes.includes(value));
             leaveDates.classList.toggle('hidden', !value);
-            endDateWrap.classList.toggle('hidden', isSaturday);
+            endDateWrap.classList.toggle('hidden', isSingleDate);
             saturdayHint.classList.toggle('hidden', !isSaturday);
             excuseHint.classList.toggle('hidden', value !== personalExcuse);
             startDateLabel.innerHTML = isSaturday
                 ? 'Saturday Date <span>*</span>'
-                : 'From Date <span>*</span>';
+                : (isPunch ? 'Date <span>*</span>' : 'From Date <span>*</span>');
 
             startDate.max = isPunch ? today : '';
             endDate.max = isPunch ? today : '';
             if (isPunch) {
                 if (startDate.value > today) startDate.value = today;
-                if (endDate.value > today) endDate.value = today;
             }
-            if (isSaturday) {
+            if (isSingleDate) {
                 endDate.value = startDate.value;
             }
         }
 
         startDate.addEventListener('change', () => {
-            if (requestType.value === saturdayType) {
+            if (punchTypes.includes(requestType.value) || requestType.value === saturdayType) {
                 endDate.value = startDate.value;
             }
         });
@@ -337,11 +337,13 @@
                 alert('Name must be in English letters only.');
                 return;
             }
-            if (punchTypes.includes(requestType.value) &&
-                (startDate.value > today || endDate.value > today)) {
+            if (punchTypes.includes(requestType.value) && startDate.value > today) {
                 event.preventDefault();
                 alert('Missing punch cannot be submitted for a future date.');
                 return;
+            }
+            if (punchTypes.includes(requestType.value) || requestType.value === saturdayType) {
+                endDate.value = startDate.value;
             }
             if (requestType.value === saturdayType) {
                 const day = weekday(startDate.value);
@@ -355,7 +357,6 @@
                     alert('Monthly Saturday Work must be a Saturday.');
                     return;
                 }
-                endDate.value = startDate.value;
             }
             const holidayHits = holidaysInRange(startDate.value, endDate.value || startDate.value);
             if (holidayHits.length) {

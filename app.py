@@ -161,6 +161,7 @@ PUNCH_TYPES = {"missing_punch_in", "missing_punch_out"}
 TIME_RANGE_TYPES = {"business_mission", "personal_excuse"}
 DATE_RANGE_TYPES = {"sick_leave", "unpaid_leave", "annual_vacation", "sickness_vacation", "work_remotely"}
 SATURDAY_TYPES = {"monthly_saturday"}
+SINGLE_DATE_TYPES = SATURDAY_TYPES | PUNCH_TYPES
 
 def all_departments(active_only: bool = True) -> list:
     return [
@@ -879,7 +880,7 @@ def index():
             errors.append("Actual punch-in time is required")
         if request_type == "missing_punch_out" and not punch_out_time:
             errors.append("Actual punch-out time is required")
-        if request_type in SATURDAY_TYPES and start_date:
+        if request_type in SINGLE_DATE_TYPES and start_date:
             end_date = start_date
         if request_type in TIME_RANGE_TYPES:
             if not from_time:
@@ -891,14 +892,19 @@ def index():
                 errors.append("Late excuse must be whole hours only (1, 2, 3 hours). Fractions are not allowed.")
         if request_type in options:
             if not start_date:
-                errors.append("Saturday date is required" if request_type in SATURDAY_TYPES else "From date is required")
-            if request_type not in SATURDAY_TYPES and not end_date:
+                if request_type in SATURDAY_TYPES:
+                    errors.append("Saturday date is required")
+                elif request_type in PUNCH_TYPES:
+                    errors.append("Date is required")
+                else:
+                    errors.append("From date is required")
+            if request_type not in SINGLE_DATE_TYPES and not end_date:
                 errors.append("To date is required")
         if start_date and end_date and start_date > end_date:
             errors.append("From date cannot be after To date")
         if request_type in PUNCH_TYPES:
             today = datetime.now().strftime("%Y-%m-%d")
-            if (start_date and start_date > today) or (end_date and end_date > today):
+            if start_date and start_date > today:
                 errors.append("Missing punch cannot be submitted for a future date")
         if request_type in SATURDAY_TYPES and start_date:
             try:
@@ -948,7 +954,7 @@ def index():
             "from_time": from_time if request_type in TIME_RANGE_TYPES else "",
             "to_time": to_time if request_type in TIME_RANGE_TYPES else "",
             "start_date": start_date,
-            "end_date": start_date if request_type in SATURDAY_TYPES else end_date,
+            "end_date": start_date if request_type in SINGLE_DATE_TYPES else end_date,
             "notes": notes,
             "status": "Pending",
             "team": team,
