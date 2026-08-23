@@ -122,6 +122,7 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_form_requests_dept ON form_requests(department)"
         )
+        _ensure_employee_team_column(conn)
         conn.commit()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for value, label in SEED_DEPARTMENTS:
@@ -131,6 +132,12 @@ def init_db() -> None:
             )
         conn.commit()
         conn.close()
+
+
+def _ensure_employee_team_column(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)")}
+    if "team" not in columns:
+        conn.execute("ALTER TABLE employees ADD COLUMN team TEXT NOT NULL DEFAULT ''")
 
 
 def _row_to_user(row) -> dict:
@@ -673,6 +680,16 @@ def names_match(left: str, right: str) -> bool:
     return len(first) >= 4 and len(second) >= 4 and (first in second or second in first)
 
 
+def normalize_employee_team(department: str, team: str) -> str:
+    text = (team or "").strip()
+    if not text:
+        return ""
+    for item in teams_by_department().get((department or "").strip(), []):
+        if item["value"].lower() == text.lower():
+            return item["value"]
+    return text
+
+
 def _row_to_employee(row) -> dict:
     return {
         "id": row["id"],
@@ -680,6 +697,7 @@ def _row_to_employee(row) -> dict:
         "department": row["department"],
         "fingerprint": row["fingerprint"],
         "device": row["device"],
+        "team": row["team"] if "team" in row.keys() else "",
         "active": bool(row["active"]),
         "created_at": row["created_at"],
     }
@@ -768,12 +786,13 @@ def departments_for_person(name: str, fingerprint: str) -> list:
     return departments
 
 
-def validate_employee(name: str, department: str, fingerprint: str, device: str, departments: set, employee_id: int | None = None) -> list:
+def validate_employee(name: str, department: str, fingerprint: str, device: str, departments: set, employee_id: int | None = None, team: str = "") -> list:
     errors = []
     name = (name or "").strip()
     department = (department or "").strip()
     fingerprint = normalize_fingerprint_id(fingerprint)
     device = normalize_device(device)
+    team = normalize_employee_team(department, team)
     if not name:
         errors.append("Employee name is required.")
     elif len(name) > 80:
@@ -788,6 +807,14 @@ def validate_employee(name: str, department: str, fingerprint: str, device: str,
         errors.append("Fingerprint number is too long.")
     if not device:
         errors.append("Device must be F8, F9, or similar (F then numbers).")
+    if team:
+        if len(team) > 60:
+            errors.append("Team name is too long.")
+        allowed = teams_by_department().get(department, [])
+        if not allowed:
+            errors.append(f"{department} has no teams. Leave the team column empty.")
+        elif not any(item["value"].lower() == team.lower() for item in allowed):
+            errors.append(f"Team '{team}' is not registered under {department}.")
     if errors:
         return errors
     init_db()
@@ -813,11 +840,12 @@ def validate_employee(name: str, department: str, fingerprint: str, device: str,
     return errors
 
 
-def create_employee(name: str, department: str, fingerprint: str, device: str) -> dict:
+def create_employee(name: str, department: str, fingerprint: str, device: str, team: str = "") -> dict:
     name = name.strip()
     department = department.strip()
     fingerprint = normalize_fingerprint_id(fingerprint)
     device = normalize_device(device)
+    team = normalize_employee_team(department, team)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     init_db()
     with DB_LOCK:
@@ -825,10 +853,10 @@ def create_employee(name: str, department: str, fingerprint: str, device: str) -
         try:
             cursor = conn.execute(
                 """
-                INSERT INTO employees (name, department, fingerprint, device, active, created_at)
-                VALUES (?, ?, ?, ?, 1, ?)
+                INSERT INTO employees (name, department, fingerprint, device, team, active, created_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?)
                 """,
-                (name, department, fingerprint, device, now),
+                (name, department, fingerprint, device, team, now),
             )
             conn.commit()
             employee_id = cursor.lastrowid
@@ -842,14 +870,16 @@ def create_employee(name: str, department: str, fingerprint: str, device: str) -
         "department": department,
         "fingerprint": fingerprint,
         "device": device,
+        "team": team,
     }
 
 
-def update_employee(employee_id: int, name: str, department: str, fingerprint: str, device: str) -> bool:
+def update_employee(employee_id: int, name: str, department: str, fingerprint: str, device: str, team: str = "") -> bool:
     name = name.strip()
     department = department.strip()
     fingerprint = normalize_fingerprint_id(fingerprint)
     device = normalize_device(device)
+    team = normalize_employee_team(department, team)
     init_db()
     with DB_LOCK:
         conn = db()
@@ -857,10 +887,10 @@ def update_employee(employee_id: int, name: str, department: str, fingerprint: s
             cursor = conn.execute(
                 """
                 UPDATE employees
-                SET name = ?, department = ?, fingerprint = ?, device = ?
+                SET name = ?, department = ?, fingerprint = ?, device = ?, team = ?
                 WHERE id = ?
                 """,
-                (name, department, fingerprint, device, employee_id),
+                (name, department, fingerprint, device, team, employee_id),
             )
             conn.commit()
             updated = cursor.rowcount > 0
@@ -919,11 +949,13 @@ def import_employees(rows: list, departments: set) -> tuple[dict, list]:
             continue
         name = row.get("name") or ""
         department = row.get("department") or ""
+        team = row.get("team") or ""
         fingerprint = normalize_fingerprint_id(row.get("fingerprint") or row.get("ac-no.") or row.get("ac-no") or "")
         device = normalize_device(row.get("device") or row.get("machine") or "")
         if department not in departments:
             canonical = next((item for item in departments if item.lower() == department.lower()), "")
             department = canonical or department
+        team = normalize_employee_team(department, team)
         key = (device, fingerprint)
         if fingerprint and device and key in seen:
             errors.append(f"Row {index}: fingerprint {fingerprint} on {device} is duplicated in the file.")
@@ -942,6 +974,7 @@ def import_employees(rows: list, departments: set) -> tuple[dict, list]:
             device,
             departments,
             existing["id"] if existing else None,
+            team,
         )
         if issues:
             errors.append(f"Row {index}: " + " ".join(issues))
@@ -954,19 +987,19 @@ def import_employees(rows: list, departments: set) -> tuple[dict, list]:
                 conn.execute(
                     """
                     UPDATE employees
-                    SET name = ?, department = ?, active = 1
+                    SET name = ?, department = ?, team = ?, active = 1
                     WHERE id = ?
                     """,
-                    (name.strip(), department.strip(), existing["id"]),
+                    (name.strip(), department.strip(), team, existing["id"]),
                 )
                 created["updated"] += 1
             else:
                 conn.execute(
                     """
-                    INSERT INTO employees (name, department, fingerprint, device, active, created_at)
-                    VALUES (?, ?, ?, ?, 1, ?)
+                    INSERT INTO employees (name, department, fingerprint, device, team, active, created_at)
+                    VALUES (?, ?, ?, ?, ?, 1, ?)
                     """,
-                    (name.strip(), department.strip(), fingerprint, device, now),
+                    (name.strip(), department.strip(), fingerprint, device, team, now),
                 )
                 created["added"] += 1
             conn.commit()

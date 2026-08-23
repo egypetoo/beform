@@ -17,7 +17,7 @@ function doPost(e) {
   if (action === "lookup") {
     return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "", data.limit || 30, data.name || "") });
   }
-
+image.png
   if (action === "set_status") {
     const items = data.items && data.items.length
       ? data.items

@@ -36,7 +36,7 @@
         <form class="form-shell" method="post" action="{{ url_for('employees_import') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Upload employees</h2>
-            <p class="muted">Excel columns: <strong>name, department, fingerprint, device</strong>. Device is F8 or F9. Re-uploading the same device + fingerprint updates the name and department.</p>
+            <p class="muted">Excel columns: <strong>name, department, fingerprint, device, team</strong>. Device is F8 or F9. Team is optional: leave it empty to link the employee to the department only. Re-uploading the same device + fingerprint updates the record.</p>
             <section class="field">
                 <label for="sheet">Employees file</label>
                 <input id="sheet" name="sheet" type="file" accept=".xlsx,.csv" required>
@@ -77,6 +77,13 @@
                         <option value="{{ device }}">{{ device }}</option>
                     {% endfor %}
                 </select>
+            </section>
+            <section class="field">
+                <label for="team">Team <span class="muted">(optional)</span></label>
+                <select id="team" name="team">
+                    <option value="">Department only</option>
+                </select>
+                <p class="muted">Choose a team leader only if this employee belongs to a team. Leave empty to link to the department.</p>
             </section>
             <button type="submit">Add employee</button>
         </form>
@@ -119,6 +126,7 @@
                                 <th></th>
                                 <th>Name</th>
                                 <th>Department</th>
+                                <th>Team</th>
                                 <th>Fingerprint</th>
                                 <th>Device</th>
                                 <th></th>
@@ -139,10 +147,16 @@
                                                aria-label="Name">
                                     </td>
                                     <td data-label="Department">
-                                        <select form="employee-save-form" name="department" required aria-label="Department">
+                                        <select form="employee-save-form" name="department" required aria-label="Department" class="employee-department">
                                             {% for dept in departments %}
                                                 <option value="{{ dept.value }}" {% if employee.department == dept.label %}selected{% endif %}>{{ dept.label }}</option>
                                             {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td data-label="Team">
+                                        <select form="employee-save-form" name="team" aria-label="Team" class="employee-team"
+                                                data-team="{{ employee.team or '' }}">
+                                            <option value="">Department only</option>
                                         </select>
                                     </td>
                                     <td data-label="Fingerprint">
@@ -176,6 +190,39 @@
         </section>
     </main>
     <script>
+        const teamsForDepartment = {{ teams_for_department | tojson }};
+
+        function fillTeamSelect(select, departmentValue, selectedTeam) {
+            const teams = teamsForDepartment[departmentValue] || [];
+            const current = selectedTeam || select.dataset.team || '';
+            select.innerHTML = '';
+            select.appendChild(new Option('Department only', ''));
+            teams.forEach((team) => {
+                const option = new Option(team.label, team.value);
+                if (team.value === current) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+
+        const addDepartment = document.getElementById('department');
+        const addTeam = document.getElementById('team');
+        if (addDepartment && addTeam) {
+            addDepartment.addEventListener('change', () => fillTeamSelect(addTeam, addDepartment.value, ''));
+            fillTeamSelect(addTeam, addDepartment.value, '');
+        }
+
+        document.querySelectorAll('.employee-team').forEach((select) => {
+            const row = select.closest('tr');
+            const deptSelect = row ? row.querySelector('.employee-department') : null;
+            if (!deptSelect) return;
+            const refresh = () => fillTeamSelect(select, deptSelect.value, select.dataset.team || '');
+            deptSelect.addEventListener('change', () => {
+                select.dataset.team = '';
+                refresh();
+            });
+            refresh();
+        });
+
         document.querySelectorAll('input[name="name"]').forEach((input) => {
             input.addEventListener('input', () => {
                 input.value = input.value.replace(/[^A-Za-z .'\-]/g, '');

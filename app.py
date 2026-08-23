@@ -345,6 +345,7 @@ def form_employee_directory() -> list:
             "fingerprint": employee["fingerprint"],
             "name": employee["name"],
             "department": department_value,
+            "team": employee.get("team") or "",
         })
     FORM_META_CACHE["directory"] = rows
     FORM_META_CACHE["holidays"] = user_store.holiday_map()
@@ -851,14 +852,9 @@ def index():
             errors.append("Department is required")
         elif department not in department_maps()["values"]:
             errors.append("Please select a valid department")
-        else:
-            allowed_teams = [item["value"] for item in teams_for_form().get(department, [])]
-            if allowed_teams and team not in allowed_teams:
-                errors.append("Please select your team leader")
-            if not allowed_teams:
-                team = ""
         device = ""
         matched_department = ""
+        matched = None
         if user_store.employee_count() and department in department_maps()["values"]:
             department_label = department_maps()["labels"].get(department, "")
             matched = user_store.match_employee(name, fingerprint_id, department_label)
@@ -874,6 +870,15 @@ def index():
                 fingerprint_id = matched["fingerprint"]
                 device = matched["device"]
                 matched_department = matched["department"] or department_label
+        if department in department_maps()["values"]:
+            allowed_teams = [item["value"] for item in teams_for_form().get(department, [])]
+            if matched:
+                team = (matched.get("team") or "").strip()
+            elif allowed_teams:
+                if team not in allowed_teams:
+                    errors.append("Please select your team leader")
+            else:
+                team = ""
         if request_type not in options:
             errors.append("Request type is required")
         if request_type == "missing_punch_in" and not punch_in_time:
@@ -1779,20 +1784,26 @@ def users_delete():
     return redirect(url_for("users_admin"))
 
 
-EMPLOYEE_HEADERS = ["name", "department", "fingerprint", "device"]
+EMPLOYEE_HEADERS = ["name", "department", "fingerprint", "device", "team"]
 EMPLOYEE_SAMPLE_ROWS = [
-    ["Ahmed Essam", "Web", "57", "F8"],
-    ["Mohamed", "Sales", "57", "F9"],
+    ["Ahmed Essam", "Web", "57", "F8", ""],
+    ["Mohamed", "Sales", "57", "F9", "Team A"],
 ]
 
 
 def employees_admin_context() -> dict:
     departments = all_departments(active_only=False)
+    teams_by_label = user_store.teams_by_department()
     return {
         "manager": session["manager"],
         "employees": user_store.list_employees(),
         "departments": departments,
         "devices": user_store.list_devices(),
+        "teams_by_department": teams_by_label,
+        "teams_for_department": {
+            item["value"]: teams_by_label.get(item["label"], [])
+            for item in departments
+        },
     }
 
 
@@ -1817,6 +1828,7 @@ def employees_admin():
         department_value = request.form.get("department", "").strip()
         fingerprint = request.form.get("fingerprint", "")
         device = request.form.get("device", "")
+        team = request.form.get("team", "")
         department_label = maps["labels"].get(department_value, "")
         errors = user_store.validate_employee(
             name,
@@ -1824,13 +1836,14 @@ def employees_admin():
             fingerprint,
             device,
             maps["label_set"],
+            team=team,
         )
         if errors:
             for error in errors:
                 flash(error, "error")
         else:
             try:
-                user_store.create_employee(name, department_label, fingerprint, device)
+                user_store.create_employee(name, department_label, fingerprint, device, team)
                 invalidate_form_meta()
                 flash("Employee added.", "success")
             except ValueError as exc:
@@ -1896,6 +1909,7 @@ def employees_edit():
     department_value = request.form.get("department", "").strip()
     fingerprint = request.form.get("fingerprint", "")
     device = request.form.get("device", "")
+    team = request.form.get("team", "")
     department_label = maps["labels"].get(department_value, department_value)
     errors = user_store.validate_employee(
         name,
@@ -1904,13 +1918,14 @@ def employees_edit():
         device,
         maps["label_set"],
         employee_id,
+        team,
     )
     if errors:
         for error in errors:
             flash(error, "error")
         return redirect(url_for("employees_admin"))
     try:
-        if user_store.update_employee(employee_id, name, department_label, fingerprint, device):
+        if user_store.update_employee(employee_id, name, department_label, fingerprint, device, team):
             invalidate_form_meta()
             flash("Employee updated.", "success")
         else:
@@ -1932,7 +1947,8 @@ def employees_bulk_edit():
     departments = request.form.getlist("department")
     fingerprints = request.form.getlist("fingerprint")
     devices = request.form.getlist("device")
-    if not ids or len({len(ids), len(names), len(departments), len(fingerprints), len(devices)}) != 1:
+    teams = request.form.getlist("team")
+    if not ids or len({len(ids), len(names), len(departments), len(fingerprints), len(devices), len(teams)}) != 1:
         flash("Could not save the employee list. Refresh and try again.", "error")
         return redirect(url_for("employees_admin"))
     errors = []
@@ -1947,6 +1963,7 @@ def employees_bulk_edit():
         department_value = (departments[index] or "").strip()
         fingerprint = fingerprints[index]
         device = devices[index]
+        team = teams[index]
         department_label = maps["labels"].get(department_value, department_value)
         issues = user_store.validate_employee(
             name,
@@ -1955,6 +1972,7 @@ def employees_bulk_edit():
             device,
             maps["label_set"],
             employee_id,
+            team,
         )
         key = (
             user_store.normalize_device(device),
@@ -1970,11 +1988,11 @@ def employees_bulk_edit():
         if issues:
             errors.append(f"{(name or 'Employee').strip()}: " + " ".join(issues))
             continue
-        pending.append((employee_id, name, department_label, fingerprint, device))
+        pending.append((employee_id, name, department_label, fingerprint, device, team))
     updated = 0
-    for employee_id, name, department_label, fingerprint, device in pending:
+    for employee_id, name, department_label, fingerprint, device, team in pending:
         try:
-            if user_store.update_employee(employee_id, name, department_label, fingerprint, device):
+            if user_store.update_employee(employee_id, name, department_label, fingerprint, device, team):
                 updated += 1
         except ValueError as exc:
             errors.append(str(exc))

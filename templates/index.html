@@ -274,6 +274,33 @@
             return found;
         }
 
+        function matchedEmployee() {
+            const fp = (fingerprint.value || '').replace(/\D/g, '');
+            const person = (nameInput.value || '').trim();
+            const department = departmentSelect.value;
+            if (!fp || !person || !department) return null;
+            return employeeDirectory.find((row) => (
+                row.fingerprint === fp
+                && namesMatch(person, row.name)
+                && row.department === department
+            )) || null;
+        }
+
+        function applyEmployeeTeam() {
+            const employee = matchedEmployee();
+            if (employee && employee.team) {
+                teamCard.classList.remove('hidden');
+                teamSelect.innerHTML = '';
+                teamSelect.appendChild(new Option(employee.team, employee.team, true, true));
+                teamSelect.value = employee.team;
+                teamSelect.required = false;
+                teamSelect.disabled = true;
+                return;
+            }
+            teamSelect.disabled = false;
+            fillTeams();
+        }
+
         function lockDepartment() {
             const allowed = matchedDepartments();
             Array.from(departmentSelect.options).forEach((option) => {
@@ -296,9 +323,21 @@
                 }
             }
             fillTeams();
+            applyEmployeeTeam();
         }
 
         function fillTeams() {
+            const employee = matchedEmployee();
+            if (employee && employee.team) {
+                applyEmployeeTeam();
+                return;
+            }
+            if (employee && !employee.team) {
+                teamCard.classList.add('hidden');
+                teamSelect.required = false;
+                teamSelect.value = '';
+                return;
+            }
             const teams = teamsByDepartment[departmentSelect.value] || [];
             teamSelect.innerHTML = '';
             if (!teams.length) {
@@ -321,11 +360,11 @@
             if (lockedDepartment && departmentSelect.value !== lockedDepartment) {
                 departmentSelect.value = lockedDepartment;
             }
-            fillTeams();
+            applyEmployeeTeam();
         });
         fingerprint.addEventListener('input', lockDepartment);
         nameInput.addEventListener('input', lockDepartment);
-        fillTeams();
+        applyEmployeeTeam();
         lockDepartment();
         form.addEventListener('submit', (event) => {
             if (sending) {
