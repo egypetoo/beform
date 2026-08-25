@@ -589,6 +589,49 @@ button.filter-chip.active {
     margin: 16px 4px 10px;
 }
 
+.leave-balance-card {
+    margin-top: 18px;
+}
+
+.leave-balance-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin: 8px 0 12px;
+}
+
+.leave-balance-grid > div {
+    background: #101010;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 12px;
+    text-align: center;
+}
+
+.leave-balance-grid span {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
+.leave-balance-grid strong {
+    font-size: 28px;
+    color: var(--accent);
+    line-height: 1;
+}
+
+.leave-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0 16px;
+}
+
+.leave-days-input {
+    max-width: 90px;
+}
+
 .track-list {
     display: grid;
     gap: 12px;

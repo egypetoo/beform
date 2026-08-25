@@ -1008,6 +1008,7 @@ def track():
     status_filter = "All"
     type_filter = ""
     request_types = []
+    leave_balance = None
 
     if request.method == "POST":
         if not csrf_is_valid():
@@ -1020,6 +1021,7 @@ def track():
                 status_filter="All",
                 type_filter="",
                 request_types=[],
+                leave_balance=None,
                 statuses=["Pending", "Approved", "Rejected", "All"],
             )
 
@@ -1052,13 +1054,18 @@ def track():
                     status_filter=status_filter,
                     type_filter=type_filter,
                     request_types=[],
+                    leave_balance=None,
                     statuses=["Pending", "Approved", "Rejected", "All"],
                 )
             try:
                 all_rows = lookup_by_fingerprint(fingerprint_id, track_name)
+                leave_balance = leave_balance_summary(track_name, fingerprint_id, all_rows)
                 if not all_rows:
-                    flash("No requests found for this name and fingerprint.", "error")
-                    rows = None
+                    if leave_balance:
+                        rows = []
+                    else:
+                        flash("No requests found for this name and fingerprint.", "error")
+                        rows = None
                 else:
                     request_types = sorted({
                         str(row.get("Request Type") or "").strip()
@@ -1074,6 +1081,7 @@ def track():
                 (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
                 flash("Could not load requests. Please try again.", "error")
                 rows = None
+                leave_balance = None
 
     return render_template(
         "track.html",
@@ -1083,6 +1091,7 @@ def track():
         status_filter=status_filter,
         type_filter=type_filter,
         request_types=request_types,
+        leave_balance=leave_balance,
         statuses=["Pending", "Approved", "Rejected", "All"],
     )
 
@@ -1804,6 +1813,52 @@ def employees_admin_context() -> dict:
             item["value"]: teams_by_label.get(item["label"], [])
             for item in departments
         },
+        "leave_balance_visible": user_store.leave_balance_visible(),
+        "default_leave_days": user_store.DEFAULT_LEAVE_DAYS,
+    }
+
+
+def count_annual_leave_used(request_rows: list, year: int | None = None) -> int:
+    year = year or datetime.now().year
+    year_start = f"{year}-01-01"
+    year_end = f"{year}-12-31"
+    used_days = set()
+    for row in request_rows or []:
+        status = str(row.get("Status") or "Pending").strip().lower()
+        if status != "approved":
+            continue
+        request_type = str(row.get("Request Type") or "").strip().lower()
+        if request_type != "annual vacation":
+            continue
+        for day in attendance.date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+            if year_start <= day <= year_end:
+                used_days.add(day)
+    return len(used_days)
+
+
+def leave_balance_summary(name: str, fingerprint: str, request_rows: list | None = None) -> dict | None:
+    if not user_store.leave_balance_visible():
+        return None
+    people = user_store.find_employees_by_person(name, fingerprint)
+    if not people:
+        return None
+    employee = people[0]
+    year = datetime.now().year
+    rows = request_rows
+    if rows is None:
+        try:
+            rows = lookup_by_fingerprint(fingerprint, name)
+        except Exception:
+            rows = user_store.lookup_form_request_sheet_rows(fingerprint, name)
+    entitlement = user_store.normalize_leave_days(employee.get("leave_days"))
+    used = count_annual_leave_used(rows or [], year)
+    remaining = entitlement - used
+    return {
+        "name": employee.get("name") or name,
+        "year": year,
+        "entitlement": entitlement,
+        "used": used,
+        "remaining": remaining,
     }
 
 
@@ -1829,6 +1884,7 @@ def employees_admin():
         fingerprint = request.form.get("fingerprint", "")
         device = request.form.get("device", "")
         team = request.form.get("team", "")
+        leave_days = request.form.get("leave_days", str(user_store.DEFAULT_LEAVE_DAYS))
         department_label = maps["labels"].get(department_value, "")
         errors = user_store.validate_employee(
             name,
@@ -1843,13 +1899,37 @@ def employees_admin():
                 flash(error, "error")
         else:
             try:
-                user_store.create_employee(name, department_label, fingerprint, device, team)
+                user_store.create_employee(
+                    name,
+                    department_label,
+                    fingerprint,
+                    device,
+                    team,
+                    leave_days,
+                )
                 invalidate_form_meta()
                 flash("Employee added.", "success")
             except ValueError as exc:
                 flash(str(exc), "error")
         return redirect(url_for("employees_admin"))
     return render_template("employees.html", **employees_admin_context())
+
+
+@app.route("/employees/leave-settings", methods=["POST"])
+@hr_required
+def employees_leave_settings():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    visible = request.form.get("leave_balance_visible") == "1"
+    user_store.set_leave_balance_visible(visible)
+    flash(
+        "Leave balance is now visible on the Track page."
+        if visible
+        else "Leave balance is now hidden on the Track page.",
+        "success",
+    )
+    return redirect(url_for("employees_admin"))
 
 
 @app.route("/employees/template.xlsx")
@@ -1910,6 +1990,7 @@ def employees_edit():
     fingerprint = request.form.get("fingerprint", "")
     device = request.form.get("device", "")
     team = request.form.get("team", "")
+    leave_days = request.form.get("leave_days", str(user_store.DEFAULT_LEAVE_DAYS))
     department_label = maps["labels"].get(department_value, department_value)
     errors = user_store.validate_employee(
         name,
@@ -1925,7 +2006,15 @@ def employees_edit():
             flash(error, "error")
         return redirect(url_for("employees_admin"))
     try:
-        if user_store.update_employee(employee_id, name, department_label, fingerprint, device, team):
+        if user_store.update_employee(
+            employee_id,
+            name,
+            department_label,
+            fingerprint,
+            device,
+            team,
+            leave_days,
+        ):
             invalidate_form_meta()
             flash("Employee updated.", "success")
         else:
@@ -1948,7 +2037,16 @@ def employees_bulk_edit():
     fingerprints = request.form.getlist("fingerprint")
     devices = request.form.getlist("device")
     teams = request.form.getlist("team")
-    if not ids or len({len(ids), len(names), len(departments), len(fingerprints), len(devices), len(teams)}) != 1:
+    leave_days_list = request.form.getlist("leave_days")
+    if not ids or len({
+        len(ids),
+        len(names),
+        len(departments),
+        len(fingerprints),
+        len(devices),
+        len(teams),
+        len(leave_days_list),
+    }) != 1:
         flash("Could not save the employee list. Refresh and try again.", "error")
         return redirect(url_for("employees_admin"))
     errors = []
@@ -1964,6 +2062,7 @@ def employees_bulk_edit():
         fingerprint = fingerprints[index]
         device = devices[index]
         team = teams[index]
+        leave_days = leave_days_list[index]
         department_label = maps["labels"].get(department_value, department_value)
         issues = user_store.validate_employee(
             name,
@@ -1988,11 +2087,19 @@ def employees_bulk_edit():
         if issues:
             errors.append(f"{(name or 'Employee').strip()}: " + " ".join(issues))
             continue
-        pending.append((employee_id, name, department_label, fingerprint, device, team))
+        pending.append((employee_id, name, department_label, fingerprint, device, team, leave_days))
     updated = 0
-    for employee_id, name, department_label, fingerprint, device, team in pending:
+    for employee_id, name, department_label, fingerprint, device, team, leave_days in pending:
         try:
-            if user_store.update_employee(employee_id, name, department_label, fingerprint, device, team):
+            if user_store.update_employee(
+                employee_id,
+                name,
+                department_label,
+                fingerprint,
+                device,
+                team,
+                leave_days,
+            ):
                 updated += 1
         except ValueError as exc:
             errors.append(str(exc))

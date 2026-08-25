@@ -123,6 +123,18 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_form_requests_dept ON form_requests(department)"
         )
         _ensure_employee_team_column(conn)
+        _ensure_employee_leave_days_column(conn)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('leave_balance_visible', '0')"
+        )
         conn.commit()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for value, label in SEED_DEPARTMENTS:
@@ -134,10 +146,62 @@ def init_db() -> None:
         conn.close()
 
 
+DEFAULT_LEAVE_DAYS = 15
+
+
 def _ensure_employee_team_column(conn) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)")}
     if "team" not in columns:
         conn.execute("ALTER TABLE employees ADD COLUMN team TEXT NOT NULL DEFAULT ''")
+
+
+def _ensure_employee_leave_days_column(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)")}
+    if "leave_days" not in columns:
+        conn.execute(
+            f"ALTER TABLE employees ADD COLUMN leave_days INTEGER NOT NULL DEFAULT {DEFAULT_LEAVE_DAYS}"
+        )
+
+
+def get_setting(key: str, default: str = "") -> str:
+    init_db()
+    conn = db()
+    row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    if row is None:
+        return default
+    return str(row["value"] if row["value"] is not None else default)
+
+
+def set_setting(key: str, value: str) -> None:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, str(value)),
+        )
+        conn.commit()
+        conn.close()
+
+
+def leave_balance_visible() -> bool:
+    return get_setting("leave_balance_visible", "0") == "1"
+
+
+def set_leave_balance_visible(visible: bool) -> None:
+    set_setting("leave_balance_visible", "1" if visible else "0")
+
+
+def normalize_leave_days(value, default: int = DEFAULT_LEAVE_DAYS) -> int:
+    try:
+        days = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(days, 365))
 
 
 def _row_to_user(row) -> dict:
@@ -691,6 +755,7 @@ def normalize_employee_team(department: str, team: str) -> str:
 
 
 def _row_to_employee(row) -> dict:
+    leave_days = row["leave_days"] if "leave_days" in row.keys() else DEFAULT_LEAVE_DAYS
     return {
         "id": row["id"],
         "name": row["name"],
@@ -698,6 +763,7 @@ def _row_to_employee(row) -> dict:
         "fingerprint": row["fingerprint"],
         "device": row["device"],
         "team": row["team"] if "team" in row.keys() else "",
+        "leave_days": normalize_leave_days(leave_days),
         "active": bool(row["active"]),
         "created_at": row["created_at"],
     }
@@ -840,12 +906,30 @@ def validate_employee(name: str, department: str, fingerprint: str, device: str,
     return errors
 
 
-def create_employee(name: str, department: str, fingerprint: str, device: str, team: str = "") -> dict:
+def find_employees_by_person(name: str, fingerprint: str) -> list:
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint:
+        return []
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM employees WHERE fingerprint = ? AND active = 1",
+        (fingerprint,),
+    ).fetchall()
+    conn.close()
+    return [
+        person for person in (_row_to_employee(row) for row in rows)
+        if names_match(name, person["name"])
+    ]
+
+
+def create_employee(name: str, department: str, fingerprint: str, device: str, team: str = "", leave_days=None) -> dict:
     name = name.strip()
     department = department.strip()
     fingerprint = normalize_fingerprint_id(fingerprint)
     device = normalize_device(device)
     team = normalize_employee_team(department, team)
+    leave_days = normalize_leave_days(leave_days if leave_days is not None else DEFAULT_LEAVE_DAYS)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     init_db()
     with DB_LOCK:
@@ -853,10 +937,10 @@ def create_employee(name: str, department: str, fingerprint: str, device: str, t
         try:
             cursor = conn.execute(
                 """
-                INSERT INTO employees (name, department, fingerprint, device, team, active, created_at)
-                VALUES (?, ?, ?, ?, ?, 1, ?)
+                INSERT INTO employees (name, department, fingerprint, device, team, leave_days, active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
                 """,
-                (name, department, fingerprint, device, team, now),
+                (name, department, fingerprint, device, team, leave_days, now),
             )
             conn.commit()
             employee_id = cursor.lastrowid
@@ -871,15 +955,17 @@ def create_employee(name: str, department: str, fingerprint: str, device: str, t
         "fingerprint": fingerprint,
         "device": device,
         "team": team,
+        "leave_days": leave_days,
     }
 
 
-def update_employee(employee_id: int, name: str, department: str, fingerprint: str, device: str, team: str = "") -> bool:
+def update_employee(employee_id: int, name: str, department: str, fingerprint: str, device: str, team: str = "", leave_days=None) -> bool:
     name = name.strip()
     department = department.strip()
     fingerprint = normalize_fingerprint_id(fingerprint)
     device = normalize_device(device)
     team = normalize_employee_team(department, team)
+    leave_days = normalize_leave_days(leave_days if leave_days is not None else DEFAULT_LEAVE_DAYS)
     init_db()
     with DB_LOCK:
         conn = db()
@@ -887,10 +973,10 @@ def update_employee(employee_id: int, name: str, department: str, fingerprint: s
             cursor = conn.execute(
                 """
                 UPDATE employees
-                SET name = ?, department = ?, fingerprint = ?, device = ?, team = ?
+                SET name = ?, department = ?, fingerprint = ?, device = ?, team = ?, leave_days = ?
                 WHERE id = ?
                 """,
-                (name, department, fingerprint, device, team, employee_id),
+                (name, department, fingerprint, device, team, leave_days, employee_id),
             )
             conn.commit()
             updated = cursor.rowcount > 0

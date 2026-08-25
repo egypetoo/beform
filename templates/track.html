@@ -71,6 +71,27 @@
             {% include "_pwa_install.html" %}
         </form>
 
+        {% if leave_balance %}
+            <section class="form-shell leave-balance-card">
+                <h2 class="section-title">Annual leave {{ leave_balance.year }}</h2>
+                <div class="leave-balance-grid">
+                    <div>
+                        <span>Remaining</span>
+                        <strong>{{ leave_balance.remaining }}</strong>
+                    </div>
+                    <div>
+                        <span>Used</span>
+                        <strong>{{ leave_balance.used }}</strong>
+                    </div>
+                    <div>
+                        <span>Entitlement</span>
+                        <strong>{{ leave_balance.entitlement }}</strong>
+                    </div>
+                </div>
+                <p class="muted">Only approved Annual Vacation days count as used.</p>
+            </section>
+        {% endif %}
+
         {% if rows %}
             <p class="track-count">{{ rows|length }} request{{ 's' if rows|length != 1 else '' }}</p>
             <section class="track-list">

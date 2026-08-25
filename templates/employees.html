@@ -33,6 +33,18 @@
             {% endif %}
         {% endwith %}
 
+        <form class="form-shell" method="post" action="{{ url_for('employees_leave_settings') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h2 class="section-title">Annual leave balance</h2>
+            <p class="muted">Default entitlement is <strong>{{ default_leave_days }}</strong> days per employee per calendar year. Used days come from approved <strong>Annual Vacation</strong> requests only. You can raise or lower each employee’s entitlement below.</p>
+            <label class="select-all-label leave-toggle">
+                <input type="checkbox" name="leave_balance_visible" value="1"
+                       {% if leave_balance_visible %}checked{% endif %}>
+                Show remaining leave days on the Track page
+            </label>
+            <button type="submit">Save leave visibility</button>
+        </form>
+
         <form class="form-shell" method="post" action="{{ url_for('employees_import') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Upload employees</h2>
@@ -85,6 +97,12 @@
                 </select>
                 <p class="muted">Choose a team leader only if this employee belongs to a team. Leave empty to link to the department.</p>
             </section>
+            <section class="field">
+                <label for="leave_days">Annual leave days</label>
+                <input id="leave_days" name="leave_days" type="number" min="0" max="365" step="1"
+                       value="{{ default_leave_days }}" required>
+                <p class="muted">Default is {{ default_leave_days }}. Change this to give more or fewer days.</p>
+            </section>
             <button type="submit">Add employee</button>
         </form>
 
@@ -127,6 +145,7 @@
                                 <th>Name</th>
                                 <th>Department</th>
                                 <th>Team</th>
+                                <th>Leave days</th>
                                 <th>Fingerprint</th>
                                 <th>Device</th>
                                 <th></th>
@@ -158,6 +177,11 @@
                                                 data-team="{{ employee.team or '' }}">
                                             <option value="">Department only</option>
                                         </select>
+                                    </td>
+                                    <td data-label="Leave days">
+                                        <input form="employee-save-form" class="inline-edit leave-days-input" type="number"
+                                               name="leave_days" value="{{ employee.leave_days }}"
+                                               min="0" max="365" step="1" required aria-label="Leave days">
                                     </td>
                                     <td data-label="Fingerprint">
                                         <input form="employee-save-form" class="inline-edit" type="text" name="fingerprint"
