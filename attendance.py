@@ -352,7 +352,7 @@ def date_range(start: str, end: str) -> list:
 
 def request_covers(row: dict) -> bool:
     status = str(row.get("Status") or "Pending").strip().lower()
-    if status == "rejected":
+    if status != "approved":
         return False
     request_type = str(row.get("Request Type") or "").strip().lower()
     return request_type in COVERING_TYPES
@@ -394,7 +394,7 @@ def type_index(requests: list, wanted) -> dict:
     index = defaultdict(list)
     for row in requests:
         status = str(row.get("Status") or "Pending").strip().lower()
-        if status == "rejected":
+        if status != "approved":
             continue
         request_type = str(row.get("Request Type") or "").strip().lower()
         if request_type not in wanted:
