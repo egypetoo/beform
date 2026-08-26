@@ -419,6 +419,8 @@
             if (rows.length === 1) {
                 nameInput.value = rows[0].name;
                 nameInput.readOnly = true;
+                nameInput.classList.add('is-matched');
+                departmentSelect.classList.add('is-matched');
                 if (nameHint) {
                     nameHint.textContent = 'Name matched from your fingerprint, department, and team.';
                 }
@@ -432,6 +434,8 @@
             }
             nameInput.value = '';
             nameInput.readOnly = true;
+            nameInput.classList.remove('is-matched');
+            departmentSelect.classList.remove('is-matched');
             if (!nameHint) return;
             const fp = (fingerprint.value || '').replace(/\D/g, '');
             if (!fp) {

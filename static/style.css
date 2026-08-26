@@ -137,6 +137,18 @@ select[data-locked="1"] {
     opacity: 0.85;
 }
 
+#name.is-matched,
+#department.is-matched {
+    color: #ec761e;
+    font-weight: 700;
+    border-color: rgba(236, 118, 30, 0.55);
+}
+
+#department.is-matched option {
+    color: var(--text);
+    font-weight: 400;
+}
+
 input[type="text"],
 input[type="date"],
 input[type="time"],
