@@ -517,10 +517,9 @@ def classify_day(
 ) -> dict:
     missing_punch_types = list(missing_punch_types or [])
     skip_out = skips_clock_out(department)
-    deduct_missing = [
-        item for item in missing_punch_types
-        if not skip_out or str(item).strip().lower() != "missing punch out"
-    ]
+    missing_keys = {str(item).strip().lower() for item in missing_punch_types}
+    has_missing_in = "missing punch in" in missing_keys
+    has_missing_out = "missing punch out" in missing_keys
     note_types = list(types or [])
     if late_excuse:
         note_types.append(LATE_EXCUSE_TYPE)
@@ -543,14 +542,16 @@ def classify_day(
         return empty
     if types:
         return empty
-    if deduct_missing:
-        return {
-            **empty,
-            "notes": notes,
-            "deduction": DEDUCTION_HALF,
-            "reason": missing_punch_reason(deduct_missing),
-        }
     if not clock_in:
+        if has_missing_in:
+            if clock_out or has_missing_out or skip_out:
+                return empty
+            return {
+                **empty,
+                "notes": notes,
+                "deduction": DEDUCTION_HALF,
+                "reason": "نسيان بصمة انصراف",
+            }
         if clock_out:
             return {
                 **empty,
@@ -565,6 +566,8 @@ def classify_day(
             "reason": "عدم البصمة ولا يوجد طلب",
         }
     if not clock_out and not skip_out:
+        if has_missing_out:
+            return empty
         return {
             **empty,
             "notes": notes,
