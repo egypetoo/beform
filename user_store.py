@@ -704,7 +704,10 @@ def delete_user(user_id: int) -> bool:
         return deleted
 
 
-DEFAULT_DEVICES = ["F8", "F9"]
+DEFAULT_DEVICES = ["F8", "F9", "Maadi"]
+NAMED_DEVICES = {
+    "MAADI": "Maadi",
+}
 MAX_EMPLOYEE_IMPORT_ROWS = 800
 
 
@@ -716,9 +719,12 @@ def normalize_fingerprint_id(value) -> str:
 
 
 def normalize_device(value: str) -> str:
-    text = re.sub(r"\s+", "", (value or "").strip().upper())
-    if re.fullmatch(r"F\d{1,3}", text):
-        return text
+    text = re.sub(r"\s+", "", (value or "").strip())
+    upper = text.upper()
+    if upper in NAMED_DEVICES:
+        return NAMED_DEVICES[upper]
+    if re.fullmatch(r"F\d{1,3}", upper):
+        return upper
     return ""
 
 
@@ -872,7 +878,7 @@ def validate_employee(name: str, department: str, fingerprint: str, device: str,
     elif len(fingerprint) > 10:
         errors.append("Fingerprint number is too long.")
     if not device:
-        errors.append("Device must be F8, F9, or similar (F then numbers).")
+        errors.append("Device must be F8, F9, Maadi, or similar.")
     if team:
         if len(team) > 60:
             errors.append("Team name is too long.")

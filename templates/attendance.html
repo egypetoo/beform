@@ -13,7 +13,7 @@
             {% include "_logo.html" %}
             <p class="eyebrow">HR Admin</p>
             <h1>Attendance gaps</h1>
-            <p class="subtitle">Upload the F8 and F9 sheets from the fingerprint machines. The Excel file matches the monthly attendance layout: one row per person per workday.</p>
+            <p class="subtitle">Upload the F8, F9, and Maadi sheets from the fingerprint machines. The Excel file matches the monthly attendance layout: one row per person per workday.</p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('employees_admin') }}">Employees</a>
                 <a class="excel-link" href="{{ url_for('holidays_admin') }}">Official holidays</a>
@@ -37,7 +37,7 @@
             <h2 class="section-title">Upload machine sheets</h2>
             <p class="muted">Clock-in is flexible from 9:00 to 10:00. The employee must complete 8.5 hours from that arrival (9:00 leaves at 17:30, 9:30 leaves at 18:00, 10:00 leaves at 18:30). 15 minutes of grace can be used on clock-in, clock-out, or split between both. From 10:16 to 11:00 is a quarter-day deduction. After 11:00 is a half-day deduction. If they still leave before completing 8.5 hours after grace: 7.5 hours or more worked is a quarter day, and less than 7.5 hours is a half day. Official holidays set by HR are not deducted. Missing punch in or punch out is a half-day deduction. Sales has no clock-out, so clock-out rules are skipped for that department. Late excuse is whole hours only and uses the 4-hour monthly allowance. No punch and no leave/mission request is a full day. Not working a Saturday in the month is a full-day deduction. Friday is skipped. Saturday is off unless the employee punched or submitted Monthly Saturday Work.</p>
             <section class="field">
-                <label for="sheets">F8 / F9 attendance files</label>
+                <label for="sheets">F8 / F9 / Maadi attendance files</label>
                 <input id="sheets" name="sheets" type="file" accept=".xls,.xlsx,.csv" multiple required>
             </section>
             <section class="field">

@@ -2220,7 +2220,7 @@ def read_attendance_file(upload) -> list:
         return attendance.rows_from_mapped(list(csv.DictReader(io.StringIO(text))), fallback)
     if filename.endswith(".xls"):
         return attendance.rows_from_xls(raw, fallback)
-    raise ValueError("Upload the F8/F9 .xls file from the fingerprint machine.")
+    raise ValueError("Upload the F8/F9/Maadi .xls file from the fingerprint machine.")
 
 
 @app.route("/attendance", methods=["GET", "POST"])
@@ -2233,7 +2233,7 @@ def attendance_report():
             return redirect(url_for("attendance_report"))
         uploads = [item for item in request.files.getlist("sheets") if item and item.filename]
         if not uploads:
-            flash("Upload the F8 and/or F9 sheet from the fingerprint machines.", "error")
+            flash("Upload the F8, F9, and/or Maadi sheet from the fingerprint machines.", "error")
             return redirect(url_for("attendance_report"))
         punches = []
         try:
@@ -2247,7 +2247,7 @@ def attendance_report():
             return redirect(url_for("attendance_report"))
         unknown_device = sum(1 for item in punches if not item.get("device"))
         if unknown_device:
-            flash("Some rows have no device. Name the files with F8 or F9, or use the machine export.", "error")
+            flash("Some rows have no device. Name the files with F8, F9, or Maadi, or use the machine export.", "error")
         try:
             requests_rows = list_requests("ALL")
         except Exception as exc:

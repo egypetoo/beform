@@ -324,6 +324,8 @@ def rows_from_mapped(raw_rows: list, fallback_device: str = "") -> list:
 
 def detect_device_from_name(filename: str) -> str:
     name = (filename or "").upper()
+    if "MAADI" in name:
+        return "Maadi"
     if "F9" in name:
         return "F9"
     if "F8" in name:

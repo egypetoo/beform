@@ -13,7 +13,7 @@
             {% include "_logo.html" %}
             <p class="eyebrow">HR Admin</p>
             <h1>Employees</h1>
-            <p class="subtitle">Register each person with their fingerprint and device (F8 or F9). The form still asks for name and fingerprint only.</p>
+            <p class="subtitle">Register each person with their fingerprint and device (F8, F9, or Maadi). The form still asks for name and fingerprint only.</p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('attendance_report') }}">Attendance gaps</a>
                 <a class="excel-link" href="{{ url_for('holidays_admin') }}">Official holidays</a>
@@ -48,7 +48,7 @@
         <form class="form-shell" method="post" action="{{ url_for('employees_import') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Upload employees</h2>
-            <p class="muted">Excel columns: <strong>name, department, fingerprint, device, team</strong>. Device is F8 or F9. Team is optional: leave it empty to link the employee to the department only. Re-uploading the same device + fingerprint updates the record.</p>
+            <p class="muted">Excel columns: <strong>name, department, fingerprint, device, team</strong>. Device is F8, F9, or Maadi. Team is optional: leave it empty to link the employee to the department only. Re-uploading the same device + fingerprint updates the record.</p>
             <section class="field">
                 <label for="sheet">Employees file</label>
                 <input id="sheet" name="sheet" type="file" accept=".xlsx,.csv" required>
