@@ -59,6 +59,7 @@
                 <select id="team" name="team">
                     <option value="">Select department first</option>
                 </select>
+                <p class="field-hint hidden" id="team-hint">Same fingerprint exists in more than one team. Choose yours to show the correct name.</p>
             </section>
 
             <section class="field hidden" id="device-card">
@@ -243,7 +244,7 @@
         const fingerprint = document.getElementById('fingerprint_id');
         fingerprint.addEventListener('input', () => {
             fingerprint.value = fingerprint.value.replace(/\D/g, '');
-            resolveEmployee();
+            resolveEmployee('fingerprint');
         });
         const nameInput = document.getElementById('name');
         const nameHint = document.getElementById('name-hint');
@@ -252,6 +253,7 @@
         const departmentSelect = document.getElementById('department');
         const teamSelect = document.getElementById('team');
         const teamCard = document.getElementById('team-card');
+        const teamHint = document.getElementById('team-hint');
         const deviceSelect = document.getElementById('device');
         const deviceCard = document.getElementById('device-card');
         const teamsByDepartment = {{ teams_by_department | tojson }};
@@ -263,6 +265,15 @@
 
         function employeesForFingerprint(fp) {
             return employeeDirectory.filter((row) => row.fingerprint === fp);
+        }
+
+        function matchesForDepartment() {
+            const fp = (fingerprint.value || '').replace(/\D/g, '');
+            const department = departmentSelect.value;
+            if (!fp || !department) return [];
+            return employeeDirectory.filter((row) => (
+                row.fingerprint === fp && row.department === department
+            ));
         }
 
         function filterDepartmentOptions(fp) {
@@ -285,82 +296,99 @@
         }
 
         function candidates() {
-            const fp = (fingerprint.value || '').replace(/\D/g, '');
-            const department = departmentSelect.value;
-            if (!fp || !department) return [];
-            let rows = employeeDirectory.filter((row) => (
-                row.fingerprint === fp && row.department === department
-            ));
-            const team = teamSelect.value || '';
+            let rows = matchesForDepartment();
             if (!teamCard.classList.contains('hidden')) {
+                const team = teamSelect.value || '';
                 rows = rows.filter((row) => (row.team || '') === team);
             }
-            const device = deviceSelect.value || '';
-            if (device) {
-                rows = rows.filter((row) => (row.device || '') === device);
+            if (!deviceCard.classList.contains('hidden')) {
+                const device = deviceSelect.value || '';
+                if (device) {
+                    rows = rows.filter((row) => (row.device || '') === device);
+                }
+            } else {
+                const device = deviceSelect.value || '';
+                if (device) {
+                    rows = rows.filter((row) => (row.device || '') === device);
+                }
             }
             return rows;
         }
 
         function fillTeamsForFingerprint() {
-            const fp = (fingerprint.value || '').replace(/\D/g, '');
-            const department = departmentSelect.value;
-            const deptTeams = teamsByDepartment[department] || [];
-            const matches = employeeDirectory.filter((row) => (
-                row.fingerprint === fp && row.department === department
-            ));
+            const matches = matchesForDepartment();
+            const previous = teamSelect.value || selectedTeam || '';
+            const deptTeams = teamsByDepartment[departmentSelect.value] || [];
+            const labelByValue = {};
+            deptTeams.forEach((team) => {
+                labelByValue[team.value] = team.label;
+            });
+
             teamSelect.innerHTML = '';
             teamSelect.disabled = false;
-            if (!department || !fp) {
+            if (!matches.length) {
                 teamCard.classList.add('hidden');
+                if (teamHint) teamHint.classList.add('hidden');
                 teamSelect.required = false;
                 teamSelect.appendChild(new Option('', ''));
                 return;
             }
-            const teamValues = [...new Set(matches.map((row) => row.team || ''))];
-            const hasBlank = teamValues.includes('');
-            const namedTeams = deptTeams.filter((team) => teamValues.includes(team.value));
-            if (!namedTeams.length && hasBlank) {
+
+            const byTeam = new Map();
+            matches.forEach((row) => {
+                const key = row.team || '';
+                if (!byTeam.has(key)) byTeam.set(key, []);
+                byTeam.get(key).push(row);
+            });
+            const teamKeys = [...byTeam.keys()];
+            const hasBlank = teamKeys.includes('');
+            const namedKeys = teamKeys.filter((key) => key);
+
+            if (namedKeys.length === 0) {
                 teamCard.classList.add('hidden');
+                if (teamHint) teamHint.classList.add('hidden');
                 teamSelect.required = false;
                 teamSelect.appendChild(new Option('', ''));
                 teamSelect.value = '';
                 return;
             }
-            if (!namedTeams.length && !deptTeams.length) {
-                teamCard.classList.add('hidden');
-                teamSelect.required = false;
-                teamSelect.appendChild(new Option('', ''));
-                return;
-            }
+
             teamCard.classList.remove('hidden');
-            teamSelect.appendChild(new Option(hasBlank ? 'Department only / Select team' : 'Select team', ''));
-            namedTeams.forEach((team) => {
-                const option = new Option(team.label, team.value);
-                if (team.value === selectedTeam) option.selected = true;
-                teamSelect.appendChild(option);
+            const multiTeam = namedKeys.length > 1 || (namedKeys.length >= 1 && hasBlank);
+            if (teamHint) {
+                teamHint.classList.toggle('hidden', !multiTeam);
+            }
+            teamSelect.appendChild(new Option(
+                hasBlank ? 'Department only / Select team' : 'Select team',
+                ''
+            ));
+            namedKeys.sort((left, right) => left.localeCompare(right)).forEach((key) => {
+                const people = byTeam.get(key) || [];
+                const base = labelByValue[key] || key;
+                const label = (multiTeam && people.length === 1)
+                    ? (base + ' — ' + people[0].name)
+                    : base;
+                teamSelect.appendChild(new Option(label, key));
             });
-            if (namedTeams.length === 1 && !hasBlank) {
-                teamSelect.value = namedTeams[0].value;
+
+            if (namedKeys.length === 1 && !hasBlank) {
+                teamSelect.value = namedKeys[0];
                 teamSelect.required = false;
             } else {
-                teamSelect.required = namedTeams.length > 0 && !hasBlank;
-            }
-            if (selectedTeam && [...teamSelect.options].some((item) => item.value === selectedTeam)) {
-                teamSelect.value = selectedTeam;
+                teamSelect.required = true;
+                if (previous && [...teamSelect.options].some((item) => item.value === previous)) {
+                    teamSelect.value = previous;
+                }
             }
         }
 
         function fillDevices() {
-            const fp = (fingerprint.value || '').replace(/\D/g, '');
-            const department = departmentSelect.value;
-            let rows = employeeDirectory.filter((row) => (
-                row.fingerprint === fp && row.department === department
-            ));
-            const team = teamSelect.value || '';
+            let rows = matchesForDepartment();
             if (!teamCard.classList.contains('hidden')) {
+                const team = teamSelect.value || '';
                 rows = rows.filter((row) => (row.team || '') === team);
             }
+            const previous = deviceSelect.value || selectedDevice || '';
             const devices = [...new Set(rows.map((row) => row.device).filter(Boolean))];
             deviceSelect.innerHTML = '';
             if (devices.length <= 1) {
@@ -377,59 +405,72 @@
             deviceSelect.required = true;
             deviceSelect.appendChild(new Option('Select device', ''));
             devices.forEach((device) => {
-                const option = new Option(device, device);
-                if (device === selectedDevice) option.selected = true;
-                deviceSelect.appendChild(option);
+                const person = rows.find((row) => row.device === device);
+                const label = person ? (device + ' — ' + person.name) : device;
+                deviceSelect.appendChild(new Option(label, device));
             });
+            if (previous && [...deviceSelect.options].some((item) => item.value === previous)) {
+                deviceSelect.value = previous;
+            }
         }
 
-        function resolveEmployee() {
-            const fp = (fingerprint.value || '').replace(/\D/g, '');
-            filterDepartmentOptions(fp);
-            fillTeamsForFingerprint();
-            fillDevices();
+        function applyMatchedName() {
             const rows = candidates();
             if (rows.length === 1) {
                 nameInput.value = rows[0].name;
                 nameInput.readOnly = true;
                 if (nameHint) {
-                    nameHint.textContent = 'Name matched from your fingerprint and department.';
+                    nameHint.textContent = 'Name matched from your fingerprint, department, and team.';
                 }
-                if (rows[0].device && !deviceSelect.value) {
+                if (rows[0].device) {
                     deviceSelect.innerHTML = '';
                     deviceSelect.appendChild(new Option(rows[0].device, rows[0].device, true, true));
+                    deviceCard.classList.add('hidden');
+                    deviceSelect.required = false;
                 }
+                return;
+            }
+            nameInput.value = '';
+            nameInput.readOnly = true;
+            if (!nameHint) return;
+            const fp = (fingerprint.value || '').replace(/\D/g, '');
+            if (!fp) {
+                nameHint.textContent = 'Enter fingerprint and department first. Your name will appear automatically.';
+            } else if (!departmentSelect.value) {
+                nameHint.textContent = 'Select your department to find your name.';
+            } else if (!teamCard.classList.contains('hidden') && !teamSelect.value) {
+                nameHint.textContent = 'Same fingerprint in more than one team. Select your team to show your name.';
+            } else if (!deviceCard.classList.contains('hidden') && !deviceSelect.value) {
+                nameHint.textContent = 'Select your device to find your name.';
+            } else if (fp && !employeesForFingerprint(fp).length) {
+                nameHint.textContent = 'This fingerprint is not registered. Ask HR to add you.';
             } else {
-                nameInput.value = '';
-                nameInput.readOnly = true;
-                if (nameHint) {
-                    if (!fp) {
-                        nameHint.textContent = 'Enter fingerprint and department first. Your name will appear automatically.';
-                    } else if (!departmentSelect.value) {
-                        nameHint.textContent = 'Select your department to find your name.';
-                    } else if (!teamCard.classList.contains('hidden') && teamSelect.required && !teamSelect.value) {
-                        nameHint.textContent = 'Select your team to find your name.';
-                    } else if (!deviceCard.classList.contains('hidden') && !deviceSelect.value) {
-                        nameHint.textContent = 'Select your device to find your name.';
-                    } else if (fp && !employeesForFingerprint(fp).length) {
-                        nameHint.textContent = 'This fingerprint is not registered. Ask HR to add you.';
-                    } else {
-                        nameHint.textContent = 'No matching employee found for this selection.';
-                    }
-                }
+                nameHint.textContent = 'No matching employee found for this selection.';
             }
         }
 
-        departmentSelect.addEventListener('change', resolveEmployee);
-        teamSelect.addEventListener('change', resolveEmployee);
-        deviceSelect.addEventListener('change', resolveEmployee);
-        resolveEmployee();
+        function resolveEmployee(from) {
+            const fp = (fingerprint.value || '').replace(/\D/g, '');
+            filterDepartmentOptions(fp);
+            if (from !== 'team' && from !== 'device') {
+                fillTeamsForFingerprint();
+            }
+            if (from !== 'device') {
+                fillDevices();
+            }
+            applyMatchedName();
+        }
+
+        departmentSelect.addEventListener('change', () => resolveEmployee('department'));
+        teamSelect.addEventListener('change', () => resolveEmployee('team'));
+        deviceSelect.addEventListener('change', () => resolveEmployee('device'));
+        resolveEmployee('init');
         form.addEventListener('submit', (event) => {
             if (sending) {
                 event.preventDefault();
                 return;
             }
-            resolveEmployee();
+            applyMatchedName();
             if (!(nameInput.value || '').trim()) {
                 event.preventDefault();
                 alert('Enter your fingerprint and choose department/team until your name appears.');
