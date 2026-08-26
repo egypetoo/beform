@@ -807,7 +807,7 @@ def list_devices() -> list:
     return devices
 
 
-def match_employee(name: str, fingerprint: str, department: str) -> dict | None:
+def match_employee(name: str, fingerprint: str, department: str, team: str = "", device: str = "") -> dict | None:
     fingerprint = normalize_fingerprint_id(fingerprint)
     if not fingerprint:
         return None
@@ -821,19 +821,60 @@ def match_employee(name: str, fingerprint: str, department: str) -> dict | None:
     people = [_row_to_employee(row) for row in rows]
     if not people:
         return None
-    named = [person for person in people if names_match(name, person["name"])]
-    if not named:
-        return None
     department_key = (department or "").strip().lower()
     in_department = [
-        person for person in named
+        person for person in people
         if person["department"].strip().lower() == department_key
     ]
+    if name:
+        named = [person for person in in_department if names_match(name, person["name"])]
+        if named:
+            in_department = named
+        elif in_department:
+            return None
+    team_key = (team or "").strip().lower()
+    if team_key:
+        in_department = [
+            person for person in in_department
+            if (person.get("team") or "").strip().lower() == team_key
+        ]
+    elif len(in_department) > 1:
+        blank_team = [
+            person for person in in_department
+            if not (person.get("team") or "").strip()
+        ]
+        if blank_team:
+            in_department = blank_team
+    device_key = normalize_device(device)
+    if device_key:
+        in_department = [
+            person for person in in_department
+            if normalize_device(person.get("device") or "") == device_key
+        ]
     if len(in_department) == 1:
         return in_department[0]
     if len(in_department) > 1:
         return in_department[0]
     return None
+
+
+def departments_for_fingerprint(fingerprint: str) -> list:
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint:
+        return []
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM employees WHERE fingerprint = ? AND active = 1",
+        (fingerprint,),
+    ).fetchall()
+    conn.close()
+    departments = []
+    for row in rows:
+        label = (_row_to_employee(row).get("department") or "").strip()
+        if label and label not in departments:
+            departments.append(label)
+    return departments
 
 
 def departments_for_person(name: str, fingerprint: str) -> list:

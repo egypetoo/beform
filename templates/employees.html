@@ -134,8 +134,9 @@
                         <button class="btn-sm btn-reject" type="submit" id="employee-delete-all">Delete all</button>
                     </div>
                 </form>
-                <form method="post" action="{{ url_for('employees_bulk_edit') }}" id="employee-save-form">
+                <form method="post" action="{{ url_for('employees_admin') }}" id="employee-save-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="bulk_save" value="1">
                 </form>
                 <div class="table-wrap">
                     <table>
@@ -153,7 +154,15 @@
                         </thead>
                         <tbody>
                             {% for employee in employees %}
-                                <tr data-name="{{ employee.name|lower }}" data-fingerprint="{{ employee.fingerprint }}">
+                                <tr class="employee-row"
+                                    data-name="{{ employee.name|lower }}"
+                                    data-fingerprint="{{ employee.fingerprint }}"
+                                    data-original-name="{{ employee.name }}"
+                                    data-original-department="{% for dept in departments %}{% if dept.label == employee.department %}{{ dept.value }}{% endif %}{% endfor %}"
+                                    data-original-team="{{ employee.team or '' }}"
+                                    data-original-leave="{{ employee.leave_days }}"
+                                    data-original-fingerprint="{{ employee.fingerprint }}"
+                                    data-original-device="{{ employee.device }}">
                                     <td class="card-check">
                                         <input form="employee-bulk-form" class="row-check" type="checkbox"
                                                name="selected" value="{{ employee.id }}" aria-label="Select {{ employee.name }}">
@@ -351,6 +360,51 @@
                     if (deleteScope) deleteScope.value = 'all';
                 });
             }
+        }
+
+        const saveForm = document.getElementById('employee-save-form');
+        function rowValues(row) {
+            return {
+                name: (row.querySelector('input[name="name"]') || {}).value || '',
+                department: (row.querySelector('select[name="department"]') || {}).value || '',
+                team: (row.querySelector('select[name="team"]') || {}).value || '',
+                leave: (row.querySelector('input[name="leave_days"]') || {}).value || '',
+                fingerprint: (row.querySelector('input[name="fingerprint"]') || {}).value || '',
+                device: (row.querySelector('select[name="device"]') || {}).value || '',
+            };
+        }
+        function rowIsDirty(row) {
+            const current = rowValues(row);
+            return (
+                current.name !== (row.dataset.originalName || '')
+                || current.department !== (row.dataset.originalDepartment || '')
+                || current.team !== (row.dataset.originalTeam || '')
+                || String(current.leave) !== String(row.dataset.originalLeave || '')
+                || current.fingerprint !== (row.dataset.originalFingerprint || '')
+                || current.device !== (row.dataset.originalDevice || '')
+            );
+        }
+        if (saveForm) {
+            saveForm.addEventListener('submit', (event) => {
+                const rows = Array.from(document.querySelectorAll('tr.employee-row'));
+                let dirtyCount = 0;
+                rows.forEach((row) => {
+                    const dirty = rowIsDirty(row);
+                    row.querySelectorAll('[form="employee-save-form"]').forEach((field) => {
+                        field.disabled = !dirty;
+                    });
+                    if (dirty) dirtyCount += 1;
+                });
+                if (!dirtyCount) {
+                    event.preventDefault();
+                    rows.forEach((row) => {
+                        row.querySelectorAll('[form="employee-save-form"]').forEach((field) => {
+                            field.disabled = false;
+                        });
+                    });
+                    alert('No employee changes to save.');
+                }
+            });
         }
     </script>
     {% include "_pwa_foot.html" %}
