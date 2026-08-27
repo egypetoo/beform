@@ -1012,10 +1012,19 @@ def track():
     rows = None
     fingerprint_id = ""
     track_name = ""
+    track_department = ""
+    track_team = ""
+    track_device = ""
     status_filter = "All"
     type_filter = ""
     request_types = []
     leave_balance = None
+    track_context = {
+        "departments": all_departments(),
+        "teams_by_department": teams_for_form(),
+        "employee_directory": form_employee_directory(),
+        "statuses": ["Pending", "Approved", "Rejected", "All"],
+    }
 
     if request.method == "POST":
         if not csrf_is_valid():
@@ -1025,81 +1034,108 @@ def track():
                 rows=None,
                 fingerprint_id="",
                 track_name="",
+                track_department="",
+                track_team="",
+                track_device="",
                 status_filter="All",
                 type_filter="",
                 request_types=[],
                 leave_balance=None,
-                statuses=["Pending", "Approved", "Rejected", "All"],
+                **track_context,
             )
 
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
         track_name = request.form.get("name", "").strip()
+        track_department = request.form.get("department", "").strip()
+        track_team = request.form.get("team", "").strip()
+        track_device = request.form.get("device", "").strip()
         status_filter = request.form.get("status", "All").strip() or "All"
         type_filter = request.form.get("type", "").strip()
         if status_filter not in {"Pending", "Approved", "Rejected", "All"}:
             status_filter = "All"
 
-        if not track_name:
-            flash("Name is required.", "error")
-        elif not user_store.is_english_person_name(track_name):
-            flash("Name must be in English letters only.", "error")
-        elif not fingerprint_id:
+        if not fingerprint_id:
             flash("Fingerprint number is required.", "error")
         elif not fingerprint_id.isdigit():
             flash("Fingerprint number must contain digits only.", "error")
+        elif not track_department or track_department not in department_maps()["values"]:
+            flash("Please select a valid department.", "error")
         else:
-            cache_key = f"{fingerprint_id}|{user_store.normalize_person_name(track_name)}"
-            cached = TRACK_CACHE.get(cache_key)
-            cache_fresh = bool(cached and time.time() - cached["at"] < TRACK_CACHE_SECONDS)
-            if not cache_fresh and track_is_limited(client_ip()):
-                flash("Too many searches. Please wait 5 minutes and try again.", "error")
-                return render_template(
-                    "track.html",
-                    rows=None,
-                    fingerprint_id=fingerprint_id,
-                    track_name=track_name,
-                    status_filter=status_filter,
-                    type_filter=type_filter,
-                    request_types=[],
-                    leave_balance=None,
-                    statuses=["Pending", "Approved", "Rejected", "All"],
-                )
-            try:
-                all_rows = lookup_by_fingerprint(fingerprint_id, track_name)
-                leave_balance = leave_balance_summary(track_name, fingerprint_id, all_rows)
-                if not all_rows:
-                    if leave_balance:
-                        rows = []
+            department_label = department_maps()["labels"].get(track_department, "")
+            matched = user_store.match_employee(
+                "",
+                fingerprint_id,
+                department_label,
+                track_team,
+                track_device,
+            )
+            if matched:
+                track_name = matched["name"]
+                track_team = matched.get("team") or ""
+                track_device = matched.get("device") or ""
+            if not track_name:
+                flash("Could not find your name for this fingerprint and department.", "error")
+            elif not user_store.is_english_person_name(track_name):
+                flash("Name must be in English letters only.", "error")
+            else:
+                cache_key = f"{fingerprint_id}|{user_store.normalize_person_name(track_name)}"
+                cached = TRACK_CACHE.get(cache_key)
+                cache_fresh = bool(cached and time.time() - cached["at"] < TRACK_CACHE_SECONDS)
+                if not cache_fresh and track_is_limited(client_ip()):
+                    flash("Too many searches. Please wait 5 minutes and try again.", "error")
+                    return render_template(
+                        "track.html",
+                        rows=None,
+                        fingerprint_id=fingerprint_id,
+                        track_name=track_name,
+                        track_department=track_department,
+                        track_team=track_team,
+                        track_device=track_device,
+                        status_filter=status_filter,
+                        type_filter=type_filter,
+                        request_types=[],
+                        leave_balance=None,
+                        **track_context,
+                    )
+                try:
+                    all_rows = lookup_by_fingerprint(fingerprint_id, track_name)
+                    leave_balance = leave_balance_summary(track_name, fingerprint_id, all_rows)
+                    if not all_rows:
+                        if leave_balance:
+                            rows = []
+                        else:
+                            flash("No requests found for this name and fingerprint.", "error")
+                            rows = None
                     else:
-                        flash("No requests found for this name and fingerprint.", "error")
-                        rows = None
-                else:
-                    request_types = sorted({
-                        str(row.get("Request Type") or "").strip()
-                        for row in all_rows
-                        if row.get("Request Type")
-                    })
-                    rows = all_rows
-                    if status_filter != "All":
-                        rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
-                    if type_filter:
-                        rows = [row for row in rows if (row.get("Request Type") or "") == type_filter]
-            except Exception as exc:
-                (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-                flash("Could not load requests. Please try again.", "error")
-                rows = None
-                leave_balance = None
+                        request_types = sorted({
+                            str(row.get("Request Type") or "").strip()
+                            for row in all_rows
+                            if row.get("Request Type")
+                        })
+                        rows = all_rows
+                        if status_filter != "All":
+                            rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
+                        if type_filter:
+                            rows = [row for row in rows if (row.get("Request Type") or "") == type_filter]
+                except Exception as exc:
+                    (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+                    flash("Could not load requests. Please try again.", "error")
+                    rows = None
+                    leave_balance = None
 
     return render_template(
         "track.html",
         rows=rows,
         fingerprint_id=fingerprint_id,
         track_name=track_name,
+        track_department=track_department,
+        track_team=track_team,
+        track_device=track_device,
         status_filter=status_filter,
         type_filter=type_filter,
         request_types=request_types,
         leave_balance=leave_balance,
-        statuses=["Pending", "Approved", "Rejected", "All"],
+        **track_context,
     )
 
 

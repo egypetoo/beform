@@ -13,7 +13,7 @@
             {% include "_logo.html" %}
             <p class="eyebrow">Request Status</p>
             <h1>Track your request</h1>
-            <p class="subtitle">Enter your name and fingerprint number to see your latest 30 requests.</p>
+            <p class="subtitle">Enter your fingerprint number. Your department and name will appear automatically.</p>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -26,22 +26,50 @@
             {% endif %}
         {% endwith %}
 
-        <form class="form-shell" method="post">
+        <form class="form-shell" method="post" id="track-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <section class="field">
-                <label for="name">Name <span>*</span></label>
-                <input id="name" name="name" type="text" required
-                       pattern="[A-Za-z][A-Za-z .'\-]*"
-                       title="English letters only"
-                       value="{{ track_name }}" placeholder="Enter full name in English">
-            </section>
             <section class="field">
                 <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
                 <input id="fingerprint_id" name="fingerprint_id" type="text" required
                        inputmode="numeric" pattern="[0-9]+" maxlength="20"
                        value="{{ fingerprint_id }}" placeholder="Enter fingerprint number">
             </section>
-            <button type="submit">Check status</button>
+            <section class="field">
+                <label for="department">Department <span>*</span></label>
+                <select id="department" name="department" required>
+                    <option value="" disabled {% if not track_department %}selected{% endif %}>Select department</option>
+                    {% for dept in departments %}
+                        <option value="{{ dept.value }}"
+                                {% if track_department == dept.value %}selected{% endif %}>
+                            {{ dept.label }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <p class="field-hint">Choose the department linked to your fingerprint.</p>
+            </section>
+            <section class="field hidden" id="team-card">
+                <label for="team">Team <span>*</span></label>
+                <select id="team" name="team">
+                    <option value="">Select department first</option>
+                </select>
+                <p class="field-hint hidden" id="team-hint">Same fingerprint exists in more than one team. Choose yours to show the correct name.</p>
+            </section>
+            <section class="field hidden" id="device-card">
+                <label for="device">Device <span>*</span></label>
+                <select id="device" name="device">
+                    <option value="">Select device</option>
+                </select>
+                <p class="field-hint">This fingerprint exists on more than one device. Choose yours.</p>
+            </section>
+            <section class="field">
+                <label for="name">Name <span>*</span></label>
+                <input id="name" name="name" type="text" required readonly
+                       pattern="[A-Za-z][A-Za-z .'\-]*"
+                       title="Filled automatically from your fingerprint"
+                       value="{{ track_name }}" placeholder="Name appears after fingerprint and department">
+                <p class="field-hint" id="name-hint">Enter fingerprint and department first. Your name will appear automatically.</p>
+            </section>
+            <button type="submit" id="submit-btn">Check status</button>
 
             {% if rows is not none %}
                 <div class="track-toolbar">
@@ -139,12 +167,225 @@
     </main>
     <script>
         const fingerprint = document.getElementById('fingerprint_id');
+        const nameInput = document.getElementById('name');
+        const nameHint = document.getElementById('name-hint');
+        const departmentSelect = document.getElementById('department');
+        const teamSelect = document.getElementById('team');
+        const teamCard = document.getElementById('team-card');
+        const teamHint = document.getElementById('team-hint');
+        const deviceSelect = document.getElementById('device');
+        const deviceCard = document.getElementById('device-card');
+        const form = document.getElementById('track-form');
+        const teamsByDepartment = {{ teams_by_department | tojson }};
+        const employeeDirectory = {{ employee_directory | tojson }};
+        const selectedTeam = {{ (track_team or '') | tojson }};
+        const selectedDevice = {{ (track_device or '') | tojson }};
+
+        function employeesForFingerprint(fp) {
+            return employeeDirectory.filter((row) => row.fingerprint === fp);
+        }
+
+        function matchesForDepartment() {
+            const fp = (fingerprint.value || '').replace(/\D/g, '');
+            const department = departmentSelect.value;
+            if (!fp || !department) return [];
+            return employeeDirectory.filter((row) => (
+                row.fingerprint === fp && row.department === department
+            ));
+        }
+
+        function filterDepartmentOptions(fp) {
+            const matches = employeesForFingerprint(fp);
+            const allowed = [...new Set(matches.map((row) => row.department))];
+            Array.from(departmentSelect.options).forEach((option) => {
+                if (!option.value) return;
+                const blocked = allowed.length ? !allowed.includes(option.value) : false;
+                option.hidden = blocked;
+                option.disabled = blocked;
+            });
+            if (allowed.length === 1) {
+                departmentSelect.value = allowed[0];
+            } else if (allowed.length && !allowed.includes(departmentSelect.value)) {
+                departmentSelect.value = '';
+            }
+            if (fp && !allowed.length) {
+                departmentSelect.value = '';
+            }
+        }
+
+        function candidates() {
+            let rows = matchesForDepartment();
+            if (!teamCard.classList.contains('hidden')) {
+                const team = teamSelect.value || '';
+                rows = rows.filter((row) => (row.team || '') === team);
+            }
+            const device = deviceSelect.value || '';
+            if (device) {
+                rows = rows.filter((row) => (row.device || '') === device);
+            }
+            return rows;
+        }
+
+        function fillTeamsForFingerprint() {
+            const matches = matchesForDepartment();
+            const previous = teamSelect.value || selectedTeam || '';
+            const deptTeams = teamsByDepartment[departmentSelect.value] || [];
+            const labelByValue = {};
+            deptTeams.forEach((team) => {
+                labelByValue[team.value] = team.label;
+            });
+
+            teamSelect.innerHTML = '';
+            teamSelect.disabled = false;
+            if (!matches.length) {
+                teamCard.classList.add('hidden');
+                if (teamHint) teamHint.classList.add('hidden');
+                teamSelect.required = false;
+                teamSelect.appendChild(new Option('', ''));
+                return;
+            }
+
+            const byTeam = new Map();
+            matches.forEach((row) => {
+                const key = row.team || '';
+                if (!byTeam.has(key)) byTeam.set(key, []);
+                byTeam.get(key).push(row);
+            });
+            const teamKeys = [...byTeam.keys()];
+            const hasBlank = teamKeys.includes('');
+            const namedKeys = teamKeys.filter((key) => key);
+
+            if (namedKeys.length === 0) {
+                teamCard.classList.add('hidden');
+                if (teamHint) teamHint.classList.add('hidden');
+                teamSelect.required = false;
+                teamSelect.appendChild(new Option('', ''));
+                teamSelect.value = '';
+                return;
+            }
+
+            teamCard.classList.remove('hidden');
+            const multiTeam = namedKeys.length > 1 || (namedKeys.length >= 1 && hasBlank);
+            if (teamHint) teamHint.classList.toggle('hidden', !multiTeam);
+            teamSelect.appendChild(new Option(
+                hasBlank ? 'Department only / Select team' : 'Select team',
+                ''
+            ));
+            namedKeys.sort((left, right) => left.localeCompare(right)).forEach((key) => {
+                const people = byTeam.get(key) || [];
+                const base = labelByValue[key] || key;
+                const label = (multiTeam && people.length === 1)
+                    ? (base + ' — ' + people[0].name)
+                    : base;
+                teamSelect.appendChild(new Option(label, key));
+            });
+
+            if (namedKeys.length === 1 && !hasBlank) {
+                teamSelect.value = namedKeys[0];
+                teamSelect.required = false;
+            } else {
+                teamSelect.required = true;
+                if (previous && [...teamSelect.options].some((item) => item.value === previous)) {
+                    teamSelect.value = previous;
+                }
+            }
+        }
+
+        function fillDevices() {
+            let rows = matchesForDepartment();
+            if (!teamCard.classList.contains('hidden')) {
+                const team = teamSelect.value || '';
+                rows = rows.filter((row) => (row.team || '') === team);
+            }
+            const previous = deviceSelect.value || selectedDevice || '';
+            const devices = [...new Set(rows.map((row) => row.device).filter(Boolean))];
+            deviceSelect.innerHTML = '';
+            if (devices.length <= 1) {
+                deviceCard.classList.add('hidden');
+                deviceSelect.required = false;
+                if (devices.length === 1) {
+                    deviceSelect.appendChild(new Option(devices[0], devices[0], true, true));
+                } else {
+                    deviceSelect.appendChild(new Option('', ''));
+                }
+                return;
+            }
+            deviceCard.classList.remove('hidden');
+            deviceSelect.required = true;
+            deviceSelect.appendChild(new Option('Select device', ''));
+            devices.forEach((device) => {
+                const person = rows.find((row) => row.device === device);
+                const label = person ? (device + ' — ' + person.name) : device;
+                deviceSelect.appendChild(new Option(label, device));
+            });
+            if (previous && [...deviceSelect.options].some((item) => item.value === previous)) {
+                deviceSelect.value = previous;
+            }
+        }
+
+        function applyMatchedName() {
+            const rows = candidates();
+            if (rows.length === 1) {
+                nameInput.value = rows[0].name;
+                nameInput.readOnly = true;
+                nameInput.classList.add('is-matched');
+                departmentSelect.classList.add('is-matched');
+                if (nameHint) {
+                    nameHint.textContent = 'Name matched from your fingerprint and department.';
+                }
+                if (rows[0].device) {
+                    deviceSelect.innerHTML = '';
+                    deviceSelect.appendChild(new Option(rows[0].device, rows[0].device, true, true));
+                    deviceCard.classList.add('hidden');
+                    deviceSelect.required = false;
+                }
+                return;
+            }
+            nameInput.value = '';
+            nameInput.readOnly = true;
+            nameInput.classList.remove('is-matched');
+            departmentSelect.classList.remove('is-matched');
+            if (!nameHint) return;
+            const fp = (fingerprint.value || '').replace(/\D/g, '');
+            if (!fp) {
+                nameHint.textContent = 'Enter fingerprint and department first. Your name will appear automatically.';
+            } else if (!departmentSelect.value) {
+                nameHint.textContent = 'Select your department to find your name.';
+            } else if (!teamCard.classList.contains('hidden') && !teamSelect.value) {
+                nameHint.textContent = 'Same fingerprint in more than one team. Select your team to show your name.';
+            } else if (!deviceCard.classList.contains('hidden') && !deviceSelect.value) {
+                nameHint.textContent = 'Select your device to find your name.';
+            } else if (fp && !employeesForFingerprint(fp).length) {
+                nameHint.textContent = 'This fingerprint is not registered. Ask HR to add you.';
+            } else {
+                nameHint.textContent = 'No matching employee found for this selection.';
+            }
+        }
+
+        function resolveEmployee(from) {
+            const fp = (fingerprint.value || '').replace(/\D/g, '');
+            filterDepartmentOptions(fp);
+            if (from !== 'team' && from !== 'device') {
+                fillTeamsForFingerprint();
+            }
+            if (from !== 'device') {
+                fillDevices();
+            }
+            applyMatchedName();
+        }
+
         fingerprint.addEventListener('input', () => {
             fingerprint.value = fingerprint.value.replace(/\D/g, '');
+            resolveEmployee('fingerprint');
         });
-        const nameInput = document.getElementById('name');
-        nameInput.addEventListener('input', () => {
-            nameInput.value = nameInput.value.replace(/[^A-Za-z .'\-]/g, '');
+        departmentSelect.addEventListener('change', () => resolveEmployee('department'));
+        teamSelect.addEventListener('change', () => resolveEmployee('team'));
+        deviceSelect.addEventListener('change', () => resolveEmployee('device'));
+        resolveEmployee('init');
+
+        form.addEventListener('submit', () => {
+            applyMatchedName();
+            nameInput.readOnly = false;
         });
     </script>
     {% include "_pwa_foot.html" %}
