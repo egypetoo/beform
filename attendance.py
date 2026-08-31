@@ -854,6 +854,7 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
     adjustments = adjustments or {}
     daily_rows = []
     for item in report.get("export_rows") or []:
+        adj = adjustments.get((item.get("device") or "", item.get("fingerprint") or ""), {})
         daily_rows.append([
             item.get("fingerprint") or "",
             item.get("name") or "",
@@ -865,8 +866,8 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
             item.get("notes") or "",
             item.get("deduction") or "",
             item.get("reason") or "",
-            "",
-            "",
+            format_days_label(adj.get("penalty_days")),
+            format_days_label(adj.get("bonus_days")),
         ])
     totals = {}
     for item in report.get("export_rows") or []:
