@@ -2,6 +2,7 @@ __pycache__/
 .venv/
 venv/
 data/*.xlsx
+data/attendance_reports/
 *.pyc
 .env
 sheet_error.log

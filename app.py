@@ -49,6 +49,7 @@ TRACK_CACHE = {}
 TRACK_CACHE_SECONDS = 60
 ATTENDANCE_EXPORTS = {}
 ATTENDANCE_EXPORT_SECONDS = 1800
+ATTENDANCE_REPORT_DIR = BASE_DIR / "data" / "attendance_reports"
 RECENT_SUBMISSIONS = {}
 RECENT_LOCK = Lock()
 DEDUP_SECONDS = 90
@@ -202,6 +203,31 @@ def attendance_workbook_bytes(report: dict) -> bytes:
     cycle_start = report_payroll_cycle_start(report)
     adjustments = user_store.payroll_adjustments_map(cycle_start)
     return build_xlsx_workbook(attendance.report_sheets(report, adjustments))
+
+
+def store_attendance_report(token: str, report: dict) -> None:
+    payload = {"at": time.time(), "report": report}
+    ATTENDANCE_EXPORTS[token] = payload
+    ATTENDANCE_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    path = ATTENDANCE_REPORT_DIR / f"{token}.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def load_attendance_report(token: str) -> dict | None:
+    payload = ATTENDANCE_EXPORTS.get(token or "")
+    if payload and payload.get("report"):
+        return payload
+    path = ATTENDANCE_REPORT_DIR / f"{token}.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if payload.get("report"):
+        ATTENDANCE_EXPORTS[token] = payload
+    return payload
+
 
 LEAVE_GROUPS = [
     {
@@ -2447,14 +2473,13 @@ def attendance_report():
         attach_payroll_adjustments(report)
         prune_attendance_exports()
         token = secrets.token_hex(12)
-        ATTENDANCE_EXPORTS[token] = {
-            "at": time.time(),
-            "report": report,
-        }
+        store_attendance_report(token, report)
         session["attendance_export"] = token
+        flash("Report built. Scroll down to enter penalties and bonuses, then download Excel.", "success")
+        return redirect(url_for("attendance_report") + "#payroll-adjustments")
     else:
         token = session.get("attendance_export")
-        payload = ATTENDANCE_EXPORTS.get(token or "")
+        payload = load_attendance_report(token or "")
         if payload and payload.get("report"):
             report = payload["report"]
             attach_payroll_adjustments(report)
@@ -2462,7 +2487,7 @@ def attendance_report():
     return render_template(
         "attendance.html",
         report=report,
-        can_download=bool(session.get("attendance_export") and session.get("attendance_export") in ATTENDANCE_EXPORTS),
+        can_download=bool(load_attendance_report(session.get("attendance_export") or "")),
         departments=all_departments(active_only=False),
         devices=user_store.list_devices(),
     )
@@ -2475,7 +2500,7 @@ def attendance_adjustments():
         flash("The form expired. Please refresh and try again.", "error")
         return redirect(url_for("attendance_report"))
     token = session.get("attendance_export")
-    payload = ATTENDANCE_EXPORTS.get(token or "")
+    payload = load_attendance_report(token or "")
     report = (payload or {}).get("report")
     if not report:
         flash("Build the report first, then add penalties or bonuses.", "error")
@@ -2525,8 +2550,7 @@ def attendance_adjustments():
         manager.get("name") or manager.get("username") or "HR",
     )
     attach_payroll_adjustments(report)
-    payload["report"] = report
-    payload["at"] = time.time()
+    store_attendance_report(token, report)
     flash(f"Saved penalties and bonuses for {saved} employee{'s' if saved != 1 else ''}.", "success")
     return redirect(url_for("attendance_report"))
 
@@ -2536,6 +2560,24 @@ def prune_attendance_exports() -> None:
     expired = [token for token, item in ATTENDANCE_EXPORTS.items() if now - item["at"] > ATTENDANCE_EXPORT_SECONDS]
     for token in expired:
         ATTENDANCE_EXPORTS.pop(token, None)
+        path = ATTENDANCE_REPORT_DIR / f"{token}.json"
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+    if ATTENDANCE_REPORT_DIR.exists():
+        for path in ATTENDANCE_REPORT_DIR.glob("*.json"):
+            token = path.stem
+            if token in ATTENDANCE_EXPORTS:
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                path.unlink(missing_ok=True)
+                continue
+            if now - float(payload.get("at") or 0) > ATTENDANCE_EXPORT_SECONDS:
+                path.unlink(missing_ok=True)
 
 
 @app.route("/attendance/export.xlsx")
@@ -2543,7 +2585,7 @@ def prune_attendance_exports() -> None:
 def attendance_export():
     prune_attendance_exports()
     token = session.get("attendance_export")
-    payload = ATTENDANCE_EXPORTS.get(token or "")
+    payload = load_attendance_report(token or "")
     report = (payload or {}).get("report")
     if not report:
         flash("Build the report first, then download the Excel file.", "error")
