@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 import sqlite3
 from datetime import datetime, timedelta
@@ -124,27 +126,7 @@ def init_db() -> None:
         )
         _ensure_employee_team_column(conn)
         _ensure_employee_leave_days_column(conn)
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS payroll_adjustments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cycle_start TEXT NOT NULL,
-                device TEXT NOT NULL,
-                fingerprint TEXT NOT NULL,
-                name TEXT NOT NULL DEFAULT '',
-                department TEXT NOT NULL DEFAULT '',
-                penalty_days REAL NOT NULL DEFAULT 0,
-                bonus_days REAL NOT NULL DEFAULT 0,
-                notes TEXT NOT NULL DEFAULT '',
-                updated_by TEXT NOT NULL DEFAULT '',
-                updated_at TEXT NOT NULL,
-                UNIQUE(cycle_start, device, fingerprint)
-            )
-            """
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_payroll_adjustments_cycle ON payroll_adjustments(cycle_start)"
-        )
+        _ensure_payroll_adjustments_table(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS app_settings (
@@ -182,6 +164,30 @@ def _ensure_employee_leave_days_column(conn) -> None:
         conn.execute(
             f"ALTER TABLE employees ADD COLUMN leave_days INTEGER NOT NULL DEFAULT {DEFAULT_LEAVE_DAYS}"
         )
+
+
+def _ensure_payroll_adjustments_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS payroll_adjustments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cycle_start TEXT NOT NULL,
+            device TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            department TEXT NOT NULL DEFAULT '',
+            penalty_days REAL NOT NULL DEFAULT 0,
+            bonus_days REAL NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(cycle_start, device, fingerprint)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_payroll_adjustments_cycle ON payroll_adjustments(cycle_start)"
+    )
 
 
 def get_setting(key: str, default: str = "") -> str:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -453,10 +455,26 @@ def track_is_limited(ip: str) -> bool:
 @app.context_processor
 def inject_security():
     manager = session.get("manager")
+    try:
+        payroll_adjustments_url = url_for("payroll_adjustments_admin")
+    except Exception:
+        payroll_adjustments_url = "/payroll-adjustments"
     return {
         "csrf_token": get_csrf_token(),
         "is_hr": bool(manager and is_hr(manager)),
+        "payroll_adjustments_url": payroll_adjustments_url,
     }
+
+
+@app.errorhandler(500)
+def handle_server_error(exc):
+    log_path = BASE_DIR / "passenger_error.log"
+    try:
+        import traceback
+        log_path.write_text(traceback.format_exc(), encoding="utf-8")
+    except OSError:
+        pass
+    return "Internal Server Error", 500
 
 
 def sheet_api(payload: dict) -> dict:
@@ -2571,10 +2589,26 @@ def prune_attendance_exports() -> None:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
-                path.unlink(missing_ok=True)
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
                 continue
             if now - float(payload.get("at") or 0) > ATTENDANCE_EXPORT_SECONDS:
-                path.unlink(missing_ok=True)
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+
+try:
+    user_store.init_db()
+    ATTENDANCE_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as startup_exc:
+    try:
+        (BASE_DIR / "startup_error.log").write_text(str(startup_exc), encoding="utf-8")
+    except OSError:
+        pass
 
 
 @app.route("/attendance/export.xlsx")

@@ -7,5 +7,6 @@ data/attendance_reports/
 .env
 sheet_error.log
 passenger_error.log
+startup_error.log
 users.db
 users.db-*
