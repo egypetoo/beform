@@ -831,6 +831,18 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
     }
 
 
+def format_days_amount(value) -> str:
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        return ""
+    if amount <= 0:
+        return ""
+    if amount == int(amount):
+        return str(int(amount))
+    return f"{amount:g}"
+
+
 def format_days_label(value) -> str:
     try:
         amount = float(value or 0)
@@ -853,8 +865,17 @@ def format_days_label(value) -> str:
 def report_sheets(report: dict, adjustments: dict | None = None) -> list:
     adjustments = adjustments or {}
     daily_rows = []
+    shown_adjustments = set()
     for item in report.get("export_rows") or []:
-        adj = adjustments.get((item.get("device") or "", item.get("fingerprint") or ""), {})
+        key = (item.get("device") or "", item.get("fingerprint") or "")
+        if key in shown_adjustments:
+            penalty_cell = ""
+            bonus_cell = ""
+        else:
+            shown_adjustments.add(key)
+            adj = adjustments.get(key, {})
+            penalty_cell = format_days_amount(adj.get("penalty_days"))
+            bonus_cell = format_days_amount(adj.get("bonus_days"))
         daily_rows.append([
             item.get("fingerprint") or "",
             item.get("name") or "",
@@ -866,8 +887,8 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
             item.get("notes") or "",
             item.get("deduction") or "",
             item.get("reason") or "",
-            format_days_label(adj.get("penalty_days")),
-            format_days_label(adj.get("bonus_days")),
+            penalty_cell,
+            bonus_cell,
         ])
     totals = {}
     for item in report.get("export_rows") or []:
