@@ -843,6 +843,18 @@ def format_days_amount(value) -> str:
     return f"{amount:g}"
 
 
+def format_money_amount(value) -> str:
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        return ""
+    if amount <= 0:
+        return ""
+    if amount == int(amount):
+        return str(int(amount))
+    return f"{amount:.2f}".rstrip("0").rstrip(".")
+
+
 def format_days_label(value) -> str:
     try:
         amount = float(value or 0)
@@ -871,11 +883,15 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
         if key in shown_adjustments:
             penalty_cell = ""
             bonus_cell = ""
+            penalty_money_cell = ""
+            bonus_money_cell = ""
         else:
             shown_adjustments.add(key)
             adj = adjustments.get(key, {})
             penalty_cell = format_days_amount(adj.get("penalty_days"))
             bonus_cell = format_days_amount(adj.get("bonus_days"))
+            penalty_money_cell = format_money_amount(adj.get("penalty_amount"))
+            bonus_money_cell = format_money_amount(adj.get("bonus_amount"))
         daily_rows.append([
             item.get("fingerprint") or "",
             item.get("name") or "",
@@ -889,6 +905,8 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
             item.get("reason") or "",
             penalty_cell,
             bonus_cell,
+            penalty_money_cell,
+            bonus_money_cell,
         ])
     totals = {}
     for item in report.get("export_rows") or []:
@@ -931,6 +949,8 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
         adj = adjustments.get((item["device"], item["fingerprint"]), {})
         penalty_days = adj.get("penalty_days") or 0
         bonus_days = adj.get("bonus_days") or 0
+        penalty_amount = adj.get("penalty_amount") or 0
+        bonus_amount = adj.get("bonus_amount") or 0
         if (
             not item["full"]
             and not item["half"]
@@ -938,6 +958,8 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
             and not item["used"]
             and not penalty_days
             and not bonus_days
+            and not penalty_amount
+            and not bonus_amount
         ):
             continue
         summary_rows.append([
@@ -953,6 +975,8 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
             format_hours(item["left"]),
             format_days_label(penalty_days),
             format_days_label(bonus_days),
+            format_money_amount(penalty_amount),
+            format_money_amount(bonus_amount),
         ])
     return [
         {
@@ -968,8 +992,10 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
                 "الملاحظات",
                 "الخصومات",
                 "سبب الخصم",
-                "الجزاءات",
-                "المكافآت",
+                "الجزاءات (أيام)",
+                "المكافآت (أيام)",
+                "خصم فلوس",
+                "مكافأة فلوس",
             ],
             "rows": daily_rows,
         },
@@ -986,8 +1012,10 @@ def report_sheets(report: dict, adjustments: dict | None = None) -> list:
                 "إجمالي الخصم",
                 "إذن التأخير المستخدم",
                 "إذن التأخير المتبقي",
-                "الجزاءات",
-                "المكافآت",
+                "الجزاءات (أيام)",
+                "المكافآت (أيام)",
+                "خصم فلوس",
+                "مكافأة فلوس",
             ],
             "rows": summary_rows,
         },

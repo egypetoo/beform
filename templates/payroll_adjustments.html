@@ -13,7 +13,7 @@
             {% include "_logo.html" %}
             <p class="eyebrow">HR Admin</p>
             <h1>الجزاءات والمكافآت</h1>
-            <p class="subtitle">Add penalty and bonus days per employee for the payroll cycle (26th to 25th). When you build the attendance report, these values are included automatically in the Excel file.</p>
+            <p class="subtitle">Add penalty and bonus days or money amounts per employee for the payroll cycle (26th to 25th). When you build the attendance report, these values are included automatically in the Excel file.</p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('attendance_report') }}">Attendance gaps</a>
                 <a class="excel-link" href="{{ url_for('employees_admin') }}">Employees</a>
@@ -71,7 +71,7 @@
             <input type="hidden" name="q" value="{{ search_query }}">
             <input type="hidden" name="employee_count" value="{{ employees|length }}">
             <h2 class="section-title">Employees · {{ cycle_label }}</h2>
-            <p class="muted">Enter days (1, 0.5, 0.25). Leave empty for zero. Save here first, then build the attendance report.</p>
+            <p class="muted">Enter days (1, 0.5, 0.25) and/or money amounts. Leave empty for zero. Save here first, then build the attendance report.</p>
             {% if employees %}
                 <div class="table-wrap">
                     <table>
@@ -83,6 +83,8 @@
                                 <th>Fingerprint</th>
                                 <th>الجزاءات (أيام)</th>
                                 <th>المكافآت (أيام)</th>
+                                <th>خصم فلوس</th>
+                                <th>مكافأة فلوس</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -115,6 +117,28 @@
                                             max="31"
                                             step="0.25"
                                             value="{{ person.bonus_days if person.bonus_days else '' }}"
+                                            placeholder="0"
+                                        >
+                                    </td>
+                                    <td data-label="Money penalty">
+                                        <input
+                                            name="penalty_money__{{ loop.index0 }}"
+                                            type="number"
+                                            min="0"
+                                            max="1000000"
+                                            step="0.01"
+                                            value="{{ person.penalty_amount if person.penalty_amount else '' }}"
+                                            placeholder="0"
+                                        >
+                                    </td>
+                                    <td data-label="Money bonus">
+                                        <input
+                                            name="bonus_money__{{ loop.index0 }}"
+                                            type="number"
+                                            min="0"
+                                            max="1000000"
+                                            step="0.01"
+                                            value="{{ person.bonus_amount if person.bonus_amount else '' }}"
                                             placeholder="0"
                                         >
                                     </td>

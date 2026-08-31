@@ -154,6 +154,21 @@ def parse_day_amount(value) -> float:
     return round(amount, 2)
 
 
+def parse_money_amount(value) -> float:
+    text = str(value or "").strip().replace(",", "")
+    if not text:
+        return 0.0
+    try:
+        amount = float(text)
+    except ValueError:
+        raise ValueError("Money amounts must be numbers.")
+    if amount < 0:
+        raise ValueError("Money amounts cannot be negative.")
+    if amount > 1_000_000:
+        raise ValueError("Money amounts cannot be more than 1,000,000.")
+    return round(amount, 2)
+
+
 def attach_payroll_adjustments(report: dict) -> dict:
     cycle_start = report_payroll_cycle_start(report)
     report["cycle_start"] = cycle_start
@@ -2507,6 +2522,8 @@ def payroll_adjustments_admin():
                 try:
                     penalty_days = parse_day_amount(request.form.get(f"penalty__{index}", ""))
                     bonus_days = parse_day_amount(request.form.get(f"bonus__{index}", ""))
+                    penalty_amount = parse_money_amount(request.form.get(f"penalty_money__{index}", ""))
+                    bonus_amount = parse_money_amount(request.form.get(f"bonus_money__{index}", ""))
                 except ValueError as exc:
                     errors.append(f"{label}: {exc}")
                     continue
@@ -2519,6 +2536,8 @@ def payroll_adjustments_admin():
                     "department": department or (person or {}).get("department") or "",
                     "penalty_days": penalty_days,
                     "bonus_days": bonus_days,
+                    "penalty_amount": penalty_amount,
+                    "bonus_amount": bonus_amount,
                 })
             if errors:
                 for error in errors[:8]:

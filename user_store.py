@@ -178,6 +178,8 @@ def _ensure_payroll_adjustments_table(conn) -> None:
             department TEXT NOT NULL DEFAULT '',
             penalty_days REAL NOT NULL DEFAULT 0,
             bonus_days REAL NOT NULL DEFAULT 0,
+            penalty_amount REAL NOT NULL DEFAULT 0,
+            bonus_amount REAL NOT NULL DEFAULT 0,
             notes TEXT NOT NULL DEFAULT '',
             updated_by TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL,
@@ -185,6 +187,15 @@ def _ensure_payroll_adjustments_table(conn) -> None:
         )
         """
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(payroll_adjustments)")}
+    if "penalty_amount" not in columns:
+        conn.execute(
+            "ALTER TABLE payroll_adjustments ADD COLUMN penalty_amount REAL NOT NULL DEFAULT 0"
+        )
+    if "bonus_amount" not in columns:
+        conn.execute(
+            "ALTER TABLE payroll_adjustments ADD COLUMN bonus_amount REAL NOT NULL DEFAULT 0"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_payroll_adjustments_cycle ON payroll_adjustments(cycle_start)"
     )
@@ -1537,7 +1548,8 @@ def payroll_adjustments_map(cycle_start: str) -> dict:
     conn = db()
     rows = conn.execute(
         """
-        SELECT device, fingerprint, name, department, penalty_days, bonus_days, notes
+        SELECT device, fingerprint, name, department,
+               penalty_days, bonus_days, penalty_amount, bonus_amount, notes
         FROM payroll_adjustments
         WHERE cycle_start = ?
         """,
@@ -1555,6 +1567,8 @@ def payroll_adjustments_map(cycle_start: str) -> dict:
             "department": row["department"] or "",
             "penalty_days": float(row["penalty_days"] or 0),
             "bonus_days": float(row["bonus_days"] or 0),
+            "penalty_amount": float(row["penalty_amount"] or 0),
+            "bonus_amount": float(row["bonus_amount"] or 0),
             "notes": row["notes"] or "",
         }
     return result
@@ -1577,10 +1591,17 @@ def save_payroll_adjustments(cycle_start: str, items: list, updated_by: str = ""
                     continue
                 penalty_days = max(0.0, float(item.get("penalty_days") or 0))
                 bonus_days = max(0.0, float(item.get("bonus_days") or 0))
+                penalty_amount = max(0.0, float(item.get("penalty_amount") or 0))
+                bonus_amount = max(0.0, float(item.get("bonus_amount") or 0))
                 name = str(item.get("name") or "").strip()
                 department = str(item.get("department") or "").strip()
                 notes = str(item.get("notes") or "").strip()
-                if penalty_days <= 0 and bonus_days <= 0:
+                if (
+                    penalty_days <= 0
+                    and bonus_days <= 0
+                    and penalty_amount <= 0
+                    and bonus_amount <= 0
+                ):
                     conn.execute(
                         """
                         DELETE FROM payroll_adjustments
@@ -1593,13 +1614,16 @@ def save_payroll_adjustments(cycle_start: str, items: list, updated_by: str = ""
                     """
                     INSERT INTO payroll_adjustments (
                         cycle_start, device, fingerprint, name, department,
-                        penalty_days, bonus_days, notes, updated_by, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        penalty_days, bonus_days, penalty_amount, bonus_amount,
+                        notes, updated_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(cycle_start, device, fingerprint) DO UPDATE SET
                         name = excluded.name,
                         department = excluded.department,
                         penalty_days = excluded.penalty_days,
                         bonus_days = excluded.bonus_days,
+                        penalty_amount = excluded.penalty_amount,
+                        bonus_amount = excluded.bonus_amount,
                         notes = excluded.notes,
                         updated_by = excluded.updated_by,
                         updated_at = excluded.updated_at
@@ -1612,6 +1636,8 @@ def save_payroll_adjustments(cycle_start: str, items: list, updated_by: str = ""
                         department,
                         penalty_days,
                         bonus_days,
+                        penalty_amount,
+                        bonus_amount,
                         notes,
                         (updated_by or "").strip(),
                         now,
@@ -1643,6 +1669,8 @@ def employees_for_payroll_adjustments(cycle_start: str) -> list:
             "fingerprint": fingerprint,
             "penalty_days": adj.get("penalty_days") or 0,
             "bonus_days": adj.get("bonus_days") or 0,
+            "penalty_amount": adj.get("penalty_amount") or 0,
+            "bonus_amount": adj.get("bonus_amount") or 0,
         })
     rows.sort(
         key=lambda item: (
