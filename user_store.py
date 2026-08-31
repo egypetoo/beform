@@ -1380,6 +1380,20 @@ def unsynced_form_request_sheet_rows(department: str = "ALL") -> list:
     return [form_request_to_sheet_row(row) for row in rows]
 
 
+def form_request_sheet_rows(department: str = "ALL") -> list:
+    init_db()
+    conn = db()
+    sql = "SELECT * FROM form_requests"
+    params = []
+    if department and department != "ALL":
+        sql += " WHERE lower(department) = lower(?)"
+        params.append(department.strip())
+    sql += " ORDER BY submitted_at DESC, id DESC"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [form_request_to_sheet_row(row) for row in rows]
+
+
 def lookup_form_request_sheet_rows(fingerprint: str, name: str = "") -> list:
     rows = form_requests_as_sheet_rows(fingerprint)
     wanted_name = normalize_person_name(name)

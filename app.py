@@ -436,32 +436,41 @@ def save_submission(row: dict) -> dict:
 
 
 def merge_local_requests(sheet_rows: list, department: str = "ALL") -> list:
-    seen = {str(row.get("Request ID") or "").strip() for row in sheet_rows}
-    extra = []
-    for row in user_store.unsynced_form_request_sheet_rows(department):
+    local_rows = user_store.form_request_sheet_rows(department)
+    seen = {
+        str(row.get("Request ID") or "").strip()
+        for row in local_rows
+        if str(row.get("Request ID") or "").strip()
+    }
+    merged = list(local_rows)
+    for row in sheet_rows:
         request_id = str(row.get("Request ID") or "").strip()
         if request_id and request_id in seen:
             continue
-        extra.append(row)
+        merged.append(row)
         if request_id:
             seen.add(request_id)
-    extra.sort(key=row_submitted_key, reverse=True)
-    return extra + list(sheet_rows)
+    merged.sort(key=row_submitted_key, reverse=True)
+    return merged
 
 
 def merge_local_lookup(sheet_rows: list, fingerprint: str, name: str = "") -> list:
-    seen = {str(row.get("Request ID") or "").strip() for row in sheet_rows}
-    extra = []
-    for row in user_store.lookup_form_request_sheet_rows(fingerprint, name):
+    local_rows = user_store.lookup_form_request_sheet_rows(fingerprint, name)
+    seen = {
+        str(row.get("Request ID") or "").strip()
+        for row in local_rows
+        if str(row.get("Request ID") or "").strip()
+    }
+    merged = list(local_rows)
+    for row in sheet_rows:
         request_id = str(row.get("Request ID") or "").strip()
         if request_id and request_id in seen:
             continue
-        extra.append(row)
+        merged.append(row)
         if request_id:
             seen.add(request_id)
-    rows = extra + list(sheet_rows)
-    rows.sort(key=row_submitted_key, reverse=True)
-    return rows[:TRACK_LIMIT]
+    merged.sort(key=row_submitted_key, reverse=True)
+    return merged[:TRACK_LIMIT]
 
 
 def _norm_conflict_text(value) -> str:
