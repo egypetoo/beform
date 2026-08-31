@@ -1616,3 +1616,34 @@ def save_payroll_adjustments(cycle_start: str, items: list, updated_by: str = ""
         finally:
             conn.close()
     return saved
+
+
+def employees_for_payroll_adjustments(cycle_start: str) -> list:
+    cycle = str(cycle_start or "").strip()[:10]
+    adjustments = payroll_adjustments_map(cycle)
+    rows = []
+    for employee in list_employees():
+        if not employee.get("active", True):
+            continue
+        device = normalize_device(employee.get("device") or "")
+        fingerprint = normalize_fingerprint_id(employee.get("fingerprint"))
+        if not fingerprint:
+            continue
+        adj = adjustments.get((device, fingerprint), {})
+        rows.append({
+            "name": employee.get("name") or "",
+            "department": employee.get("department") or "",
+            "device": device,
+            "fingerprint": fingerprint,
+            "penalty_days": adj.get("penalty_days") or 0,
+            "bonus_days": adj.get("bonus_days") or 0,
+        })
+    rows.sort(
+        key=lambda item: (
+            (item.get("department") or "").lower(),
+            (item.get("name") or "").lower(),
+            item.get("device") or "",
+            int(item["fingerprint"]) if str(item["fingerprint"]).isdigit() else 10**9,
+        )
+    )
+    return rows

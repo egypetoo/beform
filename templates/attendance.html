@@ -15,6 +15,7 @@
             <h1>Attendance gaps</h1>
             <p class="subtitle">Upload the F8, F9, and Maadi sheets from the fingerprint machines. The Excel file matches the monthly attendance layout: one row per person per workday.</p>
             <div class="form-links">
+                <a class="excel-link" href="{{ url_for('payroll_adjustments_admin') }}">Penalties &amp; bonuses</a>
                 <a class="excel-link" href="{{ url_for('employees_admin') }}">Employees</a>
                 <a class="excel-link" href="{{ url_for('holidays_admin') }}">Official holidays</a>
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
@@ -31,6 +32,11 @@
                 {% endfor %}
             {% endif %}
         {% endwith %}
+
+        <section class="form-shell">
+            <h2 class="section-title">Before building the report</h2>
+            <p class="muted">Add جزاءات and مكافآت for employees first on the <a class="excel-link" href="{{ url_for('payroll_adjustments_admin') }}">Penalties &amp; bonuses</a> page. When you build the report, they are included automatically in the Excel file.</p>
+        </section>
 
         <form class="form-shell" method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -54,9 +60,6 @@
                 <input id="q" name="q" type="search" placeholder="Optional">
             </section>
             <button type="submit">Build report</button>
-            {% if not report %}
-                <p class="muted" style="margin-top: 12px;">After building the report, a <strong>Penalties &amp; bonuses</strong> section will appear below to enter جزاءات and مكافآت in days for each employee.</p>
-            {% endif %}
         </form>
 
         {% if can_download %}
@@ -66,70 +69,9 @@
         {% endif %}
 
         {% if report %}
-            {% if report.adjustment_people %}
-                <form id="payroll-adjustments" class="form-shell users-shell" method="post" action="{{ url_for('attendance_adjustments') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <input type="hidden" name="cycle_start" value="{{ report.cycle_start }}">
-                    <input type="hidden" name="adjustment_count" value="{{ report.adjustment_people|length }}">
-                    <h2 class="section-title">الجزاءات والمكافآت (HR فقط)</h2>
-                    <p class="muted">Payroll cycle: {{ report.cycle_label or report.cycle_start }}. Enter days (1, 0.5, 0.25). Saved values appear in Excel columns <strong>الجزاءات</strong> and <strong>المكافآت</strong>.</p>
-                    <div class="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Department</th>
-                                    <th>Device</th>
-                                    <th>Fingerprint</th>
-                                    <th>الجزاءات (أيام)</th>
-                                    <th>المكافآت (أيام)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for person in report.adjustment_people %}
-                                    <tr>
-                                        <td data-label="Name">{{ person.name }}</td>
-                                        <td data-label="Department">{{ person.department or '-' }}</td>
-                                        <td data-label="Device">{{ person.device }}</td>
-                                        <td data-label="Fingerprint">{{ person.fingerprint }}</td>
-                                        <td data-label="Penalties (days)">
-                                            <input type="hidden" name="device__{{ loop.index0 }}" value="{{ person.device }}">
-                                            <input type="hidden" name="fingerprint__{{ loop.index0 }}" value="{{ person.fingerprint }}">
-                                            <input type="hidden" name="name__{{ loop.index0 }}" value="{{ person.name }}">
-                                            <input type="hidden" name="department__{{ loop.index0 }}" value="{{ person.department or '' }}">
-                                            <input
-                                                name="penalty__{{ loop.index0 }}"
-                                                type="number"
-                                                min="0"
-                                                max="31"
-                                                step="0.25"
-                                                value="{{ person.penalty_days if person.penalty_days else '' }}"
-                                                placeholder="0"
-                                            >
-                                        </td>
-                                        <td data-label="Bonuses (days)">
-                                            <input
-                                                name="bonus__{{ loop.index0 }}"
-                                                type="number"
-                                                min="0"
-                                                max="31"
-                                                step="0.25"
-                                                value="{{ person.bonus_days if person.bonus_days else '' }}"
-                                                placeholder="0"
-                                            >
-                                        </td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    <button type="submit">Save penalties &amp; bonuses</button>
-                </form>
-            {% endif %}
-
             <section class="form-shell users-shell">
                 <h2 class="section-title">Results</h2>
-                <p class="muted">{{ report.from_date }} → {{ report.to_date }} · {{ report.punch_rows }} machine rows · full-day: {{ report.full_days_total }} · half-day: {{ report.half_days_total }} · quarter-day: {{ report.quarter_days_total or 0 }} · covered by form: {{ report.covered_total }}</p>
+                <p class="muted">{{ report.from_date }} → {{ report.to_date }} · Payroll cycle: {{ report.cycle_label or report.cycle_start }} · {{ report.punch_rows }} machine rows · full-day: {{ report.full_days_total }} · half-day: {{ report.half_days_total }} · quarter-day: {{ report.quarter_days_total or 0 }} · covered by form: {{ report.covered_total }}</p>
                 <a class="excel-link" href="{{ url_for('attendance_export') }}">Download Excel</a>
                 {% if report.people %}
                     <div class="table-wrap">

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BE GROUP | Penalties &amp; bonuses</title>
+    {% include "_pwa_head.html" %}
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page page-wide">
+        <header class="hero dash-hero">
+            {% include "_logo.html" %}
+            <p class="eyebrow">HR Admin</p>
+            <h1>الجزاءات والمكافآت</h1>
+            <p class="subtitle">Add penalty and bonus days per employee for the payroll cycle (26th to 25th). When you build the attendance report, these values are included automatically in the Excel file.</p>
+            <div class="form-links">
+                <a class="excel-link" href="{{ url_for('attendance_report') }}">Attendance gaps</a>
+                <a class="excel-link" href="{{ url_for('employees_admin') }}">Employees</a>
+                <a class="excel-link" href="{{ url_for('holidays_admin') }}">Official holidays</a>
+                <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+                <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
+                        <p>{{ message }}</p>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form class="form-shell" method="get">
+            <h2 class="section-title">Choose payroll cycle</h2>
+            <section class="field">
+                <label for="cycle">Payroll cycle</label>
+                <select id="cycle" name="cycle">
+                    {% for cycle in cycles %}
+                        <option value="{{ cycle.start }}" {{ 'selected' if cycle.start == cycle_start else '' }}>
+                            {{ cycle.label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </section>
+            <section class="field">
+                <label for="department">Department</label>
+                <select id="department" name="department">
+                    <option value="">All departments</option>
+                    {% for dept in departments %}
+                        <option value="{{ dept.label }}" {{ 'selected' if dept.label == department_filter else '' }}>
+                            {{ dept.label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </section>
+            <section class="field">
+                <label for="q">Search name or fingerprint</label>
+                <input id="q" name="q" type="search" value="{{ search_query }}" placeholder="Optional">
+            </section>
+            <button type="submit">Show employees</button>
+        </form>
+
+        <form class="form-shell users-shell" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="save">
+            <input type="hidden" name="cycle_start" value="{{ cycle_start }}">
+            <input type="hidden" name="department" value="{{ department_filter }}">
+            <input type="hidden" name="q" value="{{ search_query }}">
+            <input type="hidden" name="employee_count" value="{{ employees|length }}">
+            <h2 class="section-title">Employees · {{ cycle_label }}</h2>
+            <p class="muted">Enter days (1, 0.5, 0.25). Leave empty for zero. Save here first, then build the attendance report.</p>
+            {% if employees %}
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Department</th>
+                                <th>Device</th>
+                                <th>Fingerprint</th>
+                                <th>الجزاءات (أيام)</th>
+                                <th>المكافآت (أيام)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for person in employees %}
+                                <tr>
+                                    <td data-label="Name">{{ person.name }}</td>
+                                    <td data-label="Department">{{ person.department or '-' }}</td>
+                                    <td data-label="Device">{{ person.device }}</td>
+                                    <td data-label="Fingerprint">{{ person.fingerprint }}</td>
+                                    <td data-label="Penalties (days)">
+                                        <input type="hidden" name="device__{{ loop.index0 }}" value="{{ person.device }}">
+                                        <input type="hidden" name="name__{{ loop.index0 }}" value="{{ person.name }}">
+                                        <input type="hidden" name="department__{{ loop.index0 }}" value="{{ person.department or '' }}">
+                                        <input type="hidden" name="fingerprint__{{ loop.index0 }}" value="{{ person.fingerprint }}">
+                                        <input
+                                            name="penalty__{{ loop.index0 }}"
+                                            type="number"
+                                            min="0"
+                                            max="31"
+                                            step="0.25"
+                                            value="{{ person.penalty_days if person.penalty_days else '' }}"
+                                            placeholder="0"
+                                        >
+                                    </td>
+                                    <td data-label="Bonuses (days)">
+                                        <input
+                                            name="bonus__{{ loop.index0 }}"
+                                            type="number"
+                                            min="0"
+                                            max="31"
+                                            step="0.25"
+                                            value="{{ person.bonus_days if person.bonus_days else '' }}"
+                                            placeholder="0"
+                                        >
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <button type="submit">Save penalties &amp; bonuses</button>
+            {% else %}
+                <p class="empty-state">No active employees found for this filter.</p>
+            {% endif %}
+        </form>
+    </main>
+    {% include "_pwa_foot.html" %}
+</body>
+</html>

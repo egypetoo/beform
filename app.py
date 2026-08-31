@@ -154,50 +154,12 @@ def parse_day_amount(value) -> float:
 
 def attach_payroll_adjustments(report: dict) -> dict:
     cycle_start = report_payroll_cycle_start(report)
-    adjustments = user_store.payroll_adjustments_map(cycle_start)
     report["cycle_start"] = cycle_start
     report["cycle_label"] = next(
         (item["label"] for item in payroll_cycles() if item["start"] == cycle_start),
         cycle_start,
     )
-    report["adjustment_people"] = all_report_people(report)
-    for person in report["adjustment_people"]:
-        key = (person.get("device") or "", person.get("fingerprint") or "")
-        adj = adjustments.get(key, {})
-        person["penalty_days"] = adj.get("penalty_days") or 0
-        person["bonus_days"] = adj.get("bonus_days") or 0
     return report
-
-
-def all_report_people(report: dict) -> list:
-    merged = {}
-    for row in report.get("export_rows") or []:
-        fingerprint = str(row.get("fingerprint") or "").strip()
-        if not fingerprint:
-            continue
-        key = (row.get("device") or "", fingerprint)
-        if key not in merged:
-            merged[key] = {
-                "name": row.get("name") or fingerprint,
-                "department": row.get("department") or "",
-                "device": row.get("device") or "",
-                "fingerprint": fingerprint,
-            }
-    for person in report.get("people") or []:
-        fingerprint = str(person.get("fingerprint") or "").strip()
-        if not fingerprint:
-            continue
-        key = (person.get("device") or "", fingerprint)
-        merged[key] = {**merged.get(key, {}), **person}
-    return sorted(
-        merged.values(),
-        key=lambda item: (
-            int(item["fingerprint"]) if str(item["fingerprint"]).isdigit() else 10**9,
-            (item.get("name") or "").lower(),
-            item.get("device") or "",
-        ),
-    )
-
 
 def attendance_workbook_bytes(report: dict) -> bytes:
     cycle_start = report_payroll_cycle_start(report)
@@ -2475,8 +2437,8 @@ def attendance_report():
         token = secrets.token_hex(12)
         store_attendance_report(token, report)
         session["attendance_export"] = token
-        flash("Report built. Scroll down to enter penalties and bonuses, then download Excel.", "success")
-        return redirect(url_for("attendance_report") + "#payroll-adjustments")
+        flash("Report built. Saved penalties and bonuses for this payroll cycle are included in the Excel file.", "success")
+        return redirect(url_for("attendance_report"))
     else:
         token = session.get("attendance_export")
         payload = load_attendance_report(token or "")
@@ -2493,66 +2455,101 @@ def attendance_report():
     )
 
 
-@app.route("/attendance/adjustments", methods=["POST"])
+@app.route("/payroll-adjustments", methods=["GET", "POST"])
 @hr_required
-def attendance_adjustments():
-    if not csrf_is_valid():
-        flash("The form expired. Please refresh and try again.", "error")
-        return redirect(url_for("attendance_report"))
-    token = session.get("attendance_export")
-    payload = load_attendance_report(token or "")
-    report = (payload or {}).get("report")
-    if not report:
-        flash("Build the report first, then add penalties or bonuses.", "error")
-        return redirect(url_for("attendance_report"))
-    cycle_start = str(request.form.get("cycle_start") or report.get("cycle_start") or "")[:10]
-    if not cycle_start:
-        flash("Could not determine the payroll cycle for these adjustments.", "error")
-        return redirect(url_for("attendance_report"))
-    people_by_key = {
-        f"{person.get('device') or ''}|{person.get('fingerprint') or ''}": person
-        for person in all_report_people(report)
-    }
-    items = []
-    errors = []
-    count = max(0, int(request.form.get("adjustment_count") or 0))
-    for index in range(count):
-        device = request.form.get(f"device__{index}", "").strip()
-        fingerprint = request.form.get(f"fingerprint__{index}", "").strip()
-        name = request.form.get(f"name__{index}", "").strip()
-        department = request.form.get(f"department__{index}", "").strip()
-        person = people_by_key.get(f"{device}|{fingerprint}")
-        label = name or (person or {}).get("name") or fingerprint or f"Row {index + 1}"
-        try:
-            penalty_days = parse_day_amount(request.form.get(f"penalty__{index}", ""))
-            bonus_days = parse_day_amount(request.form.get(f"bonus__{index}", ""))
-        except ValueError as exc:
-            errors.append(f"{label}: {exc}")
-            continue
-        if not fingerprint:
-            continue
-        items.append({
-            "device": device,
-            "fingerprint": fingerprint,
-            "name": name or (person or {}).get("name") or "",
-            "department": department or (person or {}).get("department") or "",
-            "penalty_days": penalty_days,
-            "bonus_days": bonus_days,
-        })
-    if errors:
-        for error in errors[:8]:
-            flash(error, "error")
-        return redirect(url_for("attendance_report"))
-    manager = session.get("manager") or {}
-    saved = user_store.save_payroll_adjustments(
+def payroll_adjustments_admin():
+    cycle_start = (
+        request.form.get("cycle_start")
+        or request.args.get("cycle")
+        or current_cycle_value()
+    )[:10]
+    department_filter = (request.form.get("department") or request.args.get("department") or "").strip()
+    search_query = (request.form.get("q") or request.args.get("q") or "").strip()
+    employees = user_store.employees_for_payroll_adjustments(cycle_start)
+
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return redirect(url_for("payroll_adjustments_admin", cycle=cycle_start))
+        if request.form.get("action") == "save":
+            lookup = {
+                f"{item.get('device') or ''}|{item.get('fingerprint') or ''}": item
+                for item in employees
+            }
+            items = []
+            errors = []
+            count = max(0, int(request.form.get("employee_count") or 0))
+            for index in range(count):
+                device = request.form.get(f"device__{index}", "").strip()
+                fingerprint = request.form.get(f"fingerprint__{index}", "").strip()
+                name = request.form.get(f"name__{index}", "").strip()
+                department = request.form.get(f"department__{index}", "").strip()
+                person = lookup.get(f"{device}|{fingerprint}")
+                label = name or (person or {}).get("name") or fingerprint or f"Row {index + 1}"
+                try:
+                    penalty_days = parse_day_amount(request.form.get(f"penalty__{index}", ""))
+                    bonus_days = parse_day_amount(request.form.get(f"bonus__{index}", ""))
+                except ValueError as exc:
+                    errors.append(f"{label}: {exc}")
+                    continue
+                if not fingerprint:
+                    continue
+                items.append({
+                    "device": device,
+                    "fingerprint": fingerprint,
+                    "name": name or (person or {}).get("name") or "",
+                    "department": department or (person or {}).get("department") or "",
+                    "penalty_days": penalty_days,
+                    "bonus_days": bonus_days,
+                })
+            if errors:
+                for error in errors[:8]:
+                    flash(error, "error")
+            else:
+                manager = session.get("manager") or {}
+                saved = user_store.save_payroll_adjustments(
+                    cycle_start,
+                    items,
+                    manager.get("name") or manager.get("username") or "HR",
+                )
+                flash(
+                    f"Saved penalties and bonuses for {saved} employee{'s' if saved != 1 else ''}. "
+                    "They will appear automatically when you build the attendance report.",
+                    "success",
+                )
+            redirect_args = {"cycle": cycle_start}
+            if department_filter:
+                redirect_args["department"] = department_filter
+            if search_query:
+                redirect_args["q"] = search_query
+            return redirect(url_for("payroll_adjustments_admin", **redirect_args))
+
+    if department_filter:
+        employees = [
+            item for item in employees
+            if str(item.get("department") or "").strip().lower() == department_filter.lower()
+        ]
+    if search_query:
+        needle = search_query.lower()
+        employees = [
+            item for item in employees
+            if needle in str(item.get("name") or "").lower()
+            or needle in str(item.get("fingerprint") or "")
+        ]
+    cycle_label = next(
+        (item["label"] for item in payroll_cycles() if item["start"] == cycle_start),
         cycle_start,
-        items,
-        manager.get("name") or manager.get("username") or "HR",
     )
-    attach_payroll_adjustments(report)
-    store_attendance_report(token, report)
-    flash(f"Saved penalties and bonuses for {saved} employee{'s' if saved != 1 else ''}.", "success")
-    return redirect(url_for("attendance_report"))
+    return render_template(
+        "payroll_adjustments.html",
+        employees=employees,
+        cycle_start=cycle_start,
+        cycle_label=cycle_label,
+        cycles=payroll_cycles(),
+        departments=all_departments(active_only=False),
+        department_filter=department_filter,
+        search_query=search_query,
+    )
 
 
 def prune_attendance_exports() -> None:
