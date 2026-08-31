@@ -126,6 +126,27 @@ def init_db() -> None:
         _ensure_employee_leave_days_column(conn)
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS payroll_adjustments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cycle_start TEXT NOT NULL,
+                device TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                department TEXT NOT NULL DEFAULT '',
+                penalty_days REAL NOT NULL DEFAULT 0,
+                bonus_days REAL NOT NULL DEFAULT 0,
+                notes TEXT NOT NULL DEFAULT '',
+                updated_by TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                UNIQUE(cycle_start, device, fingerprint)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payroll_adjustments_cycle ON payroll_adjustments(cycle_start)"
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT ''
@@ -1500,3 +1521,98 @@ def delete_holiday(holiday_id: int) -> bool:
         deleted = cursor.rowcount > 0
         conn.close()
         return deleted
+
+
+def payroll_adjustments_map(cycle_start: str) -> dict:
+    cycle = str(cycle_start or "").strip()[:10]
+    if not cycle:
+        return {}
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        """
+        SELECT device, fingerprint, name, department, penalty_days, bonus_days, notes
+        FROM payroll_adjustments
+        WHERE cycle_start = ?
+        """,
+        (cycle,),
+    ).fetchall()
+    conn.close()
+    result = {}
+    for row in rows:
+        device = normalize_device(row["device"] or "")
+        fingerprint = normalize_fingerprint_id(row["fingerprint"])
+        if not fingerprint:
+            continue
+        result[(device, fingerprint)] = {
+            "name": row["name"] or "",
+            "department": row["department"] or "",
+            "penalty_days": float(row["penalty_days"] or 0),
+            "bonus_days": float(row["bonus_days"] or 0),
+            "notes": row["notes"] or "",
+        }
+    return result
+
+
+def save_payroll_adjustments(cycle_start: str, items: list, updated_by: str = "") -> int:
+    cycle = str(cycle_start or "").strip()[:10]
+    if not cycle:
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    saved = 0
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            for item in items:
+                device = normalize_device(item.get("device") or "")
+                fingerprint = normalize_fingerprint_id(item.get("fingerprint"))
+                if not fingerprint:
+                    continue
+                penalty_days = max(0.0, float(item.get("penalty_days") or 0))
+                bonus_days = max(0.0, float(item.get("bonus_days") or 0))
+                name = str(item.get("name") or "").strip()
+                department = str(item.get("department") or "").strip()
+                notes = str(item.get("notes") or "").strip()
+                if penalty_days <= 0 and bonus_days <= 0:
+                    conn.execute(
+                        """
+                        DELETE FROM payroll_adjustments
+                        WHERE cycle_start = ? AND device = ? AND fingerprint = ?
+                        """,
+                        (cycle, device, fingerprint),
+                    )
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO payroll_adjustments (
+                        cycle_start, device, fingerprint, name, department,
+                        penalty_days, bonus_days, notes, updated_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(cycle_start, device, fingerprint) DO UPDATE SET
+                        name = excluded.name,
+                        department = excluded.department,
+                        penalty_days = excluded.penalty_days,
+                        bonus_days = excluded.bonus_days,
+                        notes = excluded.notes,
+                        updated_by = excluded.updated_by,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        cycle,
+                        device,
+                        fingerprint,
+                        name,
+                        department,
+                        penalty_days,
+                        bonus_days,
+                        notes,
+                        (updated_by or "").strip(),
+                        now,
+                    ),
+                )
+                saved += 1
+            conn.commit()
+        finally:
+            conn.close()
+    return saved

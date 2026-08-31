@@ -829,7 +829,27 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
     }
 
 
-def report_sheets(report: dict) -> list:
+def format_days_label(value) -> str:
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        return ""
+    if amount <= 0:
+        return ""
+    if amount == 1:
+        return DEDUCTION_FULL
+    if amount == 0.5:
+        return DEDUCTION_HALF
+    if amount == 0.25:
+        return DEDUCTION_QUARTER
+    if amount == int(amount):
+        return f"{int(amount)} يوم"
+    text = f"{amount:g}"
+    return f"{text} يوم"
+
+
+def report_sheets(report: dict, adjustments: dict | None = None) -> list:
+    adjustments = adjustments or {}
     daily_rows = []
     for item in report.get("export_rows") or []:
         daily_rows.append([
@@ -843,6 +863,8 @@ def report_sheets(report: dict) -> list:
             item.get("notes") or "",
             item.get("deduction") or "",
             item.get("reason") or "",
+            "",
+            "",
         ])
     totals = {}
     for item in report.get("export_rows") or []:
@@ -866,9 +888,33 @@ def report_sheets(report: dict) -> list:
             totals[key]["half"] += 1
         elif item.get("deduction") == DEDUCTION_QUARTER:
             totals[key]["quarter"] += 1
+    for (device, fingerprint), adj in adjustments.items():
+        key = (device, fingerprint, adj.get("name") or "")
+        if key not in totals:
+            totals[key] = {
+                "name": adj.get("name") or fingerprint,
+                "fingerprint": fingerprint,
+                "device": device,
+                "department": adj.get("department") or "",
+                "full": 0,
+                "half": 0,
+                "quarter": 0,
+                "used": 0,
+                "left": MONTHLY_LATE_ALLOWANCE_MINUTES,
+            }
     summary_rows = []
     for item in sorted(totals.values(), key=lambda row: (fingerprint_sort_key(row["fingerprint"]), row["device"])):
-        if not item["full"] and not item["half"] and not item["quarter"] and not item["used"]:
+        adj = adjustments.get((item["device"], item["fingerprint"]), {})
+        penalty_days = adj.get("penalty_days") or 0
+        bonus_days = adj.get("bonus_days") or 0
+        if (
+            not item["full"]
+            and not item["half"]
+            and not item["quarter"]
+            and not item["used"]
+            and not penalty_days
+            and not bonus_days
+        ):
             continue
         summary_rows.append([
             item["name"],
@@ -881,6 +927,8 @@ def report_sheets(report: dict) -> list:
             item["full"] + item["half"] * 0.5 + item["quarter"] * 0.25,
             format_hours(item["used"]),
             format_hours(item["left"]),
+            format_days_label(penalty_days),
+            format_days_label(bonus_days),
         ])
     return [
         {
@@ -896,6 +944,8 @@ def report_sheets(report: dict) -> list:
                 "الملاحظات",
                 "الخصومات",
                 "سبب الخصم",
+                "الجزاءات",
+                "المكافآت",
             ],
             "rows": daily_rows,
         },
@@ -912,6 +962,8 @@ def report_sheets(report: dict) -> list:
                 "إجمالي الخصم",
                 "إذن التأخير المستخدم",
                 "إذن التأخير المتبقي",
+                "الجزاءات",
+                "المكافآت",
             ],
             "rows": summary_rows,
         },

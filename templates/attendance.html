@@ -114,6 +114,67 @@
                     <p class="empty-state">No gaps found for this filter.</p>
                 {% endif %}
             </section>
+
+            {% if report.adjustment_people %}
+                <form class="form-shell users-shell" method="post" action="{{ url_for('attendance_adjustments') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="cycle_start" value="{{ report.cycle_start }}">
+                    <input type="hidden" name="adjustment_count" value="{{ report.adjustment_people|length }}">
+                    <h2 class="section-title">Penalties &amp; bonuses (HR only)</h2>
+                    <p class="muted">Payroll cycle: {{ report.cycle_label or report.cycle_start }}. Enter days using numbers such as 1, 0.5, or 0.25. These appear in the Excel file under الجزاءات and المكافآت.</p>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Department</th>
+                                    <th>Device</th>
+                                    <th>Fingerprint</th>
+                                    <th>Penalties (days)</th>
+                                    <th>Bonuses (days)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for person in report.adjustment_people %}
+                                    <tr>
+                                        <td data-label="Name">{{ person.name }}</td>
+                                        <td data-label="Department">{{ person.department or '-' }}</td>
+                                        <td data-label="Device">{{ person.device }}</td>
+                                        <td data-label="Fingerprint">{{ person.fingerprint }}</td>
+                                        <td data-label="Penalties (days)">
+                                            <input type="hidden" name="device__{{ loop.index0 }}" value="{{ person.device }}">
+                                            <input type="hidden" name="fingerprint__{{ loop.index0 }}" value="{{ person.fingerprint }}">
+                                            <input type="hidden" name="name__{{ loop.index0 }}" value="{{ person.name }}">
+                                            <input type="hidden" name="department__{{ loop.index0 }}" value="{{ person.department or '' }}">
+                                            <input
+                                                name="penalty__{{ loop.index0 }}"
+                                                type="number"
+                                                min="0"
+                                                max="31"
+                                                step="0.25"
+                                                value="{{ person.penalty_days if person.penalty_days else '' }}"
+                                                placeholder="0"
+                                            >
+                                        </td>
+                                        <td data-label="Bonuses (days)">
+                                            <input
+                                                name="bonus__{{ loop.index0 }}"
+                                                type="number"
+                                                min="0"
+                                                max="31"
+                                                step="0.25"
+                                                value="{{ person.bonus_days if person.bonus_days else '' }}"
+                                                placeholder="0"
+                                            >
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="submit">Save penalties &amp; bonuses</button>
+                </form>
+            {% endif %}
         {% endif %}
     </main>
     {% include "_pwa_foot.html" %}
