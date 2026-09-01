@@ -244,6 +244,7 @@ TIME_RANGE_TYPES = {"business_mission", "personal_excuse"}
 DATE_RANGE_TYPES = {"sick_leave", "unpaid_leave", "annual_vacation", "sickness_vacation", "work_remotely"}
 SATURDAY_TYPES = {"monthly_saturday"}
 SINGLE_DATE_TYPES = SATURDAY_TYPES | PUNCH_TYPES
+SALES_BLOCKED_REQUEST_TYPES = SATURDAY_TYPES | {"missing_punch_out"}
 
 def all_departments(active_only: bool = True) -> list:
     return [
@@ -444,6 +445,14 @@ def official_holidays_for_form() -> dict:
     return FORM_META_CACHE["holidays"]
 
 
+def sales_department_values() -> list:
+    return [
+        item["value"]
+        for item in all_departments()
+        if attendance.is_sales_department(item["label"]) or attendance.is_sales_department(item["value"])
+    ]
+
+
 def index_context(form) -> dict:
     return {
         "leave_groups": LEAVE_GROUPS,
@@ -451,6 +460,8 @@ def index_context(form) -> dict:
         "teams_by_department": teams_for_form(),
         "employee_directory": form_employee_directory(),
         "official_holidays": official_holidays_for_form(),
+        "sales_department_values": sales_department_values(),
+        "sales_blocked_request_types": sorted(SALES_BLOCKED_REQUEST_TYPES),
         "form": form,
         **today_values(),
     }
@@ -995,6 +1006,9 @@ def index():
                 team = ""
         if request_type not in options:
             errors.append("Request type is required")
+        department_label = matched_department or department_maps()["labels"].get(department, "")
+        if attendance.is_sales_department(department_label) and request_type in SALES_BLOCKED_REQUEST_TYPES:
+            errors.append("This request type is not available for Sales.")
         if request_type == "missing_punch_in" and not punch_in_time:
             errors.append("Actual punch-in time is required")
         if request_type == "missing_punch_out" and not punch_out_time:
@@ -1058,7 +1072,6 @@ def index():
             return render_template("index.html", **index_context(request.form))
 
         selected = options[request_type]
-        department_label = matched_department or department_maps()["labels"].get(department, "")
         row = {
             "request_id": uuid.uuid4().hex[:12].upper(),
             "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

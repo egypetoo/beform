@@ -52,7 +52,14 @@ MISSING_PUNCH_TYPES = {
 }
 LATE_EXCUSE_TYPE = "personal excuse"
 SATURDAY_WORK_TYPE = "monthly saturday work"
-NO_CLOCK_OUT_DEPARTMENTS = {"sales", "مبيعات"}
+SALES_DEPARTMENTS = {"sales", "مبيعات"}
+
+
+def is_sales_department(department: str) -> bool:
+    text = " ".join((department or "").strip().lower().split())
+    if not text:
+        return False
+    return text in SALES_DEPARTMENTS or "sales" in text or "مبيعات" in text
 WINDOW_START = "09:00"
 FLEX_END = "10:00"
 WINDOW_END = "10:15"
@@ -486,10 +493,11 @@ def notes_ar(types: list) -> str:
 
 
 def skips_clock_out(department: str) -> bool:
-    text = " ".join((department or "").strip().lower().split())
-    if not text:
-        return False
-    return text in NO_CLOCK_OUT_DEPARTMENTS or "sales" in text or "مبيعات" in text
+    return is_sales_department(department)
+
+
+def skips_monthly_saturday(department: str) -> bool:
+    return is_sales_department(department)
 
 
 def missing_punch_reason(types: list) -> str:
@@ -760,7 +768,7 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
             if punch.get("clock_in") or punch.get("clock_out") or covering_types(saturday_work, device, fingerprint, day):
                 has_monthly_saturday = True
                 break
-        if saturday_days and not has_monthly_saturday:
+        if saturday_days and not has_monthly_saturday and not skips_monthly_saturday(department):
             target = saturday_days[-1]
             for row in export_rows:
                 if row["date"] != target:

@@ -259,6 +259,8 @@
         const teamsByDepartment = {{ teams_by_department | tojson }};
         const employeeDirectory = {{ employee_directory | tojson }};
         const officialHolidays = {{ official_holidays | tojson }};
+        const salesDepartments = {{ sales_department_values | tojson }};
+        const salesBlockedTypes = {{ sales_blocked_request_types | tojson }};
         const selectedTeam = {{ form.get('team', '') | tojson }};
         const selectedDevice = {{ form.get('device', '') | tojson }};
         let sending = false;
@@ -274,6 +276,20 @@
             return employeeDirectory.filter((row) => (
                 row.fingerprint === fp && row.department === department
             ));
+        }
+
+        function applySalesRequestRules() {
+            const isSales = salesDepartments.includes(departmentSelect.value);
+            Array.from(requestType.options).forEach((option) => {
+                if (!option.value) return;
+                const blocked = isSales && salesBlockedTypes.includes(option.value);
+                option.hidden = blocked;
+                option.disabled = blocked;
+            });
+            if (isSales && salesBlockedTypes.includes(requestType.value)) {
+                requestType.value = '';
+                updateFields();
+            }
         }
 
         function filterDepartmentOptions(fp) {
@@ -293,6 +309,7 @@
             if (fp && !allowed.length) {
                 departmentSelect.value = '';
             }
+            applySalesRequestRules();
         }
 
         function candidates() {
