@@ -2442,6 +2442,27 @@ def attendance_report():
             user_store.holiday_map(),
         )
         export_rows = report.get("export_rows") or []
+        registered_only = request.form.get("registered_only") == "1"
+        if registered_only:
+            skipped_keys = {
+                (row.get("device") or "", row.get("fingerprint") or "")
+                for row in export_rows
+                if not row.get("registered")
+            }
+            skipped = len(skipped_keys)
+            report["people"] = [
+                person for person in report["people"]
+                if person.get("registered")
+            ]
+            export_rows = [
+                row for row in export_rows
+                if row.get("registered")
+            ]
+            if skipped:
+                flash(
+                    f"Skipped {skipped} fingerprint(s) not in the employee list. Uncheck “Registered only” to include them.",
+                    "success",
+                )
         if request.form.get("department"):
             department = request.form.get("department", "").strip().lower()
             report["people"] = [
@@ -2463,6 +2484,7 @@ def attendance_report():
                 if needle in (row.get("name") or "").lower() or needle in (row.get("fingerprint") or "")
             ]
         report["export_rows"] = export_rows
+        report["registered_only"] = registered_only
         report["missing_total"] = sum(len(person["missing"]) for person in report["people"])
         report["late_total"] = sum(len(person.get("late") or []) for person in report["people"])
         report["short_total"] = sum(len(person.get("short") or []) for person in report["people"])

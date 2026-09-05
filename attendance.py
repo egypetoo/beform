@@ -718,6 +718,7 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
                 "name": name,
                 "department": department,
                 "device": device,
+                "registered": bool(employee),
                 "date": day,
                 "sheet_date": sheet_date(day),
                 "weekday": weekday_ddd(day),
