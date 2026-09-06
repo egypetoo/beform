@@ -597,6 +597,9 @@ def classify_day(
             morning = ""
             remaining -= needed
             used = needed
+            # Excuse covers lateness: leave time stays 18:30 (8.5h from flex end),
+            # not 8.5h counted from the late arrival.
+            shift = evaluate_shift(FLEX_END, clock_out)
         else:
             morning_reason = "تأخير من 10:16 إلى 11:00" if morning == DEDUCTION_QUARTER else "تأخير بعد 11:00"
             if late_excuse:
