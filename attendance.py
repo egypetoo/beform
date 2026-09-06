@@ -425,6 +425,40 @@ def saturday_work_index(requests: list) -> dict:
     return type_index(requests, SATURDAY_WORK_TYPE)
 
 
+def late_excuse_minutes_index(requests: list) -> dict:
+    index = defaultdict(int)
+    for row in requests:
+        status = str(row.get("Status") or "Pending").strip().lower()
+        if status != "approved":
+            continue
+        request_type = str(row.get("Request Type") or "").strip().lower()
+        if request_type != LATE_EXCUSE_TYPE:
+            continue
+        fingerprint = user_store.normalize_fingerprint_id(row.get("Fingerprint Number"))
+        if not fingerprint:
+            continue
+        device = user_store.normalize_device(row.get("Device") or "")
+        duration = excuse_duration_minutes(
+            str(row.get("From Time") or ""),
+            str(row.get("To Time") or ""),
+        )
+        if not duration or duration <= 0:
+            duration = 60
+        for day in date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+            index[(device, fingerprint, day)] += duration
+            if not device:
+                index[("", fingerprint, day)] += duration
+    return index
+
+
+def late_excuse_minutes_for(index: dict, device: str, fingerprint: str, day: str) -> int:
+    for key in ((device, fingerprint, day), ("", fingerprint, day)):
+        value = int(index.get(key) or 0)
+        if value > 0:
+            return value
+    return 0
+
+
 def late_excuse_index(requests: list) -> dict:
     return type_index(requests, LATE_EXCUSE_TYPE)
 
@@ -526,12 +560,15 @@ def classify_day(
     missing_punch_types: list | None = None,
     department: str = "",
     holiday: str = "",
+    late_excuse_minutes: int = 0,
 ) -> dict:
     missing_punch_types = list(missing_punch_types or [])
     skip_out = skips_clock_out(department)
     missing_keys = {str(item).strip().lower() for item in missing_punch_types}
     has_missing_in = "missing punch in" in missing_keys
     has_missing_out = "missing punch out" in missing_keys
+    if late_excuse_minutes > 0:
+        late_excuse = True
     note_types = list(types or [])
     if late_excuse:
         note_types.append(LATE_EXCUSE_TYPE)
@@ -540,6 +577,12 @@ def classify_day(
     note_types.extend(missing_punch_types)
     notes = notes_ar(note_types)
     remaining = max(0, int(remaining_allowance or 0))
+    day_budget = 0
+    if late_excuse:
+        if late_excuse_minutes > 0:
+            day_budget = min(remaining, int(late_excuse_minutes))
+        else:
+            day_budget = remaining
     day = punch.get("date") or ""
     clock_in = punch.get("clock_in") or ""
     clock_out = punch.get("clock_out") or ""
@@ -593,9 +636,10 @@ def classify_day(
     if morning:
         late_minutes = shift["late_minutes"]
         needed = ceil_hours_minutes(late_minutes)
-        if late_excuse and remaining >= needed:
+        if day_budget >= needed:
             morning = ""
             remaining -= needed
+            day_budget -= needed
             used = needed
             # Excuse covers lateness: leave time stays 18:30 (8.5h from flex end),
             # not 8.5h counted from the late arrival.
@@ -604,12 +648,24 @@ def classify_day(
             morning_reason = "تأخير من 10:16 إلى 11:00" if morning == DEDUCTION_QUARTER else "تأخير بعد 11:00"
             if late_excuse:
                 morning_reason = f"{morning_reason} - رصيد الإذن لا يكفي"
-            used = remaining if late_excuse else 0
+            used = day_budget if late_excuse else 0
             remaining -= used
+            day_budget -= used
     evening = ""
     evening_reason = ""
     if not skip_out:
         evening, evening_reason = clock_out_penalty(shift)
+        if evening:
+            early = int(shift.get("early_out") or 0)
+            needed = ceil_hours_minutes(early)
+            if needed and day_budget >= needed:
+                evening = ""
+                evening_reason = ""
+                remaining -= needed
+                day_budget -= needed
+                used += needed
+            elif late_excuse and needed:
+                evening_reason = f"{evening_reason} - رصيد الإذن لا يكفي"
     deduction = worse_penalty(morning, evening)
     if not deduction:
         return {
@@ -643,7 +699,7 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
     }
     covered = coverage_index(requests)
     saturday_work = saturday_work_index(requests)
-    late_excuses = late_excuse_index(requests)
+    late_excuses = late_excuse_minutes_index(requests)
     missing_punches = missing_punch_index(requests)
     punch_dates = [punch["date"] for punch in punches if punch.get("date")]
     from_date = min(punch_dates) if punch_dates else ""
@@ -699,7 +755,8 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
             }
             types = covering_types(covered, device, fingerprint, day)
             worked_saturday = bool(covering_types(saturday_work, device, fingerprint, day))
-            late_excuse = bool(covering_types(late_excuses, device, fingerprint, day))
+            excuse_minutes = late_excuse_minutes_for(late_excuses, device, fingerprint, day)
+            late_excuse = excuse_minutes > 0
             missing_types = covering_types(missing_punches, device, fingerprint, day)
             holiday_label = (holidays.get(day) or "إجازة رسمية") if day in holidays else ""
             result = classify_day(
@@ -711,6 +768,7 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
                 missing_types,
                 department,
                 holiday_label,
+                excuse_minutes,
             )
             remaining = result["remaining"]
             allowance_used += result["used"]
