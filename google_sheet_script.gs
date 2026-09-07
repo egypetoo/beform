@@ -285,6 +285,20 @@ function datesOverlap(fromA, toA, fromB, toB) {
   return startA <= endB && startB <= endA;
 }
 
+function appendMappedRow(sheet, valuesByHeader, headers) {
+  if (!headers || !headers.length) {
+    headers = ensureHeaders(sheet);
+  }
+  const row = headers.map(function (header) {
+    return Object.prototype.hasOwnProperty.call(valuesByHeader, header) ? valuesByHeader[header] : "";
+  });
+  // Prefer appendRow — avoids getRange row/column overload confusion.
+  while (row.length < headers.length) {
+    row.push("");
+  }
+  sheet.appendRow(row.slice(0, headers.length));
+}
+
 function recentSheetValues(sheet, headers, limit) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
@@ -293,18 +307,8 @@ function recentSheetValues(sheet, headers, limit) {
   const lastCol = Math.max(sheet.getLastColumn(), headers.length);
   const count = Math.min(Math.max(limit || 800, 1), lastRow - 1);
   const startRow = lastRow - count + 1;
+  // getRange(row, column, numRows, numColumns) — 3rd/4th args are sizes, not end indices.
   return [headers].concat(sheet.getRange(startRow, 1, count, lastCol).getValues());
-}
-
-function appendMappedRow(sheet, valuesByHeader, headers) {
-  if (!headers || !headers.length) {
-    headers = ensureHeaders(sheet);
-  }
-  const row = headers.map(function (header) {
-    return Object.prototype.hasOwnProperty.call(valuesByHeader, header) ? valuesByHeader[header] : "";
-  });
-  const nextRow = Math.max(sheet.getLastRow(), 1) + 1;
-  sheet.getRange(nextRow, 1, 1, row.length).setValues([row]);
 }
 
 function getOrCreateSheet(ss, name) {

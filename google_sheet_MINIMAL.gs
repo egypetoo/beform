@@ -173,15 +173,18 @@ function appendMappedRow(sheet, valuesByHeader, headers) {
   const row = headers.map(function (header) {
     return Object.prototype.hasOwnProperty.call(valuesByHeader, header) ? valuesByHeader[header] : "";
   });
-  sheet.getRange(Math.max(sheet.getLastRow(), 1) + 1, 1, 1, row.length).setValues([row]);
+  while (row.length < headers.length) row.push("");
+  sheet.appendRow(row.slice(0, headers.length));
 }
 
 function recentSheetValues(sheet, headers, limit) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [headers];
+  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
   const count = Math.min(Math.max(lastRow - 1, 0), limit || 800);
   const startRow = lastRow - count + 1;
-  return [headers].concat(sheet.getRange(startRow, 1, count, Math.max(sheet.getLastColumn(), headers.length)).getValues());
+  // getRange(row, column, numRows, numColumns) — sizes, not end indices.
+  return [headers].concat(sheet.getRange(startRow, 1, count, lastCol).getValues());
 }
 
 function sheetToObjects(sheet) {

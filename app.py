@@ -868,48 +868,59 @@ def conflict_source_rows(fingerprint: str) -> list:
     return rows
 
 
-def sync_pending_form_requests(limit: int = 8) -> None:
+def sync_one_form_request(row: dict) -> dict:
+    """Push one local form request to Google Sheet. Returns sync result info."""
+    request_id = str(row.get("request_id") or "").strip()
+    payload = user_store.form_request_to_payload(row)
+    result = save_submission(payload)
+    if result.get("saturday_month"):
+        user_store.mark_form_request_blocked(request_id, "saturday_month")
+        return {"ok": False, "blocked": "saturday_month"}
+    if result.get("conflict"):
+        reason = result.get("conflict_type") or "conflict"
+        user_store.mark_form_request_blocked(request_id, str(reason))
+        return {"ok": False, "blocked": reason}
+    user_store.mark_form_request_synced(request_id)
+    ROWS_CACHE.clear()
+    TRACK_CACHE.clear()
+    status = (row.get("status") or "Pending").strip() or "Pending"
+    if status in {"Approved", "Rejected"}:
+        try:
+            sheet_api(
+                {
+                    "action": "set_status",
+                    "items": [{
+                        "request_id": request_id,
+                        "department": row.get("department") or "",
+                    }],
+                    "status": status,
+                    "reviewed_by": row.get("reviewed_by") or "",
+                    "reason": row.get("rejection_reason") or "",
+                }
+            )
+        except Exception as exc:
+            (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+    return {"ok": True, "result": result}
+
+
+def sync_pending_form_requests(limit: int = 8) -> int:
     if not SHEET_SYNC_LOCK.acquire(blocking=False):
-        return
+        return 0
+    synced = 0
     try:
         for row in user_store.pending_form_requests(limit):
             request_id = row.get("request_id") or ""
-            payload = user_store.form_request_to_payload(row)
             try:
-                result = save_submission(payload)
+                outcome = sync_one_form_request(row)
+                if outcome.get("ok"):
+                    synced += 1
             except Exception as exc:
                 user_store.bump_form_request_sync_attempt(request_id, str(exc))
                 (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
                 continue
-
-            if result.get("saturday_month"):
-                user_store.mark_form_request_blocked(request_id, "saturday_month")
-            elif result.get("conflict"):
-                reason = result.get("conflict_type") or "conflict"
-                user_store.mark_form_request_blocked(request_id, str(reason))
-            else:
-                user_store.mark_form_request_synced(request_id)
-                status = (row.get("status") or "Pending").strip() or "Pending"
-                if status in {"Approved", "Rejected"}:
-                    try:
-                        sheet_api(
-                            {
-                                "action": "set_status",
-                                "items": [{
-                                    "request_id": request_id,
-                                    "department": row.get("department") or "",
-                                }],
-                                "status": status,
-                                "reviewed_by": row.get("reviewed_by") or "",
-                                "reason": row.get("rejection_reason") or "",
-                            }
-                        )
-                        ROWS_CACHE.clear()
-                        TRACK_CACHE.clear()
-                    except Exception as exc:
-                        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
     finally:
         SHEET_SYNC_LOCK.release()
+    return synced
 
 
 def schedule_sheet_sync() -> None:
@@ -917,7 +928,19 @@ def schedule_sheet_sync() -> None:
         return
     if not user_store.has_pending_form_requests():
         return
-    Thread(target=sync_pending_form_requests, daemon=True).start()
+    # Prefer syncing inside the request when possible; thread is only a fallback.
+    Thread(target=sync_pending_form_requests, kwargs={"limit": 8}, daemon=True).start()
+
+
+def flush_sheet_sync(limit: int = 25) -> int:
+    """Run sync in the current process/request (Passenger-safe)."""
+    total = 0
+    for _ in range(4):
+        done = sync_pending_form_requests(limit)
+        total += done
+        if done <= 0 or not user_store.has_pending_form_requests():
+            break
+    return total
 
 
 def submission_fingerprint(row: dict) -> str:
@@ -1318,7 +1341,12 @@ def index():
             flash("Could not save the request. Please try again.", "error")
             return render_template("index.html", **index_context(request.form))
 
-        schedule_sheet_sync()
+        # Sync immediately in this request (Passenger kills background threads).
+        try:
+            sync_one_form_request(row)
+        except Exception as exc:
+            (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+            schedule_sheet_sync()
         return redirect(url_for("success"))
 
     return render_template("index.html", **index_context({}))
@@ -1671,8 +1699,49 @@ def check_sheet_bridge() -> dict:
             return result
         listing = sheet_api({"action": "list", "department": "ALL"})
         result["list_ok"] = "rows" in listing
-        result["ok"] = result["auth_ok"] and result["version_ok"] and result["list_ok"]
-        result["message"] = "Google Sheet bridge is healthy." if result["ok"] else "List action did not return rows."
+        if not result["list_ok"]:
+            result["message"] = "List action did not return rows."
+            return result
+        # Prove create actually writes a row.
+        probe_id = "PROBE" + uuid.uuid4().hex[:8].upper()
+        probe = {
+            "action": "create",
+            "request_id": probe_id,
+            "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "fingerprint_id": "0",
+            "device": "F8",
+            "name": "Sheet Probe",
+            "department": "Web",
+            "team": "",
+            "request_type": "Work Remotely",
+            "request_date": datetime.now().strftime("%Y-%m-%d"),
+            "start_date": datetime.now().strftime("%Y-%m-%d"),
+            "end_date": datetime.now().strftime("%Y-%m-%d"),
+            "notes": "probe-delete-me",
+            "status": "Pending",
+        }
+        created = sheet_api(probe)
+        if "duplicate" not in created and not created.get("conflict") and not created.get("saturday_month"):
+            result["message"] = "Create action did not return a valid create response."
+            return result
+        listed = sheet_api({"action": "list", "department": "ALL"})
+        found = [
+            row for row in (listed.get("rows") or [])
+            if str(row.get("Request ID") or "") == probe_id
+        ]
+        if not found:
+            result["message"] = (
+                "Create returned OK but the row was not found in the Sheet. "
+                "Re-paste google_sheet_MINIMAL.gs / google_sheet_script.gs and New deployment."
+            )
+            return result
+        try:
+            sheet_api({"action": "delete_by_notes", "notes_contains": "probe-delete-me"})
+        except Exception:
+            pass
+        result["ok"] = True
+        result["create_ok"] = True
+        result["message"] = "Google Sheet bridge is healthy (auth + list + create verified)."
         result["raw"] = str(ping)[:180]
     except Exception as exc:
         result["message"] = str(exc)
@@ -1712,9 +1781,9 @@ def resync_sheet_requests():
         flash("Sheet bridge FAIL: " + health.get("message", ""), "error")
         return redirect(url_for("dashboard"))
     queued = user_store.requeue_form_requests_for_sheet_sync(21)
-    Thread(target=sync_pending_form_requests, kwargs={"limit": 40}, daemon=True).start()
+    synced = flush_sheet_sync(40)
     flash(
-        f"Queued {queued} request(s) to sync to Google Sheet. Keep the site open for a minute while sync runs.",
+        f"Queued {queued} request(s). Synced {synced} to Google Sheet now.",
         "success",
     )
     return redirect(url_for("dashboard"))
