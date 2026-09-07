@@ -9,6 +9,7 @@ import hmac
 import io
 import json
 import os
+import re
 import secrets
 import time
 import uuid
@@ -70,6 +71,9 @@ FORM_SUBMIT_WINDOW_SECONDS = 600
 FORM_FP_ATTEMPTS = {}
 MAX_FORM_SUBMITS_PER_FP = 4
 FORM_FP_WINDOW_SECONDS = 3600
+FORM_FP_DAY_ATTEMPTS = {}
+MAX_FORM_SUBMITS_PER_FP_DAY = 6
+FORM_FP_DAY_WINDOW_SECONDS = 86400
 LOOKUP_ATTEMPTS = {}
 LOOKUP_LOCK = Lock()
 MAX_LOOKUPS_PER_IP = 30
@@ -78,6 +82,8 @@ MAX_NOTES_CHARS = 200
 MAX_REQUEST_FUTURE_DAYS = 45
 MAX_REQUEST_PAST_DAYS = 14
 MIN_FORM_FILL_SECONDS = 2
+SHEET_SCRIPT_VERSION = "beform-2026-09-08"
+TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/siteverify"
 DATE_SPAN_LIMITS = {
     "work_remotely": 5,
     "business_mission": 7,
@@ -522,6 +528,52 @@ def form_fingerprint_is_limited(fingerprint: str) -> bool:
     )
 
 
+def form_fingerprint_day_is_limited(fingerprint: str) -> bool:
+    return _rate_limited(
+        FORM_FP_DAY_ATTEMPTS,
+        FORM_SUBMIT_LOCK,
+        normalize_fingerprint(fingerprint),
+        MAX_FORM_SUBMITS_PER_FP_DAY,
+        FORM_FP_DAY_WINDOW_SECONDS,
+    )
+
+
+def turnstile_site_key() -> str:
+    return os.getenv("TURNSTILE_SITE_KEY", "").strip()
+
+
+def turnstile_secret_key() -> str:
+    return os.getenv("TURNSTILE_SECRET_KEY", "").strip()
+
+
+def turnstile_is_configured() -> bool:
+    return bool(turnstile_site_key() and turnstile_secret_key())
+
+
+def turnstile_is_valid() -> bool:
+    """Verify Cloudflare Turnstile when keys are configured; skip when not set (local/dev)."""
+    secret = turnstile_secret_key()
+    if not secret:
+        return True
+    token = (request.form.get("cf-turnstile-response") or "").strip()
+    if not token:
+        return False
+    try:
+        response = requests.post(
+            TURNSTILE_VERIFY_URL,
+            data={
+                "secret": secret,
+                "response": token,
+                "remoteip": client_ip(),
+            },
+            timeout=10,
+        )
+        data = response.json()
+    except Exception:
+        return False
+    return bool(data.get("success"))
+
+
 def lookup_is_limited(ip: str) -> bool:
     return _rate_limited(
         LOOKUP_ATTEMPTS,
@@ -594,6 +646,7 @@ def index_context(form) -> dict:
         "sales_blocked_request_types": sorted(SALES_BLOCKED_REQUEST_TYPES),
         "max_notes_chars": MAX_NOTES_CHARS,
         "date_span_limits": DATE_SPAN_LIMITS,
+        "turnstile_site_key": turnstile_site_key() if turnstile_is_configured() else "",
         "form": form,
         **today_values(),
     }
@@ -645,7 +698,7 @@ def sheet_api(payload: dict) -> dict:
         raise RuntimeError(data.get("error") or "Google Sheet did not confirm the save")
     action = str(payload.get("action") or "create").strip() or "create"
     if action == "ping":
-        if not data.get("ping") or data.get("version") != "beform-2026-09-07":
+        if not data.get("ping") or data.get("version") != SHEET_SCRIPT_VERSION:
             raise RuntimeError(
                 "Google Apps Script is outdated. Paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version → Deploy."
             )
@@ -705,14 +758,40 @@ SPAM_NOTE_MARKERS = (
     "hacking beeeeee",
     "haking beeee",
     "hacking beeee",
+    "hacking be",
+    "hacked by",
+    "sqlmap",
+    "<script",
+    "</script",
+    "javascript:",
+    "onerror=",
+    "union select",
+    "drop table",
+    "base64_decode",
+    "eval(",
+    "wget http",
+    "curl http",
 )
+
+_SPAM_REPEAT_RE = re.compile(r"(.)\1{8,}", re.IGNORECASE)
+_SPAM_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 
 
 def is_spam_request_row(row: dict) -> bool:
-    notes = str(row.get("Notes") or row.get("notes") or "").strip().lower()
+    notes = str(row.get("Notes") or row.get("notes") or "").strip()
     if not notes:
         return False
-    return any(marker in notes for marker in SPAM_NOTE_MARKERS)
+    lowered = notes.lower()
+    if any(marker in lowered for marker in SPAM_NOTE_MARKERS):
+        return True
+    if len(_SPAM_URL_RE.findall(notes)) >= 2:
+        return True
+    if _SPAM_REPEAT_RE.search(notes):
+        return True
+    letters = sum(1 for ch in notes if ch.isalpha())
+    if len(notes) >= 24 and letters / max(len(notes), 1) < 0.28:
+        return True
+    return False
 
 
 def purge_spam_form_requests() -> int:
@@ -1131,6 +1210,14 @@ def index():
             flash("The form expired. Please refresh and try again.", "error")
             return render_template("index.html", **index_context(request.form))
 
+        if form_opened_too_fast():
+            flash("Please take a moment to fill the form, then try again.", "error")
+            return render_template("index.html", **index_context(request.form))
+
+        if not turnstile_is_valid():
+            flash("Security check failed. Please refresh and try again.", "error")
+            return render_template("index.html", **index_context(request.form))
+
         if form_submit_is_limited(client_ip()):
             flash("Too many requests from this connection. Please wait a few minutes and try again.", "error")
             return render_template("index.html", **index_context(request.form))
@@ -1330,7 +1417,7 @@ def index():
                 flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
             return render_template("index.html", **index_context(request.form))
 
-        if form_fingerprint_is_limited(fingerprint_id):
+        if form_fingerprint_is_limited(fingerprint_id) or form_fingerprint_day_is_limited(fingerprint_id):
             flash("Too many requests for this fingerprint. Please wait and try again later.", "error")
             return render_template("index.html", **index_context(request.form))
 
@@ -1693,7 +1780,7 @@ def check_sheet_bridge() -> dict:
             return result
         result["auth_ok"] = True
         ping = sheet_api({"action": "ping"})
-        result["version_ok"] = bool(ping.get("ping") and ping.get("version") == "beform-2026-09-07")
+        result["version_ok"] = bool(ping.get("ping") and ping.get("version") == SHEET_SCRIPT_VERSION)
         if not result["version_ok"]:
             result["message"] = "Script deployed but version mismatch. Paste google_sheet_MINIMAL.gs and redeploy."
             return result

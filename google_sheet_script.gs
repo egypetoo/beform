@@ -1,10 +1,10 @@
-const SHEET_SECRET = "HNCAHozrrkIAst0M1O_ZMqO9eY9XB4fILazhfu79ka0";
+const SHEET_SECRET = "8c4_UBhk3bcRn1xkRCYtdeGzPkKIbwos4jDD2FA0O7C4qEGIFgKShA";
 
 function doGet(e) {
   return jsonResponse({
     ok: true,
     ping: true,
-    version: "beform-2026-09-07",
+    version: "beform-2026-09-08",
     via: "GET",
     hint: "If you see this version, the new script is deployed.",
   });
@@ -21,7 +21,7 @@ function doPost(e) {
     return jsonResponse({
       ok: true,
       ping: true,
-      version: "beform-2026-09-07",
+      version: "beform-2026-09-08",
       via: "POST",
       actions: ["ping", "list", "lookup", "create", "set_status", "delete_by_notes", "delete_requests"],
     });

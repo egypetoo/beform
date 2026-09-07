@@ -5,16 +5,16 @@
  * 3) Execute as: Me | Who has access: Anyone
  * 4) Copy Web App URL into server .env as GOOGLE_SHEET_WEBHOOK=
  * 5) SHEET_SECRET below must match .env SHEET_SECRET=
- * 6) Open the Web App URL in Chrome — you must see version beform-2026-09-07
+ * 6) Open the Web App URL in Chrome — you must see version beform-2026-09-08
  */
 
-const SHEET_SECRET = "HNCAHozrrkIAst0M1O_ZMqO9eY9XB4fILazhfu79ka0";
+const SHEET_SECRET = "8c4_UBhk3bcRn1xkRCYtdeGzPkKIbwos4jDD2FA0O7C4qEGIFgKShA";
 
 function doGet() {
   return jsonResponse({
     ok: true,
     ping: true,
-    version: "beform-2026-09-07",
+    version: "beform-2026-09-08",
     via: "GET",
   });
 }
@@ -31,7 +31,7 @@ function doPost(e) {
     return jsonResponse({
       ok: true,
       ping: true,
-      version: "beform-2026-09-07",
+      version: "beform-2026-09-08",
       via: "POST",
     });
   }
