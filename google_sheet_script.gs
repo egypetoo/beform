@@ -1,5 +1,15 @@
 const SHEET_SECRET = "HNCAHozrrkIAst0M1O_ZMqO9eY9XB4fILazhfu79ka0";
 
+function doGet(e) {
+  return jsonResponse({
+    ok: true,
+    ping: true,
+    version: "beform-2026-09-07",
+    via: "GET",
+    hint: "If you see this version, the new script is deployed.",
+  });
+}
+
 function doPost(e) {
   const data = parseData(e);
   if (!SHEET_SECRET || data.secret !== SHEET_SECRET) {
@@ -12,6 +22,7 @@ function doPost(e) {
       ok: true,
       ping: true,
       version: "beform-2026-09-07",
+      via: "POST",
       actions: ["ping", "list", "lookup", "create", "set_status", "delete_by_notes", "delete_requests"],
     });
   }
