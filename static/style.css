@@ -471,7 +471,29 @@ button:disabled {
 }
 
 .dash-filter-bar {
-    grid-template-columns: minmax(140px, 1.3fr) minmax(130px, 0.85fr) minmax(130px, 0.85fr) minmax(120px, 0.75fr) minmax(120px, 0.75fr) 110px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 10px;
+}
+
+.dash-filter-bar > input[type="search"],
+.dash-filter-bar > select {
+    flex: 1 1 160px;
+    min-width: 140px;
+    max-width: 100%;
+}
+
+.dash-filter-bar > .filter-date {
+    flex: 1 1 150px;
+    min-width: 150px;
+    max-width: 220px;
+}
+
+.dash-filter-bar > button {
+    flex: 0 1 120px;
+    min-width: 110px;
+    width: auto;
 }
 
 .employee-filter-bar {
@@ -485,6 +507,7 @@ button:disabled {
     margin: 0;
     font-size: 12px;
     color: var(--muted);
+    min-width: 0;
 }
 
 .filter-date span {
@@ -492,8 +515,13 @@ button:disabled {
     font-weight: 700;
 }
 
-.filter-date input {
+.filter-date input,
+.filter-date input[type="date"] {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     min-height: 46px;
+    box-sizing: border-box;
 }
 
 .filter-bar input,
@@ -821,6 +849,16 @@ th {
         grid-template-columns: 1fr 1fr;
         gap: 10px;
         width: 100%;
+        min-width: 0;
+    }
+
+    .dash-filter-bar > input[type="search"],
+    .dash-filter-bar > select,
+    .dash-filter-bar > .filter-date,
+    .dash-filter-bar > button {
+        flex: none;
+        width: 100%;
+        max-width: 100%;
         min-width: 0;
     }
 
