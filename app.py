@@ -539,39 +539,48 @@ def form_fingerprint_day_is_limited(fingerprint: str) -> bool:
 
 
 def turnstile_site_key() -> str:
-    return os.getenv("TURNSTILE_SITE_KEY", "").strip()
+    return (os.getenv("TURNSTILE_SITE_KEY", "") or "").strip().strip('"').strip("'")
 
 
 def turnstile_secret_key() -> str:
-    return os.getenv("TURNSTILE_SECRET_KEY", "").strip()
+    return (os.getenv("TURNSTILE_SECRET_KEY", "") or "").strip().strip('"').strip("'")
 
 
 def turnstile_is_configured() -> bool:
     return bool(turnstile_site_key() and turnstile_secret_key())
 
 
-def turnstile_is_valid() -> bool:
+def turnstile_is_valid() -> tuple[bool, str]:
     """Verify Cloudflare Turnstile when keys are configured; skip when not set (local/dev)."""
     secret = turnstile_secret_key()
     if not secret:
-        return True
-    token = (request.form.get("cf-turnstile-response") or "").strip()
+        return True, ""
+    token = (
+        request.form.get("turnstile_token")
+        or request.form.get("cf-turnstile-response")
+        or ""
+    ).strip()
     if not token:
-        return False
+        return False, "missing_token"
     try:
+        # Do not send remoteip — wrong IP behind proxies often breaks verification.
         response = requests.post(
             TURNSTILE_VERIFY_URL,
             data={
                 "secret": secret,
                 "response": token,
-                "remoteip": client_ip(),
             },
             timeout=10,
         )
         data = response.json()
-    except Exception:
-        return False
-    return bool(data.get("success"))
+    except Exception as exc:
+        (BASE_DIR / "turnstile_error.log").write_text(str(exc), encoding="utf-8")
+        return False, "verify_error"
+    if data.get("success"):
+        return True, ""
+    codes = ",".join(str(c) for c in (data.get("error-codes") or []))
+    (BASE_DIR / "turnstile_error.log").write_text(codes or "failed", encoding="utf-8")
+    return False, codes or "failed"
 
 
 def lookup_is_limited(ip: str) -> bool:
@@ -1210,12 +1219,20 @@ def index():
             flash("The form expired. Please refresh and try again.", "error")
             return render_template("index.html", **index_context(request.form))
 
-        if form_opened_too_fast():
+        if form_opened_too_fast() and not turnstile_is_configured():
             flash("Please take a moment to fill the form, then try again.", "error")
             return render_template("index.html", **index_context(request.form))
 
-        if not turnstile_is_valid():
-            flash("Security check failed. Please refresh and try again.", "error")
+        ok_turnstile, turnstile_reason = turnstile_is_valid()
+        if not ok_turnstile:
+            if turnstile_reason == "missing_token":
+                flash("Please complete the security check, then submit again.", "error")
+            elif "invalid-input-secret" in turnstile_reason or "missing-input-secret" in turnstile_reason:
+                flash("Security check is misconfigured (secret key). Ask HR/IT to fix TURNSTILE_SECRET_KEY.", "error")
+            elif "timeout-or-duplicate" in turnstile_reason:
+                flash("Security check expired. Wait for the check to finish, then submit again.", "error")
+            else:
+                flash("Security check failed. Refresh the page, wait for Success, then submit once.", "error")
             return render_template("index.html", **index_context(request.form))
 
         if form_submit_is_limited(client_ip()):

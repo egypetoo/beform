@@ -153,8 +153,13 @@
             {% if turnstile_site_key %}
             <section class="field turnstile-wrap">
                 <div class="cf-turnstile"
+                     id="cf-turnstile"
                      data-sitekey="{{ turnstile_site_key }}"
-                     data-theme="light"></div>
+                     data-theme="dark"
+                     data-callback="onTurnstileSuccess"
+                     data-expired-callback="onTurnstileExpired"
+                     data-error-callback="onTurnstileExpired"></div>
+                <input type="hidden" name="turnstile_token" id="turnstile_token" value="">
             </section>
             {% endif %}
 
@@ -281,6 +286,18 @@
         let sending = false;
         let lookupTimer = null;
         let lookupSeq = 0;
+        let turnstileToken = '';
+
+        window.onTurnstileSuccess = function (token) {
+            turnstileToken = token || '';
+            const field = document.getElementById('turnstile_token');
+            if (field) field.value = turnstileToken;
+        };
+        window.onTurnstileExpired = function () {
+            turnstileToken = '';
+            const field = document.getElementById('turnstile_token');
+            if (field) field.value = '';
+        };
 
         async function loadEmployeesForFingerprint(fp) {
             const seq = ++lookupSeq;
@@ -606,6 +623,20 @@
                     alert('Late excuse must be whole hours only (1, 2, or 3 hours). Fractions are not allowed.');
                     return;
                 }
+            }
+            const turnstileField = document.getElementById('turnstile_token');
+            if (turnstileField) {
+                const widgetInput = document.querySelector('#cf-turnstile textarea[name="cf-turnstile-response"], #cf-turnstile input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]');
+                const token = (turnstileToken || turnstileField.value || (widgetInput && widgetInput.value) || '').trim();
+                if (!token) {
+                    event.preventDefault();
+                    alert('Please wait for the security check (Success), then submit.');
+                    if (window.turnstile && document.getElementById('cf-turnstile')) {
+                        try { window.turnstile.reset('#cf-turnstile'); } catch (e) {}
+                    }
+                    return;
+                }
+                turnstileField.value = token;
             }
             nameInput.readOnly = false;
             sending = true;
