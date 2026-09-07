@@ -550,16 +550,21 @@ def turnstile_is_configured() -> bool:
     return bool(turnstile_site_key() and turnstile_secret_key())
 
 
+def _turnstile_token_from_request() -> str:
+    for name in ("turnstile_token", "cf-turnstile-response"):
+        for raw in request.form.getlist(name):
+            token = str(raw or "").strip()
+            if token:
+                return token
+    return ""
+
+
 def turnstile_is_valid() -> tuple[bool, str]:
     """Verify Cloudflare Turnstile when keys are configured; skip when not set (local/dev)."""
     secret = turnstile_secret_key()
     if not secret:
         return True, ""
-    token = (
-        request.form.get("turnstile_token")
-        or request.form.get("cf-turnstile-response")
-        or ""
-    ).strip()
+    token = _turnstile_token_from_request()
     if not token:
         return False, "missing_token"
     try:
@@ -572,15 +577,52 @@ def turnstile_is_valid() -> tuple[bool, str]:
             },
             timeout=10,
         )
-        data = response.json()
+        try:
+            data = response.json()
+        except Exception:
+            snippet = (response.text or "")[:240]
+            (BASE_DIR / "turnstile_error.log").write_text(
+                f"http_{response.status_code}:{snippet}",
+                encoding="utf-8",
+            )
+            return False, f"http_{response.status_code}"
     except Exception as exc:
         (BASE_DIR / "turnstile_error.log").write_text(str(exc), encoding="utf-8")
         return False, "verify_error"
     if data.get("success"):
         return True, ""
-    codes = ",".join(str(c) for c in (data.get("error-codes") or []))
-    (BASE_DIR / "turnstile_error.log").write_text(codes or "failed", encoding="utf-8")
-    return False, codes or "failed"
+    codes = ",".join(str(c) for c in (data.get("error-codes") or [])) or "failed"
+    (BASE_DIR / "turnstile_error.log").write_text(
+        f"{codes}|token_len={len(token)}|site_len={len(turnstile_site_key())}|secret_len={len(secret)}",
+        encoding="utf-8",
+    )
+    return False, codes
+
+
+def turnstile_failure_message(reason: str) -> str:
+    reason = (reason or "").strip()
+    if reason == "missing_token":
+        return "Please complete the security check, then submit again."
+    if "invalid-input-secret" in reason or "missing-input-secret" in reason:
+        return (
+            "TURNSTILE_SECRET_KEY on the server is wrong. "
+            "Copy Secret Key from the same Cloudflare widget as the Site Key."
+        )
+    if "invalid-input-response" in reason:
+        return (
+            "Security token rejected (invalid-input-response). "
+            "Site Key and Secret Key must be from the same widget, then restart the app."
+        )
+    if "hostname-mismatch" in reason:
+        return "Add form.be-group.com to the Turnstile widget hostnames, then try again."
+    if "timeout-or-duplicate" in reason:
+        return "Security check expired. Refresh, wait for Success, then submit once."
+    if reason.startswith("http_") or reason == "verify_error":
+        return (
+            f"Server could not reach Cloudflare verification ({reason}). "
+            "Check outbound HTTPS from the host."
+        )
+    return f"Security check failed ({reason or 'unknown'}). Refresh, wait for Success, then submit once."
 
 
 def lookup_is_limited(ip: str) -> bool:
@@ -1225,14 +1267,7 @@ def index():
 
         ok_turnstile, turnstile_reason = turnstile_is_valid()
         if not ok_turnstile:
-            if turnstile_reason == "missing_token":
-                flash("Please complete the security check, then submit again.", "error")
-            elif "invalid-input-secret" in turnstile_reason or "missing-input-secret" in turnstile_reason:
-                flash("Security check is misconfigured (secret key). Ask HR/IT to fix TURNSTILE_SECRET_KEY.", "error")
-            elif "timeout-or-duplicate" in turnstile_reason:
-                flash("Security check expired. Wait for the check to finish, then submit again.", "error")
-            else:
-                flash("Security check failed. Refresh the page, wait for Success, then submit once.", "error")
+            flash(turnstile_failure_message(turnstile_reason), "error")
             return render_template("index.html", **index_context(request.form))
 
         if form_submit_is_limited(client_ip()):
