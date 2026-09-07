@@ -17,13 +17,30 @@ function doPost(e) {
   if (action === "lookup") {
     return jsonResponse({ ok: true, rows: lookupByFingerprint(data.fingerprint_id || "", data.limit || 30, data.name || "") });
   }
-image.png
+
   if (action === "set_status") {
     const items = data.items && data.items.length
       ? data.items
       : [{ request_id: data.request_id, department: data.department || "" }];
     updateStatuses(items, data.status, data.reviewed_by || "", data.reason || "");
     return jsonResponse({ ok: true });
+  }
+
+  if (action === "delete_by_notes") {
+    const needle = String(data.notes_contains || "").trim().toLowerCase();
+    if (!needle || needle.length < 4) {
+      return jsonResponse({ ok: false, error: "notes_required" });
+    }
+    const deleted = deleteRowsByNotes(needle);
+    return jsonResponse({ ok: true, deleted: deleted });
+  }
+
+  if (action === "delete_requests") {
+    const items = data.items && data.items.length
+      ? data.items
+      : [{ request_id: data.request_id, department: data.department || "" }];
+    const deleted = deleteRequests(items);
+    return jsonResponse({ ok: true, deleted: deleted });
   }
 
   if (action !== "create") {
@@ -536,4 +553,89 @@ function updateSheetStatuses(sheet, requestIds, status, reviewedBy, reason) {
   }
 
   applyStatusColors(sheet);
+}
+
+function deleteRequests(items) {
+  const ids = [];
+  const names = { All: true };
+  (items || []).forEach(function (item) {
+    if (item && item.request_id) {
+      ids.push(String(item.request_id));
+      if (item.department && item.department !== "ALL") {
+        names[item.department] = true;
+      }
+    }
+  });
+  if (!ids.length) {
+    return 0;
+  }
+  const wanted = {};
+  ids.forEach(function (id) {
+    wanted[id] = true;
+  });
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let deleted = 0;
+  Object.keys(names).forEach(function (name) {
+    const sheet = ss.getSheetByName(name);
+    if (sheet) {
+      deleted += deleteSheetRowsByRequestIds(sheet, wanted);
+    }
+  });
+  return deleted;
+}
+
+function deleteRowsByNotes(needle) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let deleted = 0;
+  ss.getSheets().forEach(function (sheet) {
+    deleted += deleteSheetRowsByNotes(sheet, needle);
+  });
+  return deleted;
+}
+
+function deleteSheetRowsByRequestIds(sheet, wanted) {
+  if (sheet.getLastRow() < 2) {
+    return 0;
+  }
+  ensureHeaders(sheet);
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const idCol = headers.indexOf("Request ID") + 1;
+  if (!idCol) {
+    return 0;
+  }
+  const lastRow = sheet.getLastRow();
+  const ids = sheet.getRange(2, idCol, lastRow, idCol).getValues();
+  let deleted = 0;
+  for (let i = ids.length - 1; i >= 0; i--) {
+    if (wanted[String(ids[i][0])]) {
+      sheet.deleteRow(i + 2);
+      deleted += 1;
+    }
+  }
+  return deleted;
+}
+
+function deleteSheetRowsByNotes(sheet, needle) {
+  if (sheet.getLastRow() < 2) {
+    return 0;
+  }
+  ensureHeaders(sheet);
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const notesCol = headers.indexOf("Notes") + 1;
+  if (!notesCol) {
+    return 0;
+  }
+  const lastRow = sheet.getLastRow();
+  const values = sheet.getRange(2, notesCol, lastRow, notesCol).getValues();
+  let deleted = 0;
+  for (let i = values.length - 1; i >= 0; i--) {
+    const text = String(values[i][0] == null ? "" : values[i][0]).toLowerCase();
+    if (text.indexOf(needle) !== -1) {
+      sheet.deleteRow(i + 2);
+      deleted += 1;
+    }
+  }
+  return deleted;
 }

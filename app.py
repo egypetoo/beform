@@ -17,7 +17,7 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
 from dotenv import load_dotenv
-from flask import Flask, Response, flash, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 import requests
@@ -63,6 +63,30 @@ TRACK_ATTEMPTS = {}
 TRACK_LOCK = Lock()
 MAX_TRACK_ATTEMPTS = 8
 TRACK_WINDOW_SECONDS = 300
+FORM_SUBMIT_ATTEMPTS = {}
+FORM_SUBMIT_LOCK = Lock()
+MAX_FORM_SUBMITS_PER_IP = 5
+FORM_SUBMIT_WINDOW_SECONDS = 600
+FORM_FP_ATTEMPTS = {}
+MAX_FORM_SUBMITS_PER_FP = 4
+FORM_FP_WINDOW_SECONDS = 3600
+LOOKUP_ATTEMPTS = {}
+LOOKUP_LOCK = Lock()
+MAX_LOOKUPS_PER_IP = 30
+LOOKUP_WINDOW_SECONDS = 300
+MAX_NOTES_CHARS = 200
+MAX_REQUEST_FUTURE_DAYS = 45
+MAX_REQUEST_PAST_DAYS = 14
+MIN_FORM_FILL_SECONDS = 2
+DATE_SPAN_LIMITS = {
+    "work_remotely": 5,
+    "business_mission": 7,
+    "sick_leave": 14,
+    "unpaid_leave": 14,
+    "annual_vacation": 30,
+    "sickness_vacation": 30,
+    "personal_excuse": 1,
+}
 FORM_META_CACHE = {"at": 0, "directory": [], "holidays": {}}
 FORM_META_SECONDS = 60
 SHEET_SYNC_LOCK = Lock()
@@ -309,7 +333,9 @@ def get_csrf_token() -> str:
 
 
 def csrf_is_valid() -> bool:
-    sent = request.form.get("csrf_token", "")
+    sent = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+    if not sent and request.is_json:
+        sent = str((request.get_json(silent=True) or {}).get("csrf_token") or "")
     expected = session.get("csrf_token", "")
     return bool(sent) and bool(expected) and hmac.compare_digest(sent, expected)
 
@@ -453,29 +479,124 @@ def sales_department_values() -> list:
     ]
 
 
+def track_is_limited(ip: str) -> bool:
+    return _rate_limited(
+        TRACK_ATTEMPTS,
+        TRACK_LOCK,
+        ip or "unknown",
+        MAX_TRACK_ATTEMPTS,
+        TRACK_WINDOW_SECONDS,
+    )
+
+
+def _rate_limited(store: dict, lock: Lock, key: str, max_count: int, window_seconds: int) -> bool:
+    if not key:
+        return True
+    now = time.time()
+    with lock:
+        record = store.get(key)
+        if not record or now - record["start"] > window_seconds:
+            store[key] = {"count": 1, "start": now}
+            return False
+        record["count"] += 1
+        return record["count"] > max_count
+
+
+def form_submit_is_limited(ip: str) -> bool:
+    return _rate_limited(
+        FORM_SUBMIT_ATTEMPTS,
+        FORM_SUBMIT_LOCK,
+        ip or "unknown",
+        MAX_FORM_SUBMITS_PER_IP,
+        FORM_SUBMIT_WINDOW_SECONDS,
+    )
+
+
+def form_fingerprint_is_limited(fingerprint: str) -> bool:
+    return _rate_limited(
+        FORM_FP_ATTEMPTS,
+        FORM_SUBMIT_LOCK,
+        normalize_fingerprint(fingerprint),
+        MAX_FORM_SUBMITS_PER_FP,
+        FORM_FP_WINDOW_SECONDS,
+    )
+
+
+def lookup_is_limited(ip: str) -> bool:
+    return _rate_limited(
+        LOOKUP_ATTEMPTS,
+        LOOKUP_LOCK,
+        ip or "unknown",
+        MAX_LOOKUPS_PER_IP,
+        LOOKUP_WINDOW_SECONDS,
+    )
+
+
+def mark_form_opened() -> None:
+    session["form_opened_at"] = time.time()
+
+
+def form_opened_too_fast() -> bool:
+    opened = session.get("form_opened_at")
+    if not opened:
+        return True
+    try:
+        elapsed = time.time() - float(opened)
+    except (TypeError, ValueError):
+        return True
+    return elapsed < MIN_FORM_FILL_SECONDS
+
+
+def request_span_days(start_date: str, end_date: str) -> int | None:
+    try:
+        begin = datetime.strptime(start_date, "%Y-%m-%d")
+        finish = datetime.strptime(end_date or start_date, "%Y-%m-%d")
+    except ValueError:
+        return None
+    return (finish - begin).days + 1
+
+
+def employees_for_fingerprint_lookup(fingerprint: str) -> list:
+    fp = user_store.normalize_fingerprint_id(fingerprint)
+    if not fp:
+        return []
+    labels_to_value = {
+        item["label"].strip().lower(): item["value"]
+        for item in all_departments(active_only=True)
+    }
+    rows = []
+    for employee in user_store.list_employees():
+        if not employee.get("active", True):
+            continue
+        if user_store.normalize_fingerprint_id(employee.get("fingerprint")) != fp:
+            continue
+        department_value = labels_to_value.get((employee.get("department") or "").strip().lower(), "")
+        if not department_value:
+            continue
+        rows.append({
+            "fingerprint": employee["fingerprint"],
+            "name": employee["name"],
+            "department": department_value,
+            "team": employee.get("team") or "",
+            "device": employee.get("device") or "",
+        })
+    return rows
+
+
 def index_context(form) -> dict:
+    mark_form_opened()
     return {
         "leave_groups": LEAVE_GROUPS,
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
-        "employee_directory": form_employee_directory(),
         "official_holidays": official_holidays_for_form(),
         "sales_department_values": sales_department_values(),
         "sales_blocked_request_types": sorted(SALES_BLOCKED_REQUEST_TYPES),
+        "max_notes_chars": MAX_NOTES_CHARS,
+        "date_span_limits": DATE_SPAN_LIMITS,
         "form": form,
         **today_values(),
     }
-
-
-def track_is_limited(ip: str) -> bool:
-    now = time.time()
-    with TRACK_LOCK:
-        record = TRACK_ATTEMPTS.get(ip)
-        if not record or now - record["start"] > TRACK_WINDOW_SECONDS:
-            TRACK_ATTEMPTS[ip] = {"count": 1, "start": now}
-            return False
-        record["count"] += 1
-        return record["count"] > MAX_TRACK_ATTEMPTS
 
 
 @app.context_processor
@@ -944,6 +1065,18 @@ def index():
             flash("The form expired. Please refresh and try again.", "error")
             return render_template("index.html", **index_context(request.form))
 
+        if (request.form.get("fax_number") or "").strip():
+            flash("Could not submit the request. Please try again.", "error")
+            return render_template("index.html", **index_context({}))
+
+        if form_opened_too_fast():
+            flash("Please take a moment to complete the form, then submit again.", "error")
+            return render_template("index.html", **index_context(request.form))
+
+        if form_submit_is_limited(client_ip()):
+            flash("Too many requests from this connection. Please wait a few minutes and try again.", "error")
+            return render_template("index.html", **index_context(request.form))
+
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
         name = request.form.get("name", "").strip()
         department = request.form.get("department", "").strip()
@@ -957,6 +1090,8 @@ def index():
         start_date = request.form.get("start_date", "").strip()
         end_date = request.form.get("end_date", "").strip()
         notes = request.form.get("notes", "").strip()
+        if len(notes) > MAX_NOTES_CHARS:
+            notes = notes[:MAX_NOTES_CHARS]
 
         errors = []
         if not fingerprint_id:
@@ -1035,6 +1170,31 @@ def index():
                 errors.append("To date is required")
         if start_date and end_date and start_date > end_date:
             errors.append("From date cannot be after To date")
+        if start_date:
+            today = datetime.now().date()
+            try:
+                begin = datetime.strptime(start_date, "%Y-%m-%d").date()
+                finish = datetime.strptime(end_date or start_date, "%Y-%m-%d").date()
+            except ValueError:
+                begin = None
+                finish = None
+                errors.append("Please choose valid dates")
+            if begin is not None:
+                if (begin - today).days > MAX_REQUEST_FUTURE_DAYS:
+                    errors.append(
+                        f"Start date cannot be more than {MAX_REQUEST_FUTURE_DAYS} days in the future."
+                    )
+                if request_type not in PUNCH_TYPES and (today - begin).days > MAX_REQUEST_PAST_DAYS:
+                    errors.append(
+                        f"Start date cannot be more than {MAX_REQUEST_PAST_DAYS} days in the past."
+                    )
+                if finish is not None:
+                    span = (finish - begin).days + 1
+                    max_span = DATE_SPAN_LIMITS.get(request_type)
+                    if max_span and span > max_span:
+                        errors.append(
+                            f"This request type cannot exceed {max_span} day(s). Shorten the date range."
+                        )
         if request_type in PUNCH_TYPES:
             today = datetime.now().strftime("%Y-%m-%d")
             if start_date and start_date > today:
@@ -1109,6 +1269,10 @@ def index():
                 flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
             return render_template("index.html", **index_context(request.form))
 
+        if form_fingerprint_is_limited(fingerprint_id):
+            flash("Too many requests for this fingerprint. Please wait and try again later.", "error")
+            return render_template("index.html", **index_context(request.form))
+
         try:
             user_store.create_form_request(row)
         except Exception as exc:
@@ -1120,6 +1284,21 @@ def index():
         return redirect(url_for("success"))
 
     return render_template("index.html", **index_context({}))
+
+
+@app.route("/api/employee-lookup", methods=["POST"])
+def employee_lookup():
+    if not csrf_is_valid():
+        return jsonify({"ok": False, "error": "expired", "employees": []}), 403
+    if lookup_is_limited(client_ip()):
+        return jsonify({"ok": False, "error": "rate_limited", "employees": []}), 429
+    payload = request.get_json(silent=True) or {}
+    fingerprint_id = str(
+        payload.get("fingerprint_id") or request.form.get("fingerprint_id") or ""
+    ).strip()
+    if not fingerprint_id.isdigit():
+        return jsonify({"ok": True, "employees": []})
+    return jsonify({"ok": True, "employees": employees_for_fingerprint_lookup(fingerprint_id)})
 
 
 @app.route("/success")
@@ -1142,7 +1321,6 @@ def track():
     track_context = {
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
-        "employee_directory": form_employee_directory(),
         "statuses": ["Pending", "Approved", "Rejected", "All"],
     }
 

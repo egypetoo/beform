@@ -177,9 +177,37 @@
         const deviceCard = document.getElementById('device-card');
         const form = document.getElementById('track-form');
         const teamsByDepartment = {{ teams_by_department | tojson }};
-        const employeeDirectory = {{ employee_directory | tojson }};
+        let employeeDirectory = [];
+        const csrfToken = {{ csrf_token | tojson }};
         const selectedTeam = {{ (track_team or '') | tojson }};
         const selectedDevice = {{ (track_device or '') | tojson }};
+        let lookupTimer = null;
+        let lookupSeq = 0;
+
+        async function loadEmployeesForFingerprint(fp) {
+            const seq = ++lookupSeq;
+            if (!fp) {
+                employeeDirectory = [];
+                return [];
+            }
+            try {
+                const response = await fetch({{ url_for('employee_lookup') | tojson }}, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken,
+                    },
+                    body: JSON.stringify({ csrf_token: csrfToken, fingerprint_id: fp }),
+                });
+                const data = await response.json();
+                if (seq !== lookupSeq) return employeeDirectory;
+                employeeDirectory = (data && data.employees) ? data.employees : [];
+            } catch (err) {
+                if (seq !== lookupSeq) return employeeDirectory;
+                employeeDirectory = [];
+            }
+            return employeeDirectory;
+        }
 
         function employeesForFingerprint(fp) {
             return employeeDirectory.filter((row) => row.fingerprint === fp);
@@ -362,8 +390,14 @@
             }
         }
 
-        function resolveEmployee(from) {
+        async function resolveEmployee(from) {
             const fp = (fingerprint.value || '').replace(/\D/g, '');
+            if (from === 'fingerprint' || from === 'init') {
+                if (nameHint && fp) {
+                    nameHint.textContent = 'Looking up your fingerprint...';
+                }
+                await loadEmployeesForFingerprint(fp);
+            }
             filterDepartmentOptions(fp);
             if (from !== 'team' && from !== 'device') {
                 fillTeamsForFingerprint();
@@ -376,7 +410,8 @@
 
         fingerprint.addEventListener('input', () => {
             fingerprint.value = fingerprint.value.replace(/\D/g, '');
-            resolveEmployee('fingerprint');
+            clearTimeout(lookupTimer);
+            lookupTimer = setTimeout(() => resolveEmployee('fingerprint'), 280);
         });
         departmentSelect.addEventListener('change', () => resolveEmployee('department'));
         teamSelect.addEventListener('change', () => resolveEmployee('team'));

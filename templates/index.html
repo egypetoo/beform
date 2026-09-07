@@ -33,6 +33,10 @@
 
         <form id="hr-form" class="form-shell" method="post" novalidate>
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <section class="field hp-field" aria-hidden="true">
+                <label for="fax_number">Fax</label>
+                <input id="fax_number" name="fax_number" type="text" tabindex="-1" autocomplete="off">
+            </section>
             <section class="field">
                 <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
                 <input id="fingerprint_id" name="fingerprint_id" type="text" required
@@ -143,7 +147,8 @@
 
             <section class="field">
                 <label for="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="3" placeholder="Optional">{{ form.get('notes', '') }}</textarea>
+                <textarea id="notes" name="notes" rows="3" maxlength="{{ max_notes_chars }}"
+                          placeholder="Optional">{{ form.get('notes', '') }}</textarea>
             </section>
 
             <button type="submit" id="submit-btn">Submit Request</button>
@@ -244,7 +249,8 @@
         const fingerprint = document.getElementById('fingerprint_id');
         fingerprint.addEventListener('input', () => {
             fingerprint.value = fingerprint.value.replace(/\D/g, '');
-            resolveEmployee('fingerprint');
+            clearTimeout(lookupTimer);
+            lookupTimer = setTimeout(() => resolveEmployee('fingerprint'), 280);
         });
         const nameInput = document.getElementById('name');
         const nameHint = document.getElementById('name-hint');
@@ -257,13 +263,42 @@
         const deviceSelect = document.getElementById('device');
         const deviceCard = document.getElementById('device-card');
         const teamsByDepartment = {{ teams_by_department | tojson }};
-        const employeeDirectory = {{ employee_directory | tojson }};
+        let employeeDirectory = [];
         const officialHolidays = {{ official_holidays | tojson }};
         const salesDepartments = {{ sales_department_values | tojson }};
         const salesBlockedTypes = {{ sales_blocked_request_types | tojson }};
+        const dateSpanLimits = {{ date_span_limits | tojson }};
+        const csrfToken = {{ csrf_token | tojson }};
         const selectedTeam = {{ form.get('team', '') | tojson }};
         const selectedDevice = {{ form.get('device', '') | tojson }};
         let sending = false;
+        let lookupTimer = null;
+        let lookupSeq = 0;
+
+        async function loadEmployeesForFingerprint(fp) {
+            const seq = ++lookupSeq;
+            if (!fp) {
+                employeeDirectory = [];
+                return [];
+            }
+            try {
+                const response = await fetch({{ url_for('employee_lookup') | tojson }}, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken,
+                    },
+                    body: JSON.stringify({ csrf_token: csrfToken, fingerprint_id: fp }),
+                });
+                const data = await response.json();
+                if (seq !== lookupSeq) return employeeDirectory;
+                employeeDirectory = (data && data.employees) ? data.employees : [];
+            } catch (err) {
+                if (seq !== lookupSeq) return employeeDirectory;
+                employeeDirectory = [];
+            }
+            return employeeDirectory;
+        }
 
         function employeesForFingerprint(fp) {
             return employeeDirectory.filter((row) => row.fingerprint === fp);
@@ -470,8 +505,14 @@
             }
         }
 
-        function resolveEmployee(from) {
+        async function resolveEmployee(from) {
             const fp = (fingerprint.value || '').replace(/\D/g, '');
+            if (from === 'fingerprint' || from === 'init') {
+                if (nameHint && fp) {
+                    nameHint.textContent = 'Looking up your fingerprint...';
+                }
+                await loadEmployeesForFingerprint(fp);
+            }
             filterDepartmentOptions(fp);
             if (from !== 'team' && from !== 'device') {
                 fillTeamsForFingerprint();
@@ -509,6 +550,19 @@
             }
             if (punchTypes.includes(requestType.value) || requestType.value === saturdayType) {
                 endDate.value = startDate.value;
+            }
+            const maxSpan = dateSpanLimits[requestType.value];
+            if (maxSpan && startDate.value && endDate.value) {
+                const startParts = startDate.value.split('-').map(Number);
+                const endParts = endDate.value.split('-').map(Number);
+                const startMs = Date.UTC(startParts[0], startParts[1] - 1, startParts[2]);
+                const endMs = Date.UTC(endParts[0], endParts[1] - 1, endParts[2]);
+                const days = Math.floor((endMs - startMs) / 86400000) + 1;
+                if (days > maxSpan) {
+                    event.preventDefault();
+                    alert('This request type cannot exceed ' + maxSpan + ' day(s). Shorten the date range.');
+                    return;
+                }
             }
             if (requestType.value === saturdayType) {
                 const day = weekday(startDate.value);
