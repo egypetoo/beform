@@ -83,7 +83,7 @@ MAX_REQUEST_FUTURE_DAYS = 45
 MAX_REQUEST_PAST_DAYS = 14
 MIN_FORM_FILL_SECONDS = 2
 SHEET_SCRIPT_VERSION = "beform-2026-09-08"
-TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/siteverify"
+TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 DATE_SPAN_LIMITS = {
     "work_remotely": 5,
     "business_mission": 7,
