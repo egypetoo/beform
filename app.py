@@ -634,13 +634,14 @@ def sheet_api(payload: dict) -> dict:
     if not payload["secret"]:
         raise RuntimeError("Sheet secret is not configured")
 
-    response = SHEET_SESSION.post(webhook, json=payload, timeout=(5, 15))
+    response = SHEET_SESSION.post(webhook, json=payload, timeout=(8, 45))
     response.raise_for_status()
     try:
         data = json.loads(response.text or "{}")
     except json.JSONDecodeError as exc:
         raise RuntimeError("Invalid sheet response") from exc
-    if not data.get("ok"):
+    # Some older deployments return {"ok": true} without extra fields.
+    if "ok" in data and not data.get("ok"):
         raise RuntimeError(data.get("error") or "Google Sheet did not confirm the save")
     return data
 
@@ -953,7 +954,7 @@ def list_requests(department: str) -> list:
     return merged
 
 
-def set_request_status(items: list, status: str, reviewed_by: str, reason: str = "") -> None:
+def set_request_status(items: list, status: str, reviewed_by: str, reason: str = "") -> dict:
     local_by_id = user_store.get_form_requests_by_ids(
         [item.get("request_id") for item in items]
     )
@@ -965,18 +966,26 @@ def set_request_status(items: list, status: str, reviewed_by: str, reason: str =
         if local and local.get("sync_status") != "synced":
             continue
         google_items.append(item)
+    sheet_ok = True
+    sheet_error = ""
     if google_items:
-        sheet_api(
-            {
-                "action": "set_status",
-                "items": google_items,
-                "status": status,
-                "reviewed_by": reviewed_by,
-                "reason": reason,
-            }
-        )
+        try:
+            sheet_api(
+                {
+                    "action": "set_status",
+                    "items": google_items,
+                    "status": status,
+                    "reviewed_by": reviewed_by,
+                    "reason": reason,
+                }
+            )
+        except Exception as exc:
+            sheet_ok = False
+            sheet_error = str(exc)
+            (BASE_DIR / "sheet_error.log").write_text(sheet_error, encoding="utf-8")
     ROWS_CACHE.clear()
     TRACK_CACHE.clear()
+    return {"sheet_ok": sheet_ok, "sheet_error": sheet_error, "count": len(items)}
 
 
 def normalize_fingerprint(value) -> str:
@@ -1707,8 +1716,13 @@ def update_status():
         return redirect(url_for("dashboard", **dashboard_redirect_args()))
 
     try:
-        set_request_status(authorized, status, manager["name"], reason)
+        result = set_request_status(authorized, status, manager["name"], reason)
         flash(f"{len(authorized)} request(s) {status.lower()} successfully.", "success")
+        if not result.get("sheet_ok", True):
+            flash(
+                "Saved in the system, but Google Sheet did not update. Check the Apps Script deployment / SHEET_SECRET.",
+                "error",
+            )
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
         flash("Could not update the request status.", "error")
