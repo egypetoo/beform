@@ -78,6 +78,7 @@ LOOKUP_ATTEMPTS = {}
 LOOKUP_LOCK = Lock()
 MAX_LOOKUPS_PER_IP = 30
 LOOKUP_WINDOW_SECONDS = 300
+TRACK_LIMIT = 30
 MAX_NOTES_CHARS = 200
 MAX_REQUEST_FUTURE_DAYS = 45
 MAX_REQUEST_PAST_DAYS = 14
@@ -819,21 +820,10 @@ def save_submission(row: dict) -> dict:
 
 
 def merge_local_requests(sheet_rows: list, department: str = "ALL") -> list:
+    """Build request list for the app. Sheet rows are ignored — DB is source of truth."""
+    del sheet_rows  # kept for call-site compatibility; sheet is display-only
     local_rows = user_store.form_request_sheet_rows(department)
-    seen = {
-        str(row.get("Request ID") or "").strip()
-        for row in local_rows
-        if str(row.get("Request ID") or "").strip()
-    }
-    merged = list(local_rows)
-    for row in sheet_rows:
-        request_id = str(row.get("Request ID") or "").strip()
-        if request_id and request_id in seen:
-            continue
-        merged.append(row)
-        if request_id:
-            seen.add(request_id)
-    merged = [row for row in merged if not is_spam_request_row(row)]
+    merged = [row for row in local_rows if not is_spam_request_row(row)]
     merged.sort(key=row_submitted_key, reverse=True)
     return merged
 
@@ -883,20 +873,10 @@ def purge_spam_form_requests() -> int:
 
 
 def merge_local_lookup(sheet_rows: list, fingerprint: str, name: str = "") -> list:
+    """Track/lookup from DB only. Sheet is display-only."""
+    del sheet_rows
     local_rows = user_store.lookup_form_request_sheet_rows(fingerprint, name)
-    seen = {
-        str(row.get("Request ID") or "").strip()
-        for row in local_rows
-        if str(row.get("Request ID") or "").strip()
-    }
-    merged = list(local_rows)
-    for row in sheet_rows:
-        request_id = str(row.get("Request ID") or "").strip()
-        if request_id and request_id in seen:
-            continue
-        merged.append(row)
-        if request_id:
-            seen.add(request_id)
+    merged = [row for row in local_rows if not is_spam_request_row(row)]
     merged.sort(key=row_submitted_key, reverse=True)
     return merged[:TRACK_LIMIT]
 
@@ -1015,20 +995,8 @@ def check_create_conflicts(data: dict, existing_rows: list) -> dict:
 
 
 def conflict_source_rows(fingerprint: str) -> list:
-    rows = user_store.form_requests_as_sheet_rows(fingerprint)
-    seen = {str(row.get("Request ID") or "").strip() for row in rows}
-    wanted = normalize_fingerprint(fingerprint)
-    for cached in ROWS_CACHE.values():
-        for row in cached.get("rows") or []:
-            request_id = str(row.get("Request ID") or "").strip()
-            if request_id and request_id in seen:
-                continue
-            if normalize_fingerprint(row.get("Fingerprint Number")) != wanted:
-                continue
-            rows.append(row)
-            if request_id:
-                seen.add(request_id)
-    return rows
+    # Database only — Google Sheet is a display mirror, not a conflict source.
+    return user_store.form_requests_as_sheet_rows(fingerprint)
 
 
 def sync_one_form_request(row: dict) -> dict:
@@ -1134,25 +1102,9 @@ def claim_submission(key: str) -> bool:
 
 
 def list_requests(department: str) -> list:
+    """Dashboard / closing list from the database only. Sheet is write/display only."""
     schedule_sheet_sync()
-    now = time.time()
-    cached = ROWS_CACHE.get(department)
-    sheet_rows = []
-    error = None
-    if cached and now - cached["at"] < CACHE_SECONDS:
-        sheet_rows = cached["rows"]
-    else:
-        try:
-            data = sheet_api({"action": "list", "department": department})
-            sheet_rows = data.get("rows", [])
-            ROWS_CACHE[department] = {"at": now, "rows": sheet_rows}
-        except Exception as exc:
-            error = exc
-            sheet_rows = cached["rows"] if cached else []
-    merged = merge_local_requests(sheet_rows, department)
-    if error and not merged:
-        raise error
-    return merged
+    return merge_local_requests([], department)
 
 
 def set_request_status(items: list, status: str, reviewed_by: str, reason: str = "") -> dict:
@@ -1196,52 +1148,21 @@ def normalize_fingerprint(value) -> str:
     return text
 
 
-TRACK_LIMIT = 30
-
-
 def row_submitted_key(row: dict) -> str:
     return str(row.get("Submitted At") or row.get("From Date") or "")
 
 
 def lookup_by_fingerprint(fingerprint: str, name: str = "") -> list:
+    """Track lookup from the database only. Sheet is write/display only."""
     schedule_sheet_sync()
     now = time.time()
     cache_key = f"{normalize_fingerprint(fingerprint)}|{user_store.normalize_person_name(name)}"
     cached = TRACK_CACHE.get(cache_key)
-    sheet_rows = []
-
     if cached and now - cached["at"] < TRACK_CACHE_SECONDS:
-        sheet_rows = list(cached["rows"])
-    else:
-        source_rows = []
-        try:
-            data = sheet_api({
-                "action": "lookup",
-                "fingerprint_id": fingerprint,
-                "name": name,
-                "limit": TRACK_LIMIT,
-            })
-            source_rows = data.get("rows", [])
-        except Exception:
-            try:
-                data = sheet_api({"action": "list", "department": "ALL"})
-                source_rows = data.get("rows", [])
-            except Exception:
-                source_rows = []
-
-        wanted = normalize_fingerprint(fingerprint)
-        wanted_name = user_store.normalize_person_name(name)
-        for row in source_rows:
-            if normalize_fingerprint(row.get("Fingerprint Number")) != wanted:
-                continue
-            if wanted_name and not user_store.names_match(wanted_name, str(row.get("Name") or "")):
-                continue
-            sheet_rows.append(row)
-        sheet_rows.sort(key=row_submitted_key, reverse=True)
-        sheet_rows = sheet_rows[:TRACK_LIMIT]
-        TRACK_CACHE[cache_key] = {"at": now, "rows": sheet_rows}
-
-    return merge_local_lookup(sheet_rows, fingerprint, name)
+        return list(cached["rows"])
+    rows = merge_local_lookup([], fingerprint, name)
+    TRACK_CACHE[cache_key] = {"at": now, "rows": rows}
+    return list(rows)
 
 
 def login_required(view):
@@ -1766,9 +1687,8 @@ def dashboard():
         rows = filter_visible_rows(manager, rows)
     except Exception as exc:
         (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-        rows = filter_visible_rows(manager, merge_local_requests([], manager["department"]))
-        if not rows:
-            flash("Could not load requests from the HR sheet.", "error")
+        rows = []
+        flash("Could not load requests from the database.", "error")
 
     request_types = sorted({
         str(row.get("Request Type") or "").strip()
@@ -3021,12 +2941,12 @@ def attendance_report():
         if unknown_device:
             flash("Some rows have no device. Name the files with F8, F9, or Maadi, or use the machine export.", "error")
         try:
-            requests_rows = list_requests("ALL")
+            # Closing uses database requests only — Google Sheet is a display mirror.
+            requests_rows = merge_local_requests([], "ALL")
         except Exception as exc:
             (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-            requests_rows = merge_local_requests([], "ALL")
-            if not requests_rows:
-                flash("Could not load form requests from the HR sheet.", "error")
+            flash("Could not load form requests from the database.", "error")
+            return redirect(url_for("attendance_report"))
         report = attendance.build_report(
             punches,
             requests_rows,
