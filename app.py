@@ -644,6 +644,12 @@ def sheet_api(payload: dict) -> dict:
     if "ok" in data and not data.get("ok"):
         raise RuntimeError(data.get("error") or "Google Sheet did not confirm the save")
     action = str(payload.get("action") or "create").strip() or "create"
+    if action == "ping":
+        if not data.get("ping") or data.get("version") != "beform-2026-09-07":
+            raise RuntimeError(
+                "Google Apps Script is outdated. Paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version → Deploy."
+            )
+        return data
     if action == "list" and "rows" not in data:
         raise RuntimeError(
             "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version."

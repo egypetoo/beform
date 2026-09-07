@@ -7,6 +7,15 @@ function doPost(e) {
   }
   const action = data.action || "create";
 
+  if (action === "ping") {
+    return jsonResponse({
+      ok: true,
+      ping: true,
+      version: "beform-2026-09-07",
+      actions: ["ping", "list", "lookup", "create", "set_status", "delete_by_notes", "delete_requests"],
+    });
+  }
+
   if (action === "list") {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheetName = !data.department || data.department === "ALL" ? "All" : data.department;
