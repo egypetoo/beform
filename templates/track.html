@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BE GROUP | Track Request</title>
     {% include "_pwa_head.html" %}
+    {% include "_turnstile_head.html" %}
 </head>
 <body>
     <div class="glow"></div>
@@ -69,6 +70,7 @@
                        value="{{ track_name }}" placeholder="Name appears after fingerprint and department">
                 <p class="field-hint" id="name-hint">Enter fingerprint and department first. Your name will appear automatically.</p>
             </section>
+            {% include "_turnstile_widget.html" %}
             <button type="submit" id="submit-btn">Check status</button>
 
             {% if rows is not none %}
@@ -418,11 +420,16 @@
         deviceSelect.addEventListener('change', () => resolveEmployee('device'));
         resolveEmployee('init');
 
-        form.addEventListener('submit', () => {
+        form.addEventListener('submit', (event) => {
             applyMatchedName();
+            if (!window.ensureTurnstileToken()) {
+                event.preventDefault();
+                return;
+            }
             nameInput.readOnly = false;
         });
     </script>
+    {% include "_turnstile_js.html" %}
     {% include "_pwa_foot.html" %}
 </body>
 </html>

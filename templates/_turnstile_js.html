@@ -1,0 +1,32 @@
+<script>
+(function () {
+    window.turnstileToken = window.turnstileToken || '';
+    window.onTurnstileSuccess = function (token) {
+        window.turnstileToken = token || '';
+        const field = document.getElementById('turnstile_token');
+        if (field) field.value = window.turnstileToken;
+    };
+    window.onTurnstileExpired = function () {
+        window.turnstileToken = '';
+        const field = document.getElementById('turnstile_token');
+        if (field) field.value = '';
+    };
+    window.ensureTurnstileToken = function () {
+        const field = document.getElementById('turnstile_token');
+        if (!field) return true;
+        const widgetInput = document.querySelector(
+            '#cf-turnstile textarea[name="cf-turnstile-response"], #cf-turnstile input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]'
+        );
+        const token = (window.turnstileToken || field.value || (widgetInput && widgetInput.value) || '').trim();
+        if (!token) {
+            alert('Please wait for the security check (Success), then continue.');
+            if (window.turnstile && document.getElementById('cf-turnstile')) {
+                try { window.turnstile.reset('#cf-turnstile'); } catch (e) {}
+            }
+            return false;
+        }
+        field.value = token;
+        return true;
+    };
+})();
+</script>

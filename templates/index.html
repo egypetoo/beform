@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BE GROUP | HR Request Form</title>
     {% include "_pwa_head.html" %}
-    {% if turnstile_site_key %}
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-    {% endif %}
+    {% include "_turnstile_head.html" %}
 </head>
 <body>
     <div class="glow"></div>
@@ -150,18 +148,9 @@
                           placeholder="Optional">{{ form.get('notes', '') }}</textarea>
             </section>
 
-            {% if turnstile_site_key %}
-            <section class="field turnstile-wrap">
-                <div class="cf-turnstile"
-                     id="cf-turnstile"
-                     data-sitekey="{{ turnstile_site_key }}"
-                     data-theme="dark"
-                     data-callback="onTurnstileSuccess"
-                     data-expired-callback="onTurnstileExpired"
-                     data-error-callback="onTurnstileExpired"></div>
-                <input type="hidden" name="turnstile_token" id="turnstile_token" value="">
-            </section>
-            {% endif %}
+            {% with turnstile_always=true %}
+            {% include "_turnstile_widget.html" %}
+            {% endwith %}
 
             <button type="submit" id="submit-btn">Submit Request</button>
             <a class="excel-link" href="{{ url_for('track') }}">Track your request</a>
@@ -286,18 +275,6 @@
         let sending = false;
         let lookupTimer = null;
         let lookupSeq = 0;
-        let turnstileToken = '';
-
-        window.onTurnstileSuccess = function (token) {
-            turnstileToken = token || '';
-            const field = document.getElementById('turnstile_token');
-            if (field) field.value = turnstileToken;
-        };
-        window.onTurnstileExpired = function () {
-            turnstileToken = '';
-            const field = document.getElementById('turnstile_token');
-            if (field) field.value = '';
-        };
 
         async function loadEmployeesForFingerprint(fp) {
             const seq = ++lookupSeq;
@@ -624,19 +601,9 @@
                     return;
                 }
             }
-            const turnstileField = document.getElementById('turnstile_token');
-            if (turnstileField) {
-                const widgetInput = document.querySelector('#cf-turnstile textarea[name="cf-turnstile-response"], #cf-turnstile input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]');
-                const token = (turnstileToken || turnstileField.value || (widgetInput && widgetInput.value) || '').trim();
-                if (!token) {
-                    event.preventDefault();
-                    alert('Please wait for the security check (Success), then submit.');
-                    if (window.turnstile && document.getElementById('cf-turnstile')) {
-                        try { window.turnstile.reset('#cf-turnstile'); } catch (e) {}
-                    }
-                    return;
-                }
-                turnstileField.value = token;
+            if (!window.ensureTurnstileToken()) {
+                event.preventDefault();
+                return;
             }
             nameInput.readOnly = false;
             sending = true;
@@ -644,6 +611,7 @@
             submitBtn.textContent = 'Sending...';
         });
     </script>
+    {% include "_turnstile_js.html" %}
     {% include "_pwa_foot.html" %}
 </body>
 </html>

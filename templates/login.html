@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BE GROUP | Manager Login</title>
     {% include "_pwa_head.html" %}
+    {% include "_turnstile_head.html" %}
 </head>
 <body>
     <div class="glow"></div>
@@ -26,7 +27,7 @@
             {% endif %}
         {% endwith %}
 
-        <form class="form-shell" method="post">
+        <form class="form-shell" method="post" id="login-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <section class="field">
                 <label for="username">Username</label>
@@ -37,9 +38,21 @@
                 <label for="password">Password</label>
                 <input id="password" name="password" type="password" required placeholder="Enter password">
             </section>
+            {% with turnstile_always=true %}
+            {% include "_turnstile_widget.html" %}
+            {% endwith %}
             <button type="submit">Sign in</button>
         </form>
     </main>
+    {% include "_turnstile_js.html" %}
+    <script>
+        const loginForm = document.getElementById('login-form');
+        if (loginForm) {
+            loginForm.addEventListener('submit', (event) => {
+                if (!window.ensureTurnstileToken()) event.preventDefault();
+            });
+        }
+    </script>
     {% include "_pwa_foot.html" %}
 </body>
 </html>

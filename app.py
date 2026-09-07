@@ -84,6 +84,7 @@ MAX_REQUEST_PAST_DAYS = 14
 MIN_FORM_FILL_SECONDS = 2
 SHEET_SCRIPT_VERSION = "beform-2026-09-08"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+TURNSTILE_PASS_SECONDS = 20 * 60
 DATE_SPAN_LIMITS = {
     "work_remotely": 5,
     "business_mission": 7,
@@ -625,6 +626,36 @@ def turnstile_failure_message(reason: str) -> str:
     return f"Security check failed ({reason or 'unknown'}). Refresh, wait for Success, then submit once."
 
 
+def turnstile_session_ok() -> bool:
+    if not turnstile_is_configured():
+        return True
+    at = session.get("turnstile_ok_at")
+    if not at:
+        return False
+    try:
+        return (time.time() - float(at)) < TURNSTILE_PASS_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
+def mark_turnstile_ok() -> None:
+    session["turnstile_ok_at"] = time.time()
+
+
+def enforce_turnstile(*, allow_session: bool = False) -> bool:
+    """Return True when the request must be blocked."""
+    if not turnstile_is_configured():
+        return False
+    if allow_session and turnstile_session_ok():
+        return False
+    ok, reason = turnstile_is_valid()
+    if ok:
+        mark_turnstile_ok()
+        return False
+    flash(turnstile_failure_message(reason), "error")
+    return True
+
+
 def lookup_is_limited(ip: str) -> bool:
     return _rate_limited(
         LOOKUP_ATTEMPTS,
@@ -697,7 +728,6 @@ def index_context(form) -> dict:
         "sales_blocked_request_types": sorted(SALES_BLOCKED_REQUEST_TYPES),
         "max_notes_chars": MAX_NOTES_CHARS,
         "date_span_limits": DATE_SPAN_LIMITS,
-        "turnstile_site_key": turnstile_site_key() if turnstile_is_configured() else "",
         "form": form,
         **today_values(),
     }
@@ -710,10 +740,13 @@ def inject_security():
         payroll_adjustments_url = url_for("payroll_adjustments_admin")
     except Exception:
         payroll_adjustments_url = "/payroll-adjustments"
+    configured = turnstile_is_configured()
     return {
         "csrf_token": get_csrf_token(),
         "is_hr": bool(manager and is_hr(manager)),
         "payroll_adjustments_url": payroll_adjustments_url,
+        "turnstile_site_key": turnstile_site_key() if configured else "",
+        "turnstile_session_ok": turnstile_session_ok() if configured else True,
     }
 
 
@@ -1265,9 +1298,7 @@ def index():
             flash("Please take a moment to fill the form, then try again.", "error")
             return render_template("index.html", **index_context(request.form))
 
-        ok_turnstile, turnstile_reason = turnstile_is_valid()
-        if not ok_turnstile:
-            flash(turnstile_failure_message(turnstile_reason), "error")
+        if enforce_turnstile(allow_session=False):
             return render_template("index.html", **index_context(request.form))
 
         if form_submit_is_limited(client_ip()):
@@ -1547,6 +1578,22 @@ def track():
                 **track_context,
             )
 
+        if enforce_turnstile(allow_session=True):
+            return render_template(
+                "track.html",
+                rows=None,
+                fingerprint_id=request.form.get("fingerprint_id", "").strip(),
+                track_name=request.form.get("name", "").strip(),
+                track_department=request.form.get("department", "").strip(),
+                track_team=request.form.get("team", "").strip(),
+                track_device=request.form.get("device", "").strip(),
+                status_filter=request.form.get("status", "All").strip() or "All",
+                type_filter=request.form.get("type", "").strip(),
+                request_types=[],
+                leave_balance=None,
+                **track_context,
+            )
+
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
         track_name = request.form.get("name", "").strip()
         track_department = request.form.get("department", "").strip()
@@ -1650,6 +1697,9 @@ def login():
     if request.method == "POST":
         if not csrf_is_valid():
             flash("The form expired. Please refresh and try again.", "error")
+            return render_template("login.html")
+
+        if enforce_turnstile(allow_session=False):
             return render_template("login.html")
 
         ip = client_ip()

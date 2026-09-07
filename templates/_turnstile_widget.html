@@ -1,0 +1,13 @@
+{% set _force = turnstile_always|default(false) %}
+{% if turnstile_site_key and (_force or not turnstile_session_ok) %}
+<section class="field turnstile-wrap">
+    <div class="cf-turnstile"
+         id="cf-turnstile"
+         data-sitekey="{{ turnstile_site_key }}"
+         data-theme="dark"
+         data-callback="onTurnstileSuccess"
+         data-expired-callback="onTurnstileExpired"
+         data-error-callback="onTurnstileExpired"></div>
+    <input type="hidden" name="turnstile_token" id="turnstile_token" value="">
+</section>
+{% endif %}
