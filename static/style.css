@@ -21,6 +21,15 @@
     pointer-events: none !important;
 }
 
+* {
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    overflow-x: hidden;
+}
+
 body {
     margin: 0;
     min-height: 100vh;
@@ -41,11 +50,13 @@ body {
 
 .page {
     position: relative;
+    width: 100%;
     max-width: 720px;
     margin: 0 auto;
-    padding: 36px 20px 64px;
+    padding: 36px max(24px, env(safe-area-inset-right)) 64px max(24px, env(safe-area-inset-left));
     min-width: 0;
     overflow-x: hidden;
+    box-sizing: border-box;
 }
 
 .hero,
@@ -55,6 +66,8 @@ body {
     border: 1px solid var(--border);
     border-radius: 24px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .hero {
@@ -292,12 +305,12 @@ button:disabled {
 
 @media (max-width: 900px) {
     .page {
-        padding: 20px 18px 48px;
+        padding: 20px max(22px, env(safe-area-inset-right)) 48px max(22px, env(safe-area-inset-left));
     }
 
     .page-wide {
-        padding-left: 16px;
-        padding-right: 16px;
+        padding-left: max(18px, env(safe-area-inset-left));
+        padding-right: max(18px, env(safe-area-inset-right));
     }
 
     h1 {
@@ -314,6 +327,8 @@ button:disabled {
     .errors {
         border-radius: 18px;
         padding: 22px 20px;
+        width: 100%;
+        max-width: 100%;
     }
 
     .hero {
@@ -329,6 +344,7 @@ button:disabled {
     select,
     textarea {
         padding: 14px 16px;
+        max-width: 100%;
     }
 
     .filter-bar,
@@ -465,7 +481,7 @@ button:disabled {
 
 @media (max-width: 640px) {
     .page {
-        padding: 16px 16px 40px;
+        padding: 16px max(20px, env(safe-area-inset-right)) 40px max(20px, env(safe-area-inset-left));
     }
 
     .hero,
