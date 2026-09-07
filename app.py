@@ -643,6 +643,15 @@ def sheet_api(payload: dict) -> dict:
     # Some older deployments return {"ok": true} without extra fields.
     if "ok" in data and not data.get("ok"):
         raise RuntimeError(data.get("error") or "Google Sheet did not confirm the save")
+    action = str(payload.get("action") or "create").strip() or "create"
+    if action == "list" and "rows" not in data:
+        raise RuntimeError(
+            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version."
+        )
+    if action == "create" and "duplicate" not in data and not data.get("conflict") and not data.get("saturday_month"):
+        raise RuntimeError(
+            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version."
+        )
     return data
 
 
@@ -1623,6 +1632,31 @@ def dashboard():
         request_types=request_types,
         statuses=["Pending", "Approved", "Rejected", "All"],
     )
+
+
+@app.route("/dashboard/resync-sheet", methods=["POST"])
+@hr_required
+def resync_sheet_requests():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("dashboard"))
+    try:
+        # Fail fast if Apps Script is still a stub.
+        sheet_api({"action": "list", "department": "ALL"})
+    except Exception as exc:
+        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+        flash(
+            "Google Sheet sync is broken. Redeploy google_sheet_script.gs first (Deploy → Manage deployments → New version), then try again.",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+    queued = user_store.requeue_form_requests_for_sheet_sync(21)
+    Thread(target=sync_pending_form_requests, kwargs={"limit": 40}, daemon=True).start()
+    flash(
+        f"Queued {queued} request(s) to sync to Google Sheet. Keep the site open for a minute while sync runs.",
+        "success",
+    )
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/dashboard/purge-spam", methods=["POST"])

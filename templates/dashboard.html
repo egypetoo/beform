@@ -26,6 +26,11 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="excel-link" style="border:0;background:transparent;cursor:pointer;padding:0;font:inherit;color:inherit;">Purge spam notes</button>
                     </form>
+                    <form method="post" action="{{ url_for('resync_sheet_requests') }}" style="display:inline;"
+                          onsubmit="return confirm('Re-queue recent requests to Google Sheet? Deploy the latest Apps Script first.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="excel-link" style="border:0;background:transparent;cursor:pointer;padding:0;font:inherit;color:inherit;">Resync to Sheet</button>
+                    </form>
                 {% endif %}
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
             </div>

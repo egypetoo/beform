@@ -1474,6 +1474,27 @@ def mark_form_request_synced(request_id: str) -> None:
         conn.close()
 
 
+def requeue_form_requests_for_sheet_sync(days: int = 21) -> int:
+    days = max(1, min(int(days or 21), 90))
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        cursor = conn.execute(
+            """
+            UPDATE form_requests
+            SET sync_status = 'pending', sync_error = '', sync_attempts = 0
+            WHERE sync_status IN ('synced', 'blocked')
+              AND submitted_at >= ?
+            """,
+            (cutoff,),
+        )
+        conn.commit()
+        updated = cursor.rowcount
+        conn.close()
+        return max(0, int(updated or 0))
+
+
 def mark_form_request_blocked(request_id: str, reason: str) -> None:
     init_db()
     with DB_LOCK:
