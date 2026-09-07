@@ -10,17 +10,6 @@
     --input: #1a1a1a;
 }
 
-.hp-field {
-    position: absolute !important;
-    left: -10000px !important;
-    top: auto !important;
-    width: 1px !important;
-    height: 1px !important;
-    overflow: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-}
-
 * {
     box-sizing: border-box;
 }

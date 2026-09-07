@@ -21,15 +21,19 @@
                     <a class="excel-link" href="{{ url_for('employees_admin') }}">Employees</a>
                     <a class="excel-link" href="{{ url_for('holidays_admin') }}">Official holidays</a>
                     <a class="excel-link" href="{{ url_for('attendance_report') }}">Attendance gaps</a>
-                    <form method="post" action="{{ url_for('purge_spam_requests') }}" style="display:inline;"
-                          onsubmit="return confirm('Delete all hacking beeeeee spam requests from the database (and sheet if script is updated)?');">
+                    <form method="post" action="{{ url_for('sheet_health') }}" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <button type="submit" class="excel-link" style="border:0;background:transparent;cursor:pointer;padding:0;font:inherit;color:inherit;">Purge spam notes</button>
+                        <button type="submit" class="excel-link" style="border:0;background:transparent;cursor:pointer;padding:0;font:inherit;color:inherit;">Test Sheet</button>
                     </form>
                     <form method="post" action="{{ url_for('resync_sheet_requests') }}" style="display:inline;"
                           onsubmit="return confirm('Re-queue recent requests to Google Sheet? Deploy the latest Apps Script first.');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="excel-link" style="border:0;background:transparent;cursor:pointer;padding:0;font:inherit;color:inherit;">Resync to Sheet</button>
+                    </form>
+                    <form method="post" action="{{ url_for('purge_spam_requests') }}" style="display:inline;"
+                          onsubmit="return confirm('Delete all hacking beeeeee spam requests from the database (and sheet if script is updated)?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="excel-link" style="border:0;background:transparent;cursor:pointer;padding:0;font:inherit;color:inherit;">Purge spam notes</button>
                     </form>
                 {% endif %}
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>

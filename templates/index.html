@@ -33,10 +33,6 @@
 
         <form id="hr-form" class="form-shell" method="post" novalidate>
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <section class="field hp-field" aria-hidden="true">
-                <label for="fax_number">Fax</label>
-                <input id="fax_number" name="fax_number" type="text" tabindex="-1" autocomplete="off">
-            </section>
             <section class="field">
                 <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
                 <input id="fingerprint_id" name="fingerprint_id" type="text" required

@@ -1108,14 +1108,6 @@ def index():
             flash("The form expired. Please refresh and try again.", "error")
             return render_template("index.html", **index_context(request.form))
 
-        if (request.form.get("fax_number") or "").strip():
-            flash("Could not submit the request. Please try again.", "error")
-            return render_template("index.html", **index_context({}))
-
-        if form_opened_too_fast():
-            flash("Please take a moment to complete the form, then submit again.", "error")
-            return render_template("index.html", **index_context(request.form))
-
         if form_submit_is_limited(client_ip()):
             flash("Too many requests from this connection. Please wait a few minutes and try again.", "error")
             return render_template("index.html", **index_context(request.form))
@@ -1640,21 +1632,84 @@ def dashboard():
     )
 
 
+def check_sheet_bridge() -> dict:
+    result = {
+        "ok": False,
+        "webhook_configured": bool(webhook_url()),
+        "secret_configured": bool(sheet_secret()),
+        "auth_ok": False,
+        "version_ok": False,
+        "list_ok": False,
+        "message": "",
+        "raw": "",
+    }
+    if not result["webhook_configured"]:
+        result["message"] = "GOOGLE_SHEET_WEBHOOK is missing in .env"
+        return result
+    if not result["secret_configured"]:
+        result["message"] = "SHEET_SECRET is missing in .env"
+        return result
+    try:
+        bad = SHEET_SESSION.post(
+            webhook_url(),
+            json={"secret": "__wrong__", "action": "ping"},
+            timeout=(8, 45),
+        )
+        bad_text = (bad.text or "").strip()
+        result["raw"] = bad_text[:180]
+        if "unauthorized" not in bad_text:
+            result["message"] = (
+                "Web App URL is still on an OLD script (wrong secret still returns ok). "
+                "Create a New deployment and put the NEW URL in GOOGLE_SHEET_WEBHOOK."
+            )
+            return result
+        result["auth_ok"] = True
+        ping = sheet_api({"action": "ping"})
+        result["version_ok"] = bool(ping.get("ping") and ping.get("version") == "beform-2026-09-07")
+        if not result["version_ok"]:
+            result["message"] = "Script deployed but version mismatch. Paste google_sheet_MINIMAL.gs and redeploy."
+            return result
+        listing = sheet_api({"action": "list", "department": "ALL"})
+        result["list_ok"] = "rows" in listing
+        result["ok"] = result["auth_ok"] and result["version_ok"] and result["list_ok"]
+        result["message"] = "Google Sheet bridge is healthy." if result["ok"] else "List action did not return rows."
+        result["raw"] = str(ping)[:180]
+    except Exception as exc:
+        result["message"] = str(exc)
+        result["raw"] = str(exc)[:180]
+    return result
+
+
+@app.route("/dashboard/sheet-health", methods=["GET", "POST"])
+@hr_required
+def sheet_health():
+    health = check_sheet_bridge()
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+        elif health.get("ok"):
+            flash("Sheet bridge OK: " + health.get("message", ""), "success")
+        else:
+            flash("Sheet bridge FAIL: " + health.get("message", ""), "error")
+        return redirect(url_for("dashboard"))
+    return {
+        "ok": health.get("ok"),
+        "message": health.get("message"),
+        "auth_ok": health.get("auth_ok"),
+        "version_ok": health.get("version_ok"),
+        "list_ok": health.get("list_ok"),
+    }
+
+
 @app.route("/dashboard/resync-sheet", methods=["POST"])
 @hr_required
 def resync_sheet_requests():
     if not csrf_is_valid():
         flash("The form expired. Please refresh and try again.", "error")
         return redirect(url_for("dashboard"))
-    try:
-        # Fail fast if Apps Script is still a stub.
-        sheet_api({"action": "list", "department": "ALL"})
-    except Exception as exc:
-        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
-        flash(
-            "Google Sheet sync is broken. Redeploy google_sheet_script.gs first (Deploy → Manage deployments → New version), then try again.",
-            "error",
-        )
+    health = check_sheet_bridge()
+    if not health.get("ok"):
+        flash("Sheet bridge FAIL: " + health.get("message", ""), "error")
         return redirect(url_for("dashboard"))
     queued = user_store.requeue_form_requests_for_sheet_sync(21)
     Thread(target=sync_pending_form_requests, kwargs={"limit": 40}, daemon=True).start()
