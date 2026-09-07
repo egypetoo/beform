@@ -1529,6 +1529,22 @@ def update_form_request_statuses(items: list, status: str, reviewed_by: str, rea
         conn.close()
 
 
+def delete_form_requests_by_notes(markers: list) -> int:
+    needles = [str(item or "").strip().lower() for item in markers if str(item or "").strip()]
+    if not needles:
+        return 0
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        clauses = " OR ".join(["lower(notes) LIKE ?" for _ in needles])
+        params = [f"%{item}%" for item in needles]
+        cursor = conn.execute(f"DELETE FROM form_requests WHERE {clauses}", params)
+        conn.commit()
+        deleted = cursor.rowcount
+        conn.close()
+        return max(0, int(deleted or 0))
+
+
 def delete_holiday(holiday_id: int) -> bool:
     init_db()
     with DB_LOCK:

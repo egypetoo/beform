@@ -680,8 +680,27 @@ def merge_local_requests(sheet_rows: list, department: str = "ALL") -> list:
         merged.append(row)
         if request_id:
             seen.add(request_id)
+    merged = [row for row in merged if not is_spam_request_row(row)]
     merged.sort(key=row_submitted_key, reverse=True)
     return merged
+
+
+SPAM_NOTE_MARKERS = (
+    "hacking beeeeee",
+    "haking beeee",
+    "hacking beeee",
+)
+
+
+def is_spam_request_row(row: dict) -> bool:
+    notes = str(row.get("Notes") or row.get("notes") or "").strip().lower()
+    if not notes:
+        return False
+    return any(marker in notes for marker in SPAM_NOTE_MARKERS)
+
+
+def purge_spam_form_requests() -> int:
+    return user_store.delete_form_requests_by_notes(SPAM_NOTE_MARKERS)
 
 
 def merge_local_lookup(sheet_rows: list, fingerprint: str, name: str = "") -> list:
@@ -1092,6 +1111,9 @@ def index():
         notes = request.form.get("notes", "").strip()
         if len(notes) > MAX_NOTES_CHARS:
             notes = notes[:MAX_NOTES_CHARS]
+        if is_spam_request_row({"Notes": notes}):
+            flash("Could not submit the request. Please try again.", "error")
+            return render_template("index.html", **index_context({}))
 
         errors = []
         if not fingerprint_id:
@@ -1592,6 +1614,31 @@ def dashboard():
         request_types=request_types,
         statuses=["Pending", "Approved", "Rejected", "All"],
     )
+
+
+@app.route("/dashboard/purge-spam", methods=["POST"])
+@hr_required
+def purge_spam_requests():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("dashboard"))
+    deleted = purge_spam_form_requests()
+    ROWS_CACHE.clear()
+    TRACK_CACHE.clear()
+    try:
+        sheet_api({
+            "action": "delete_by_notes",
+            "notes_contains": "hacking beeeeee",
+        })
+    except Exception as exc:
+        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+        flash(
+            f"Removed {deleted} local spam request(s). Update Google Apps Script to delete sheet rows, or delete them manually in Sheets (filter Notes).",
+            "error",
+        )
+        return redirect(url_for("dashboard"))
+    flash(f"Removed {deleted} spam request(s) from the database and asked Google Sheet to delete matching rows.", "success")
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/dashboard/status", methods=["POST"])

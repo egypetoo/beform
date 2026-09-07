@@ -528,7 +528,7 @@ function updateSheetStatuses(sheet, requestIds, status, reviewedBy, reason) {
     return;
   }
 
-  const ids = sheet.getRange(2, idCol, sheet.getLastRow() - 1, 1).getValues();
+  const ids = sheet.getRange(2, idCol, sheet.getLastRow(), idCol).getValues();
   const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
   const wanted = {};
   requestIds.forEach(function (id) {
