@@ -43,7 +43,7 @@ body {
     position: relative;
     max-width: 720px;
     margin: 0 auto;
-    padding: 36px 16px 64px;
+    padding: 36px 20px 64px;
     min-width: 0;
     overflow-x: hidden;
 }
@@ -115,7 +115,7 @@ h1 {
 }
 
 .form-shell {
-    padding: 28px 24px;
+    padding: 28px 28px;
 }
 
 .field {
@@ -292,7 +292,12 @@ button:disabled {
 
 @media (max-width: 900px) {
     .page {
-        padding: 18px 12px 40px;
+        padding: 20px 18px 48px;
+    }
+
+    .page-wide {
+        padding-left: 16px;
+        padding-right: 16px;
     }
 
     h1 {
@@ -305,9 +310,25 @@ button:disabled {
     }
 
     .hero,
-    .form-shell {
+    .form-shell,
+    .errors {
         border-radius: 18px;
-        padding: 18px 14px;
+        padding: 22px 20px;
+    }
+
+    .hero {
+        padding: 22px 20px 20px;
+    }
+
+    input[type="text"],
+    input[type="date"],
+    input[type="time"],
+    input[type="password"],
+    input[type="email"],
+    input[type="search"],
+    select,
+    textarea {
+        padding: 14px 16px;
     }
 
     .filter-bar,
@@ -443,6 +464,16 @@ button:disabled {
 }
 
 @media (max-width: 640px) {
+    .page {
+        padding: 16px 16px 40px;
+    }
+
+    .hero,
+    .form-shell,
+    .errors {
+        padding: 20px 18px;
+    }
+
     h1 {
         font-size: 22px;
     }
