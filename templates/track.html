@@ -181,6 +181,7 @@
         const teamsByDepartment = {{ teams_by_department | tojson }};
         let employeeDirectory = [];
         const csrfToken = {{ csrf_token | tojson }};
+        const lookupTicket = {{ lookup_ticket | tojson }};
         const selectedTeam = {{ (track_team or '') | tojson }};
         const selectedDevice = {{ (track_device or '') | tojson }};
         let lookupTimer = null;
@@ -199,7 +200,7 @@
                         'Content-Type': 'application/json',
                         'X-CSRF-Token': csrfToken,
                     },
-                    body: JSON.stringify({ csrf_token: csrfToken, fingerprint_id: fp }),
+                    body: JSON.stringify({ csrf_token: csrfToken, lookup_ticket: lookupTicket, fingerprint_id: fp }),
                 });
                 const data = await response.json();
                 if (seq !== lookupSeq) return employeeDirectory;

@@ -2,3 +2,4 @@ flask
 python-dotenv
 requests
 openpyxl
+Flask-Limiter

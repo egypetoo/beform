@@ -46,6 +46,34 @@ app.config.update(
     MAX_CONTENT_LENGTH=12 * 1024 * 1024,
 )
 
+try:
+    from flask_limiter import Limiter
+except ImportError:  # pragma: no cover
+    Limiter = None
+
+def _limiter_key() -> str:
+    return request.remote_addr or "unknown"
+
+if Limiter is not None:
+    limiter = Limiter(
+        key_func=_limiter_key,
+        app=app,
+        default_limits=[],
+        storage_uri="memory://",
+    )
+else:
+    limiter = None
+
+
+def limit_route(limit_value: str):
+    """Apply Flask-Limiter to POST requests when installed; otherwise no-op."""
+    def decorator(view):
+        if limiter is None:
+            return view
+        return limiter.limit(limit_value, methods=["POST"])(view)
+    return decorator
+
+
 ROWS_CACHE = {}
 CACHE_SECONDS = 60
 TRACK_CACHE = {}
@@ -76,13 +104,21 @@ MAX_FORM_SUBMITS_PER_FP_DAY = 6
 FORM_FP_DAY_WINDOW_SECONDS = 86400
 LOOKUP_ATTEMPTS = {}
 LOOKUP_LOCK = Lock()
-MAX_LOOKUPS_PER_IP = 30
+LOOKUP_FP_ATTEMPTS = {}
+MAX_LOOKUPS_PER_IP = 12
 LOOKUP_WINDOW_SECONDS = 300
+MAX_LOOKUPS_PER_FP = 6
+LOOKUP_FP_WINDOW_SECONDS = 3600
+LOOKUP_TICKET_SECONDS = 3600
+LOOKUP_MIN_MS = 0.08
 TRACK_LIMIT = 30
 MAX_NOTES_CHARS = 200
+MAX_FINGERPRINT_LEN = 10
 MAX_REQUEST_FUTURE_DAYS = 45
 MAX_REQUEST_PAST_DAYS = 14
 MIN_FORM_FILL_SECONDS = 2
+LOGIN_AUDIT_PATH = BASE_DIR / "data" / "login_audit.log"
+LOGIN_AUDIT_LOCK = Lock()
 SHEET_SCRIPT_VERSION = "beform-2026-09-08"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 TURNSTILE_PASS_SECONDS = 20 * 60
@@ -350,6 +386,72 @@ def csrf_is_valid() -> bool:
 
 def client_ip() -> str:
     return request.remote_addr or "unknown"
+
+
+def parse_fingerprint_id(value) -> str | None:
+    text = str(value or "").strip()
+    if not text.isdigit():
+        return None
+    if not (1 <= len(text) <= MAX_FINGERPRINT_LEN):
+        return None
+    return text
+
+
+def ensure_lookup_ticket() -> str:
+    ticket = session.get("lookup_ticket")
+    at = session.get("lookup_ticket_at")
+    try:
+        fresh = bool(ticket and at and (time.time() - float(at)) < LOOKUP_TICKET_SECONDS)
+    except (TypeError, ValueError):
+        fresh = False
+    if fresh:
+        return str(ticket)
+    ticket = secrets.token_hex(16)
+    session["lookup_ticket"] = ticket
+    session["lookup_ticket_at"] = time.time()
+    return ticket
+
+
+def lookup_ticket_is_valid(sent: str) -> bool:
+    expected = session.get("lookup_ticket")
+    at = session.get("lookup_ticket_at")
+    if not expected or not at or not sent:
+        return False
+    try:
+        if (time.time() - float(at)) > LOOKUP_TICKET_SECONDS:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return hmac.compare_digest(str(sent), str(expected))
+
+
+def lookup_fingerprint_is_limited(fingerprint: str) -> bool:
+    return _rate_limited(
+        LOOKUP_FP_ATTEMPTS,
+        LOOKUP_LOCK,
+        f"{client_ip()}|{normalize_fingerprint(fingerprint)}",
+        MAX_LOOKUPS_PER_FP,
+        LOOKUP_FP_WINDOW_SECONDS,
+    )
+
+
+def write_login_audit(*, username: str, success: bool, reason: str = "") -> None:
+    payload = {
+        "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ip": client_ip(),
+        "username": (username or "").strip().lower()[:80],
+        "success": bool(success),
+        "reason": (reason or "")[:120],
+        "ua": (request.headers.get("User-Agent") or "")[:180],
+    }
+    line = json.dumps(payload, ensure_ascii=True) + "\n"
+    try:
+        LOGIN_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with LOGIN_AUDIT_LOCK:
+            with LOGIN_AUDIT_PATH.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+    except OSError:
+        pass
 
 
 def login_is_locked(ip: str) -> bool:
@@ -744,11 +846,28 @@ def inject_security():
     configured = turnstile_is_configured()
     return {
         "csrf_token": get_csrf_token(),
+        "lookup_ticket": ensure_lookup_ticket(),
         "is_hr": bool(manager and is_hr(manager)),
         "payroll_adjustments_url": payroll_adjustments_url,
         "turnstile_site_key": turnstile_site_key() if configured else "",
         "turnstile_session_ok": turnstile_session_ok() if configured else True,
     }
+
+
+@app.before_request
+def require_csrf_on_writes():
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return None
+    endpoint = request.endpoint or ""
+    if endpoint == "static" or endpoint.startswith("static"):
+        return None
+    if not csrf_is_valid():
+        if request.path.startswith("/api/") or request.accept_mimetypes.best == "application/json":
+            return jsonify({"ok": False, "error": "csrf", "employees": []}), 403
+        flash("The form expired. Please refresh and try again.", "error")
+        target = request.referrer or url_for("index")
+        return redirect(target)
+    return None
 
 
 @app.errorhandler(500)
@@ -1206,6 +1325,7 @@ def pwa_service_worker():
 
 
 @app.route("/", methods=["GET", "POST"])
+@limit_route("20 per 10 minutes")
 def index():
     schedule_sheet_sync()
     options = option_lookup()
@@ -1246,18 +1366,22 @@ def index():
             return render_template("index.html", **index_context({}))
 
         errors = []
+        fingerprint_id = parse_fingerprint_id(fingerprint_id) or ""
         if not fingerprint_id:
-            errors.append("Fingerprint number is required")
-        elif not fingerprint_id.isdigit():
-            errors.append("Fingerprint number must contain digits only")
+            if request.form.get("fingerprint_id", "").strip():
+                errors.append("Fingerprint number must be 1–10 digits only")
+            else:
+                errors.append("Fingerprint number is required")
         if not department:
             errors.append("Department is required")
         elif department not in department_maps()["values"]:
             errors.append("Please select a valid department")
         device = request.form.get("device", "").strip()
+        if device:
+            device = user_store.normalize_device(device)
         matched_department = ""
         matched = None
-        if user_store.employee_count() and department in department_maps()["values"]:
+        if fingerprint_id and user_store.employee_count() and department in department_maps()["values"]:
             department_label = department_maps()["labels"].get(department, "")
             allowed_teams = [item["value"] for item in teams_for_form().get(department, [])]
             if allowed_teams and team and team not in allowed_teams:
@@ -1266,15 +1390,10 @@ def index():
             if not matched and name:
                 matched = user_store.match_employee(name, fingerprint_id, department_label, team, device)
             if not matched:
-                registered = user_store.departments_for_fingerprint(fingerprint_id)
-                if registered:
-                    errors.append(
-                        f"This fingerprint is registered in {registered[0]}. Choose the correct department."
-                        if len(registered) == 1
-                        else "This fingerprint is not registered in the selected department."
-                    )
-                else:
-                    errors.append("This fingerprint is not registered. Ask HR to add you to the employees list.")
+                # Do not reveal whether the fingerprint exists in another department.
+                errors.append(
+                    "Fingerprint and department do not match our records. Ask HR if you need help."
+                )
             else:
                 fingerprint_id = matched["fingerprint"]
                 device = matched["device"]
@@ -1444,18 +1563,36 @@ def index():
 
 
 @app.route("/api/employee-lookup", methods=["POST"])
+@limit_route("12 per 5 minutes")
 def employee_lookup():
+    started = time.time()
+    empty = {"ok": True, "employees": []}
+
+    def _finish(payload, status=200):
+        elapsed = time.time() - started
+        if elapsed < LOOKUP_MIN_MS:
+            time.sleep(LOOKUP_MIN_MS - elapsed)
+        return jsonify(payload), status
+
     if not csrf_is_valid():
-        return jsonify({"ok": False, "error": "expired", "employees": []}), 403
-    if lookup_is_limited(client_ip()):
-        return jsonify({"ok": False, "error": "rate_limited", "employees": []}), 429
+        return _finish({"ok": False, "error": "csrf", "employees": []}, 403)
+
     payload = request.get_json(silent=True) or {}
-    fingerprint_id = str(
+    ticket = str(payload.get("lookup_ticket") or request.form.get("lookup_ticket") or "").strip()
+    if not lookup_ticket_is_valid(ticket):
+        return _finish({"ok": False, "error": "ticket", "employees": []}, 403)
+
+    if lookup_is_limited(client_ip()):
+        return _finish({"ok": False, "error": "rate_limited", "employees": []}, 429)
+
+    fingerprint_id = parse_fingerprint_id(
         payload.get("fingerprint_id") or request.form.get("fingerprint_id") or ""
-    ).strip()
-    if not fingerprint_id.isdigit():
-        return jsonify({"ok": True, "employees": []})
-    return jsonify({"ok": True, "employees": employees_for_fingerprint_lookup(fingerprint_id)})
+    )
+    if not fingerprint_id:
+        return _finish(empty)
+    if lookup_fingerprint_is_limited(fingerprint_id):
+        return _finish({"ok": False, "error": "rate_limited", "employees": []}, 429)
+    return _finish({"ok": True, "employees": employees_for_fingerprint_lookup(fingerprint_id)})
 
 
 @app.route("/success")
@@ -1464,6 +1601,7 @@ def success():
 
 
 @app.route("/track", methods=["GET", "POST"])
+@limit_route("8 per 5 minutes")
 def track():
     rows = None
     fingerprint_id = ""
@@ -1527,11 +1665,16 @@ def track():
 
         if not fingerprint_id:
             flash("Fingerprint number is required.", "error")
-        elif not fingerprint_id.isdigit():
-            flash("Fingerprint number must contain digits only.", "error")
-        elif not track_department or track_department not in department_maps()["values"]:
-            flash("Please select a valid department.", "error")
         else:
+            parsed_fp = parse_fingerprint_id(fingerprint_id)
+            if not parsed_fp:
+                flash("Fingerprint number must be 1–10 digits only.", "error")
+                fingerprint_id = ""
+            else:
+                fingerprint_id = parsed_fp
+        if fingerprint_id and (not track_department or track_department not in department_maps()["values"]):
+            flash("Please select a valid department.", "error")
+        elif fingerprint_id:
             department_label = department_maps()["labels"].get(track_department, "")
             matched = user_store.match_employee(
                 "",
@@ -1611,6 +1754,7 @@ def track():
 
 
 @app.route(MANAGER_LOGIN_PATH, methods=["GET", "POST"])
+@limit_route("10 per 5 minutes")
 def login():
     if session.get("manager"):
         return redirect(url_for("dashboard"))
@@ -1625,6 +1769,7 @@ def login():
 
         ip = client_ip()
         if login_is_locked(ip):
+            write_login_audit(username=request.form.get("username", ""), success=False, reason="locked")
             flash("Too many login attempts. Please wait 5 minutes and try again.", "error")
             return render_template("login.html")
 
@@ -1642,10 +1787,12 @@ def login():
                 manager = None
         if not manager:
             record_login_failure(ip)
+            write_login_audit(username=username, success=False, reason="invalid_credentials")
             flash("Invalid username or password.", "error")
             return render_template("login.html")
 
         clear_login_failures(ip)
+        write_login_audit(username=username, success=True, reason="ok")
         session.clear()
         session.permanent = True
         session["csrf_token"] = secrets.token_hex(32)

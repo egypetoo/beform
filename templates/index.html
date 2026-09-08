@@ -270,6 +270,7 @@
         const salesBlockedTypes = {{ sales_blocked_request_types | tojson }};
         const dateSpanLimits = {{ date_span_limits | tojson }};
         const csrfToken = {{ csrf_token | tojson }};
+        const lookupTicket = {{ lookup_ticket | tojson }};
         const selectedTeam = {{ form.get('team', '') | tojson }};
         const selectedDevice = {{ form.get('device', '') | tojson }};
         let sending = false;
@@ -289,7 +290,7 @@
                         'Content-Type': 'application/json',
                         'X-CSRF-Token': csrfToken,
                     },
-                    body: JSON.stringify({ csrf_token: csrfToken, fingerprint_id: fp }),
+                    body: JSON.stringify({ csrf_token: csrfToken, lookup_ticket: lookupTicket, fingerprint_id: fp }),
                 });
                 const data = await response.json();
                 if (seq !== lookupSeq) return employeeDirectory;
