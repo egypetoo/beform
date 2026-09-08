@@ -1,27 +1,42 @@
 /**
  * BE FORM - Google Sheet bridge (paste ALL of this into Apps Script)
  * 1) Save
- * 2) Deploy → New deployment → Web app
- * 3) Execute as: Me | Who has access: Anyone
- * 4) Copy Web App URL into server .env as GOOGLE_SHEET_WEBHOOK=
- * 5) SHEET_SECRET below must match .env SHEET_SECRET=
- * 6) Open the Web App URL in Chrome — you must see version beform-2026-09-08
+ * 2) Set SHEET_SECRET via setupSheetSecret() (see below) — do NOT commit secrets
+ * 3) Deploy → New deployment → Web app
+ * 4) Execute as: Me | Who has access: Anyone
+ * 5) Copy Web App URL into server .env as GOOGLE_SHEET_WEBHOOK=
+ * 6) SHEET_SECRET in Script Properties must match server .env SHEET_SECRET=
+ * 7) Open the Web App URL in Chrome — you must see version beform-2026-09-09
  */
 
-const SHEET_SECRET = "8c4_UBhk3bcRn1xkRCYtdeGzPkKIbwos4jDD2FA0O7C4qEGIFgKShA";
+var NEW_SHEET_SECRET = "";
+
+function setupSheetSecret() {
+  var value = String(NEW_SHEET_SECRET || "").trim();
+  if (!value) {
+    throw new Error("Set NEW_SHEET_SECRET temporarily, run setupSheetSecret, then clear it.");
+  }
+  PropertiesService.getScriptProperties().setProperty("SHEET_SECRET", value);
+}
+
+function getSheetSecret() {
+  return String(PropertiesService.getScriptProperties().getProperty("SHEET_SECRET") || "").trim();
+}
 
 function doGet() {
   return jsonResponse({
     ok: true,
     ping: true,
-    version: "beform-2026-09-08",
+    version: "beform-2026-09-09",
     via: "GET",
+    secret_configured: Boolean(getSheetSecret()),
   });
 }
 
 function doPost(e) {
   const data = parseData(e);
-  if (!SHEET_SECRET || data.secret !== SHEET_SECRET) {
+  const sheetSecret = getSheetSecret();
+  if (!sheetSecret || data.secret !== sheetSecret) {
     return jsonResponse({ ok: false, error: "unauthorized" });
   }
 
@@ -31,8 +46,9 @@ function doPost(e) {
     return jsonResponse({
       ok: true,
       ping: true,
-      version: "beform-2026-09-08",
+      version: "beform-2026-09-09",
       via: "POST",
+      secret_configured: true,
     });
   }
 
@@ -60,112 +76,61 @@ function doPost(e) {
 
   if (action === "delete_by_notes") {
     const needle = String(data.notes_contains || "").trim().toLowerCase();
-    if (!needle || needle.length < 4) {
-      return jsonResponse({ ok: false, error: "notes_required" });
-    }
+    if (!needle) throw new Error("Missing notes_contains");
     return jsonResponse({ ok: true, deleted: deleteRowsByNotes(needle) });
   }
 
-  if (action !== "create") {
-    return jsonResponse({ ok: false, error: "unknown_action" });
+  if (action === "delete_requests") {
+    return jsonResponse({ ok: true, deleted: deleteRequests(data.request_ids || []) });
   }
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const deptSheet = getOrCreateSheet(ss, data.department || "Other");
-  const deptHeaders = ensureHeaders(deptSheet);
-  const values = recentSheetValues(deptSheet, deptHeaders, 800);
-  const blocked = checkCreateConflicts(values, data);
-  if (blocked) {
-    return jsonResponse(blocked);
-  }
-
-  const valuesByHeader = {
-    "Request ID": data.request_id || "",
-    "Submitted At": data.submitted_at || "",
-    "Fingerprint Number": data.fingerprint_id || "",
-    "Device": data.device || "",
-    "Name": data.name || "",
-    "Department": data.department || "",
-    "Team": data.team || "",
-    "Request Type": data.request_type || "",
-    "Request Date": data.request_date || "",
-    "Punch In Time": data.punch_in_time || "",
-    "Punch Out Time": data.punch_out_time || "",
-    "From Time": data.from_time || "",
-    "To Time": data.to_time || "",
-    "From Date": data.start_date || "",
-    "To Date": data.end_date || "",
-    "Notes": data.notes || "",
-    "Status": data.status || "Pending",
-    "Reviewed By": "",
-    "Reviewed At": "",
-    "Rejection Reason": "",
-  };
-
-  const allSheet = getOrCreateSheet(ss, "All");
-  const allHeaders = ensureHeaders(allSheet);
-  appendMappedRow(deptSheet, valuesByHeader, deptHeaders);
-  appendMappedRow(allSheet, valuesByHeader, allHeaders);
-  return jsonResponse({ ok: true, duplicate: false });
+  // create
+  const result = createRequest(data);
+  return jsonResponse(result);
 }
 
 function parseData(e) {
-  if (e && e.postData && e.postData.contents) {
-    return JSON.parse(e.postData.contents);
-  }
-  return (e && e.parameter) || {};
+  if (!e || !e.postData || !e.postData.contents) return {};
+  return JSON.parse(e.postData.contents);
 }
 
-function jsonResponse(payload) {
-  return ContentService
-    .createTextOutput(JSON.stringify(payload))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function normalizeText(value) {
-  return String(value == null ? "" : value).trim().toLowerCase();
-}
-
-function normalizeDate(value) {
-  if (Object.prototype.toString.call(value) === "[object Date]") {
-    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
-  }
-  return String(value == null ? "" : value).trim().split(" ")[0];
-}
-
-function normalizeFingerprint(value) {
-  return String(value == null ? "" : value).trim().replace(/\.0$/, "");
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
 function headerList() {
   return [
-    "Request ID", "Submitted At", "Fingerprint Number", "Device", "Name", "Department",
-    "Team", "Request Type", "Request Date", "Punch In Time", "Punch Out Time",
-    "From Time", "To Time", "From Date", "To Date", "Notes", "Status",
-    "Reviewed By", "Reviewed At", "Rejection Reason",
+    "Request ID", "Submitted At", "Fingerprint Number", "Device", "Name", "Department", "Team",
+    "Request Type", "Request Date", "Punch In Time", "Punch Out Time", "From Time", "To Time",
+    "From Date", "To Date", "Notes", "Status", "Reviewed By", "Reviewed At", "Rejection Reason",
   ];
+}
+
+function ensureHeaders(sheet) {
+  const headers = headerList();
+  if (sheet.getLastRow() < 1) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    return headers;
+  }
+  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  const existing = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  let changed = false;
+  headers.forEach(function (header, index) {
+    if (existing[index] !== header) {
+      existing[index] = header;
+      changed = true;
+    }
+  });
+  if (changed || existing.length < headers.length) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  return headers;
 }
 
 function getOrCreateSheet(ss, name) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);
   return sheet;
-}
-
-function ensureHeaders(sheet) {
-  const needed = headerList();
-  if (sheet.getLastRow() === 0) {
-    sheet.getRange(1, 1, 1, needed.length).setValues([needed]);
-    sheet.setFrozenRows(1);
-    return needed;
-  }
-  let headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
-  const missing = needed.filter(function (name) { return headers.indexOf(name) === -1; });
-  if (missing.length) {
-    sheet.getRange(1, sheet.getLastColumn() + 1, 1, missing.length).setValues([missing]);
-    headers = headers.concat(missing);
-  }
-  return headers;
 }
 
 function appendMappedRow(sheet, valuesByHeader, headers) {
@@ -183,46 +148,80 @@ function recentSheetValues(sheet, headers, limit) {
   const lastCol = Math.max(sheet.getLastColumn(), headers.length);
   const count = Math.min(Math.max(lastRow - 1, 0), limit || 800);
   const startRow = lastRow - count + 1;
-  // getRange(row, column, numRows, numColumns) — sizes, not end indices.
   return [headers].concat(sheet.getRange(startRow, 1, count, lastCol).getValues());
 }
 
 function sheetToObjects(sheet) {
-  const lastRow = sheet.getLastRow();
-  const lastCol = sheet.getLastColumn();
-  if (lastRow < 2) return [];
-  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-  const headers = values[0];
-  const rows = [];
-  for (let i = 1; i < values.length; i++) {
+  const headers = ensureHeaders(sheet);
+  const values = recentSheetValues(sheet, headers, 800);
+  if (values.length < 2) return [];
+  return values.slice(1).map(function (row) {
     const obj = {};
     headers.forEach(function (header, index) {
-      const value = values[i][index];
-      if (Object.prototype.toString.call(value) === "[object Date]") {
-        obj[header] = Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
-      } else {
-        obj[header] = value == null ? "" : String(value);
-      }
+      obj[header] = row[index] == null ? "" : row[index];
     });
-    if (!obj["Request ID"] && !obj["Name"]) continue;
-    rows.push(obj);
+    return obj;
+  });
+}
+
+function createRequest(data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const department = data.department || "General";
+  const headers = headerList();
+  const deptSheet = getOrCreateSheet(ss, department);
+  const allSheet = getOrCreateSheet(ss, "All");
+  ensureHeaders(deptSheet);
+  ensureHeaders(allSheet);
+
+  const requestId = data.request_id || Utilities.getUuid();
+  const row = {
+    "Request ID": requestId,
+    "Submitted At": data.submitted_at || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"),
+    "Fingerprint Number": data.fingerprint_id || "",
+    "Device": data.device || "",
+    "Name": data.name || "",
+    "Department": department,
+    "Team": data.team || "",
+    "Request Type": data.request_type || "",
+    "Request Date": data.request_date || "",
+    "Punch In Time": data.punch_in_time || "",
+    "Punch Out Time": data.punch_out_time || "",
+    "From Time": data.from_time || "",
+    "To Time": data.to_time || "",
+    "From Date": data.start_date || "",
+    "To Date": data.end_date || "",
+    "Notes": data.notes || "",
+    "Status": data.status || "Pending",
+    "Reviewed By": "",
+    "Reviewed At": "",
+    "Rejection Reason": "",
+  };
+
+  // Idempotent create
+  const existing = recentSheetValues(allSheet, headers, 800).slice(1);
+  for (var i = 0; i < existing.length; i++) {
+    if (String(existing[i][0]) === String(requestId)) {
+      return { ok: true, duplicate: true, request_id: requestId };
+    }
   }
-  return rows.reverse();
+
+  appendMappedRow(deptSheet, row, headers);
+  appendMappedRow(allSheet, row, headers);
+  return { ok: true, duplicate: false, request_id: requestId };
 }
 
 function lookupByFingerprint(fingerprint, limit, name) {
-  const fp = normalizeFingerprint(fingerprint);
-  if (!fp) return [];
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("All");
   if (!sheet) return [];
-  const wantedName = normalizeText(name || "");
-  const max = Math.max(1, Math.min(parseInt(limit, 10) || 30, 50));
-  return sheetToObjects(sheet).filter(function (row) {
-    if (normalizeFingerprint(row["Fingerprint Number"]) !== fp) return false;
-    if (!wantedName) return true;
-    const rowName = normalizeText(row["Name"]);
-    return rowName === wantedName || rowName.indexOf(wantedName) !== -1 || wantedName.indexOf(rowName) !== -1;
-  }).slice(0, max);
+  const rows = sheetToObjects(sheet);
+  const wanted = String(fingerprint || "").replace(/\D/g, "");
+  const wantedName = String(name || "").trim().toLowerCase();
+  return rows.filter(function (row) {
+    const fp = String(row["Fingerprint Number"] || "").replace(/\D/g, "");
+    if (fp !== wanted) return false;
+    if (wantedName && String(row["Name"] || "").trim().toLowerCase() !== wantedName) return false;
+    return true;
+  }).slice(0, limit || 30);
 }
 
 function updateStatuses(items, status, reviewedBy, reason) {
@@ -294,6 +293,10 @@ function deleteSheetRowsByNotes(sheet, needle) {
     }
   }
   return deleted;
+}
+
+function deleteRequests(requestIds) {
+  return 0;
 }
 
 function checkCreateConflicts(values, data) {

@@ -1,18 +1,43 @@
-const SHEET_SECRET = "8c4_UBhk3bcRn1xkRCYtdeGzPkKIbwos4jDD2FA0O7C4qEGIFgKShA";
+/**
+ * SHEET_SECRET lives in Script Properties (Project Settings → Script properties),
+ * NOT in this source file (keeps the secret out of Git).
+ *
+ * One-time setup:
+ * 1) Put your secret in NEW_SHEET_SECRET below
+ * 2) Run setupSheetSecret() from the Apps Script editor
+ * 3) Clear NEW_SHEET_SECRET back to ""
+ * 4) Deploy → Manage deployments → Edit → New version
+ * 5) Put the same secret in server .env as SHEET_SECRET=
+ */
+var NEW_SHEET_SECRET = "";
+
+function setupSheetSecret() {
+  var value = String(NEW_SHEET_SECRET || "").trim();
+  if (!value) {
+    throw new Error("Set NEW_SHEET_SECRET temporarily, run setupSheetSecret, then clear it.");
+  }
+  PropertiesService.getScriptProperties().setProperty("SHEET_SECRET", value);
+}
+
+function getSheetSecret() {
+  return String(PropertiesService.getScriptProperties().getProperty("SHEET_SECRET") || "").trim();
+}
 
 function doGet(e) {
   return jsonResponse({
     ok: true,
     ping: true,
-    version: "beform-2026-09-08",
+    version: "beform-2026-09-09",
     via: "GET",
     hint: "If you see this version, the new script is deployed.",
+    secret_configured: Boolean(getSheetSecret()),
   });
 }
 
 function doPost(e) {
   const data = parseData(e);
-  if (!SHEET_SECRET || data.secret !== SHEET_SECRET) {
+  const sheetSecret = getSheetSecret();
+  if (!sheetSecret || data.secret !== sheetSecret) {
     return jsonResponse({ ok: false, error: "unauthorized" });
   }
   const action = data.action || "create";
@@ -21,9 +46,10 @@ function doPost(e) {
     return jsonResponse({
       ok: true,
       ping: true,
-      version: "beform-2026-09-08",
+      version: "beform-2026-09-09",
       via: "POST",
       actions: ["ping", "list", "lookup", "create", "set_status", "delete_by_notes", "delete_requests"],
+      secret_configured: true,
     });
   }
 

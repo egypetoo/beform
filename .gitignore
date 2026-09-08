@@ -10,5 +10,7 @@ passenger_error.log
 startup_error.log
 turnstile_error.log
 data/login_audit.log
+data/flask_secret.txt
+data/hr_password.hash
 users.db
 users.db-*

@@ -18,7 +18,7 @@ else:
 
 ping = requests.post(wh, json={"secret": sec, "action": "ping"}, timeout=45)
 print("2) Ping:", ping.text[:250])
-if "beform-2026-09-08" in ping.text:
+if "beform-2026-09-09" in ping.text:
     print("   OK - New script is live.")
 else:
     print("   FAIL - New script NOT deployed yet.")

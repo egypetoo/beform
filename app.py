@@ -20,7 +20,7 @@ from xml.sax.saxutils import escape
 from dotenv import load_dotenv
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 import requests
 
 import user_store
@@ -35,9 +35,28 @@ MANAGER_LOGIN_PATH = os.getenv("MANAGER_LOGIN_PATH", "/be-review-k4n").strip() o
 if not MANAGER_LOGIN_PATH.startswith("/"):
     MANAGER_LOGIN_PATH = "/" + MANAGER_LOGIN_PATH
 
+
+def resolve_flask_secret() -> str:
+    env = (os.getenv("FLASK_SECRET_KEY") or "").strip()
+    if env and env not in {"change-this-to-a-long-random-value", "changeme"}:
+        return env
+    path = BASE_DIR / "data" / "flask_secret.txt"
+    try:
+        if path.exists():
+            stored = path.read_text(encoding="utf-8").strip()
+            if stored:
+                return stored
+        secret = secrets.token_hex(32)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(secret, encoding="utf-8")
+        return secret
+    except OSError:
+        return secrets.token_hex(32)
+
+
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
-app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.secret_key = resolve_flask_secret()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -105,12 +124,15 @@ FORM_FP_DAY_WINDOW_SECONDS = 86400
 LOOKUP_ATTEMPTS = {}
 LOOKUP_LOCK = Lock()
 LOOKUP_FP_ATTEMPTS = {}
-MAX_LOOKUPS_PER_IP = 12
+MAX_LOOKUPS_PER_IP = 8
 LOOKUP_WINDOW_SECONDS = 300
-MAX_LOOKUPS_PER_FP = 6
+MAX_LOOKUPS_PER_FP = 4
 LOOKUP_FP_WINDOW_SECONDS = 3600
+LOOKUP_HIT_ATTEMPTS = {}
+MAX_LOOKUP_HITS_PER_IP = 12
+LOOKUP_HIT_WINDOW_SECONDS = 86400
 LOOKUP_TICKET_SECONDS = 3600
-LOOKUP_MIN_MS = 0.08
+LOOKUP_MIN_MS = 0.12
 TRACK_LIMIT = 30
 MAX_NOTES_CHARS = 200
 MAX_FINGERPRINT_LEN = 10
@@ -119,7 +141,8 @@ MAX_REQUEST_PAST_DAYS = 14
 MIN_FORM_FILL_SECONDS = 2
 LOGIN_AUDIT_PATH = BASE_DIR / "data" / "login_audit.log"
 LOGIN_AUDIT_LOCK = Lock()
-SHEET_SCRIPT_VERSION = "beform-2026-09-08"
+HR_PASSWORD_HASH_PATH = BASE_DIR / "data" / "hr_password.hash"
+SHEET_SCRIPT_VERSION = "beform-2026-09-09"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 TURNSTILE_PASS_SECONDS = 20 * 60
 DATE_SPAN_LIMITS = {
@@ -331,15 +354,45 @@ def department_maps():
     }
 
 
-def get_managers():
+def get_hr_password_secret() -> str:
+    """Return a werkzeug password hash for the env HR account (never plaintext compare)."""
     load_dotenv(BASE_DIR / ".env", override=True)
+    for candidate in (
+        (os.getenv("MANAGER_HR_PASSWORD_HASH") or "").strip(),
+        (os.getenv("MANAGER_HR_PASSWORD") or "").strip(),
+    ):
+        if candidate.startswith(("pbkdf2:", "scrypt:", "argon2:")):
+            return candidate
+    try:
+        if HR_PASSWORD_HASH_PATH.exists():
+            stored = HR_PASSWORD_HASH_PATH.read_text(encoding="utf-8").strip()
+            if stored.startswith(("pbkdf2:", "scrypt:", "argon2:")):
+                return stored
+    except OSError:
+        pass
+    plain = (os.getenv("MANAGER_HR_PASSWORD") or "").strip()
+    if not plain:
+        return ""
+    hashed = generate_password_hash(plain)
+    try:
+        HR_PASSWORD_HASH_PATH.parent.mkdir(parents=True, exist_ok=True)
+        HR_PASSWORD_HASH_PATH.write_text(hashed, encoding="utf-8")
+    except OSError:
+        pass
+    return hashed
+
+
+def get_managers():
+    secret = get_hr_password_secret()
+    if not secret:
+        return {}
     return {
         "hr": {
             "name": "HR Manager",
             "department": "ALL",
             "role": "hr",
             "team": "",
-            "password": os.getenv("MANAGER_HR_PASSWORD", ""),
+            "password": secret,
         },
     }
 
@@ -365,7 +418,8 @@ def password_matches(stored: str, provided: str) -> bool:
         return False
     if stored.startswith(("pbkdf2:", "scrypt:", "argon2:")):
         return check_password_hash(stored, provided)
-    return hmac.compare_digest(stored, provided)
+    # Plaintext passwords are no longer accepted.
+    return False
 
 
 def get_csrf_token() -> str:
@@ -433,6 +487,27 @@ def lookup_fingerprint_is_limited(fingerprint: str) -> bool:
         MAX_LOOKUPS_PER_FP,
         LOOKUP_FP_WINDOW_SECONDS,
     )
+
+
+def lookup_hits_are_limited(ip: str) -> bool:
+    return _rate_limited(
+        LOOKUP_HIT_ATTEMPTS,
+        LOOKUP_LOCK,
+        ip or "unknown",
+        MAX_LOOKUP_HITS_PER_IP,
+        LOOKUP_HIT_WINDOW_SECONDS,
+    )
+
+
+def lookup_session_is_ready() -> bool:
+    """Lookup only after the visitor loaded a real form/track page recently."""
+    opened = session.get("form_opened_at")
+    if not opened:
+        return False
+    try:
+        return (time.time() - float(opened)) < LOOKUP_TICKET_SECONDS
+    except (TypeError, ValueError):
+        return False
 
 
 def write_login_audit(*, username: str, success: bool, reason: str = "") -> None:
@@ -1563,7 +1638,7 @@ def index():
 
 
 @app.route("/api/employee-lookup", methods=["POST"])
-@limit_route("12 per 5 minutes")
+@limit_route("8 per 5 minutes")
 def employee_lookup():
     started = time.time()
     empty = {"ok": True, "employees": []}
@@ -1576,6 +1651,9 @@ def employee_lookup():
 
     if not csrf_is_valid():
         return _finish({"ok": False, "error": "csrf", "employees": []}, 403)
+
+    if not lookup_session_is_ready():
+        return _finish({"ok": False, "error": "session", "employees": []}, 403)
 
     payload = request.get_json(silent=True) or {}
     ticket = str(payload.get("lookup_ticket") or request.form.get("lookup_ticket") or "").strip()
@@ -1592,7 +1670,13 @@ def employee_lookup():
         return _finish(empty)
     if lookup_fingerprint_is_limited(fingerprint_id):
         return _finish({"ok": False, "error": "rate_limited", "employees": []}, 429)
-    return _finish({"ok": True, "employees": employees_for_fingerprint_lookup(fingerprint_id)})
+
+    employees = employees_for_fingerprint_lookup(fingerprint_id)
+    if employees:
+        # Cap how many successful identity reveals one IP can get per day.
+        if lookup_hits_are_limited(client_ip()):
+            return _finish({"ok": False, "error": "rate_limited", "employees": []}, 429)
+    return _finish({"ok": True, "employees": employees})
 
 
 @app.route("/success")
@@ -1603,6 +1687,7 @@ def success():
 @app.route("/track", methods=["GET", "POST"])
 @limit_route("8 per 5 minutes")
 def track():
+    mark_form_opened()
     rows = None
     fingerprint_id = ""
     track_name = ""
