@@ -122,6 +122,27 @@
             </section>
         {% endif %}
 
+        {% if excuse_balance %}
+            <section class="form-shell leave-balance-card">
+                <h2 class="section-title">Personal excuse {{ excuse_balance.cycle_label }}</h2>
+                <div class="leave-balance-grid">
+                    <div>
+                        <span>Remaining</span>
+                        <strong>{{ excuse_balance.remaining }}</strong>
+                    </div>
+                    <div>
+                        <span>Used</span>
+                        <strong>{{ excuse_balance.used }}</strong>
+                    </div>
+                    <div>
+                        <span>Entitlement</span>
+                        <strong>{{ excuse_balance.entitlement }}</strong>
+                    </div>
+                </div>
+                <p class="muted">Only approved Personal Excuse hours count as used. Allowance resets each payroll cycle (26th–25th).</p>
+            </section>
+        {% endif %}
+
         {% if rows %}
             <p class="track-count">{{ rows|length }} request{{ 's' if rows|length != 1 else '' }}</p>
             <section class="track-list">

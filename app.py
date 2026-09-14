@@ -1698,6 +1698,7 @@ def track():
     type_filter = ""
     request_types = []
     leave_balance = None
+    excuse_balance = None
     track_context = {
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
@@ -1719,6 +1720,7 @@ def track():
                 type_filter="",
                 request_types=[],
                 leave_balance=None,
+                excuse_balance=None,
                 **track_context,
             )
 
@@ -1735,6 +1737,7 @@ def track():
                 type_filter=request.form.get("type", "").strip(),
                 request_types=[],
                 leave_balance=None,
+                excuse_balance=None,
                 **track_context,
             )
 
@@ -1794,13 +1797,15 @@ def track():
                         type_filter=type_filter,
                         request_types=[],
                         leave_balance=None,
+                        excuse_balance=None,
                         **track_context,
                     )
                 try:
                     all_rows = lookup_by_fingerprint(fingerprint_id, track_name)
                     leave_balance = leave_balance_summary(track_name, fingerprint_id, all_rows)
+                    excuse_balance = personal_excuse_balance_summary(track_name, fingerprint_id, all_rows)
                     if not all_rows:
-                        if leave_balance:
+                        if leave_balance or excuse_balance:
                             rows = []
                         else:
                             flash("No requests found for this name and fingerprint.", "error")
@@ -1821,6 +1826,7 @@ def track():
                     flash("Could not load requests. Please try again.", "error")
                     rows = None
                     leave_balance = None
+                    excuse_balance = None
 
     return render_template(
         "track.html",
@@ -1834,6 +1840,7 @@ def track():
         type_filter=type_filter,
         request_types=request_types,
         leave_balance=leave_balance,
+        excuse_balance=excuse_balance,
         **track_context,
     )
 
@@ -2741,6 +2748,53 @@ def count_annual_leave_used(request_rows: list, year: int | None = None) -> int:
             if year_start <= day <= year_end:
                 used_days.add(day)
     return len(used_days)
+
+
+def count_personal_excuse_used_minutes(request_rows: list, cycle_start: str, cycle_end: str) -> int:
+    total = 0
+    for row in request_rows or []:
+        status = str(row.get("Status") or "Pending").strip().lower()
+        if status != "approved":
+            continue
+        request_type = str(row.get("Request Type") or "").strip().lower()
+        if request_type != attendance.LATE_EXCUSE_TYPE:
+            continue
+        duration = attendance.excuse_duration_minutes(
+            str(row.get("From Time") or ""),
+            str(row.get("To Time") or ""),
+        )
+        if not duration or duration <= 0:
+            duration = 60
+        for day in attendance.date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+            if cycle_start <= day <= cycle_end:
+                total += duration
+    return total
+
+
+def personal_excuse_balance_summary(name: str, fingerprint: str, request_rows: list | None = None) -> dict | None:
+    people = user_store.find_employees_by_person(name, fingerprint)
+    if not people:
+        return None
+    now = datetime.now()
+    cycle_start = cycle_start_for(now)
+    cycle_end = cycle_end_for(cycle_start)
+    cycle_start_str = cycle_start.strftime("%Y-%m-%d")
+    cycle_end_str = cycle_end.strftime("%Y-%m-%d")
+    rows = request_rows
+    if rows is None:
+        try:
+            rows = lookup_by_fingerprint(fingerprint, name)
+        except Exception:
+            rows = user_store.lookup_form_request_sheet_rows(fingerprint, name)
+    entitlement = attendance.MONTHLY_LATE_ALLOWANCE_MINUTES
+    used = count_personal_excuse_used_minutes(rows or [], cycle_start_str, cycle_end_str)
+    remaining = max(0, entitlement - used)
+    return {
+        "cycle_label": f"{cycle_start.strftime('%d %b')} – {cycle_end.strftime('%d %b %Y')}",
+        "entitlement": attendance.format_hours(entitlement),
+        "used": attendance.format_hours(used),
+        "remaining": attendance.format_hours(remaining),
+    }
 
 
 def leave_balance_summary(name: str, fingerprint: str, request_rows: list | None = None) -> dict | None:
