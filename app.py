@@ -641,6 +641,7 @@ def form_employee_directory() -> list:
             "department": department_value,
             "team": employee.get("team") or "",
             "device": employee.get("device") or "",
+            "normal_rules": bool(employee.get("normal_rules")),
         })
     FORM_META_CACHE["directory"] = rows
     FORM_META_CACHE["holidays"] = user_store.holiday_map()
@@ -891,6 +892,7 @@ def employees_for_fingerprint_lookup(fingerprint: str) -> list:
             "department": department_value,
             "team": employee.get("team") or "",
             "device": employee.get("device") or "",
+            "normal_rules": bool(employee.get("normal_rules")),
         })
     return rows
 
@@ -1488,7 +1490,11 @@ def index():
         if request_type not in options:
             errors.append("Request type is required")
         department_label = matched_department or department_maps()["labels"].get(department, "")
-        if attendance.is_sales_department(department_label) and request_type in SALES_BLOCKED_REQUEST_TYPES:
+        uses_sales_exceptions = (
+            attendance.is_sales_department(department_label)
+            and not bool((matched or {}).get("normal_rules"))
+        )
+        if uses_sales_exceptions and request_type in SALES_BLOCKED_REQUEST_TYPES:
             errors.append("This request type is not available for Sales.")
         if request_type == "missing_punch_in" and not punch_in_time:
             errors.append("Actual punch-in time is required")
@@ -2707,10 +2713,11 @@ def users_delete():
     return redirect(url_for("users_admin"))
 
 
-EMPLOYEE_HEADERS = ["name", "department", "fingerprint", "device", "team"]
+EMPLOYEE_HEADERS = ["name", "department", "fingerprint", "device", "team", "normal_rules"]
 EMPLOYEE_SAMPLE_ROWS = [
-    ["Ahmed Essam", "Web", "57", "F8", ""],
-    ["Mohamed", "Sales", "57", "F9", "Team A"],
+    ["Ahmed Essam", "Web", "57", "F8", "", ""],
+    ["Mohamed", "Sales", "57", "F9", "Team A", ""],
+    ["Sara", "Sales", "88", "F9", "Nasr City 1", "1"],
 ]
 
 
@@ -2841,6 +2848,7 @@ def save_employees_bulk_from_form() -> tuple[int, list]:
     devices = request.form.getlist("device")
     teams = request.form.getlist("team")
     leave_days_list = request.form.getlist("leave_days")
+    normal_rules_list = request.form.getlist("normal_rules")
     lengths = [
         len(ids),
         len(names),
@@ -2849,6 +2857,7 @@ def save_employees_bulk_from_form() -> tuple[int, list]:
         len(devices),
         len(teams),
         len(leave_days_list),
+        len(normal_rules_list),
     ]
     if not ids or len(set(lengths)) != 1:
         return 0, ["Could not save the employee list. Refresh and try again."]
@@ -2866,6 +2875,7 @@ def save_employees_bulk_from_form() -> tuple[int, list]:
         device = devices[index]
         team = teams[index]
         leave_days = leave_days_list[index]
+        normal_rules = normal_rules_list[index]
         department_label = maps["labels"].get(department_value, department_value)
         issues = user_store.validate_employee(
             name,
@@ -2890,9 +2900,11 @@ def save_employees_bulk_from_form() -> tuple[int, list]:
         if issues:
             errors.append(f"{(name or 'Employee').strip()}: " + " ".join(issues))
             continue
-        pending.append((employee_id, name, department_label, fingerprint, device, team, leave_days))
+        pending.append(
+            (employee_id, name, department_label, fingerprint, device, team, leave_days, normal_rules)
+        )
     updated = 0
-    for employee_id, name, department_label, fingerprint, device, team, leave_days in pending:
+    for employee_id, name, department_label, fingerprint, device, team, leave_days, normal_rules in pending:
         try:
             if user_store.update_employee(
                 employee_id,
@@ -2902,6 +2914,7 @@ def save_employees_bulk_from_form() -> tuple[int, list]:
                 device,
                 team,
                 leave_days,
+                normal_rules,
             ):
                 updated += 1
         except ValueError as exc:
@@ -2935,6 +2948,7 @@ def employees_admin():
         device = request.form.get("device", "")
         team = request.form.get("team", "")
         leave_days = request.form.get("leave_days", str(user_store.DEFAULT_LEAVE_DAYS))
+        normal_rules = request.form.get("normal_rules") == "1"
         department_label = maps["labels"].get(department_value, "")
         errors = user_store.validate_employee(
             name,
@@ -2956,6 +2970,7 @@ def employees_admin():
                     device,
                     team,
                     leave_days,
+                    normal_rules,
                 )
                 invalidate_form_meta()
                 flash("Employee added.", "success")

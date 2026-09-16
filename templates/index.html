@@ -316,14 +316,18 @@
         }
 
         function applySalesRequestRules() {
-            const isSales = salesDepartments.includes(departmentSelect.value);
+            const isSalesDept = salesDepartments.includes(departmentSelect.value);
+            const matches = candidates();
+            const applySalesBlock = isSalesDept && (
+                !matches.length || matches.some((row) => !row.normal_rules)
+            );
             Array.from(requestType.options).forEach((option) => {
                 if (!option.value) return;
-                const blocked = isSales && salesBlockedTypes.includes(option.value);
+                const blocked = applySalesBlock && salesBlockedTypes.includes(option.value);
                 option.hidden = blocked;
                 option.disabled = blocked;
             });
-            if (isSales && salesBlockedTypes.includes(requestType.value)) {
+            if (applySalesBlock && salesBlockedTypes.includes(requestType.value)) {
                 requestType.value = '';
                 updateFields();
             }
@@ -523,6 +527,7 @@
                 fillDevices();
             }
             applyMatchedName();
+            applySalesRequestRules();
         }
 
         departmentSelect.addEventListener('change', () => resolveEmployee('department'));

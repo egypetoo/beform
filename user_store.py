@@ -126,6 +126,7 @@ def init_db() -> None:
         )
         _ensure_employee_team_column(conn)
         _ensure_employee_leave_days_column(conn)
+        _ensure_employee_normal_rules_column(conn)
         _ensure_payroll_adjustments_table(conn)
         conn.execute(
             """
@@ -164,6 +165,23 @@ def _ensure_employee_leave_days_column(conn) -> None:
         conn.execute(
             f"ALTER TABLE employees ADD COLUMN leave_days INTEGER NOT NULL DEFAULT {DEFAULT_LEAVE_DAYS}"
         )
+
+
+def _ensure_employee_normal_rules_column(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)")}
+    if "normal_rules" not in columns:
+        conn.execute(
+            "ALTER TABLE employees ADD COLUMN normal_rules INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def normalize_normal_rules(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    return text in {"1", "true", "yes", "y", "on", "tele", "tele sales", "telesales", "normal"}
 
 
 def _ensure_payroll_adjustments_table(conn) -> None:
@@ -800,6 +818,7 @@ def normalize_employee_team(department: str, team: str) -> str:
 
 def _row_to_employee(row) -> dict:
     leave_days = row["leave_days"] if "leave_days" in row.keys() else DEFAULT_LEAVE_DAYS
+    normal_rules = row["normal_rules"] if "normal_rules" in row.keys() else 0
     return {
         "id": row["id"],
         "name": row["name"],
@@ -808,6 +827,7 @@ def _row_to_employee(row) -> dict:
         "device": row["device"],
         "team": row["team"] if "team" in row.keys() else "",
         "leave_days": normalize_leave_days(leave_days),
+        "normal_rules": bool(int(normal_rules or 0)),
         "active": bool(row["active"]),
         "created_at": row["created_at"],
     }
@@ -1008,13 +1028,22 @@ def find_employees_by_person(name: str, fingerprint: str) -> list:
     ]
 
 
-def create_employee(name: str, department: str, fingerprint: str, device: str, team: str = "", leave_days=None) -> dict:
+def create_employee(
+    name: str,
+    department: str,
+    fingerprint: str,
+    device: str,
+    team: str = "",
+    leave_days=None,
+    normal_rules=False,
+) -> dict:
     name = name.strip()
     department = department.strip()
     fingerprint = normalize_fingerprint_id(fingerprint)
     device = normalize_device(device)
     team = normalize_employee_team(department, team)
     leave_days = normalize_leave_days(leave_days if leave_days is not None else DEFAULT_LEAVE_DAYS)
+    normal_rules = normalize_normal_rules(normal_rules)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     init_db()
     with DB_LOCK:
@@ -1022,10 +1051,12 @@ def create_employee(name: str, department: str, fingerprint: str, device: str, t
         try:
             cursor = conn.execute(
                 """
-                INSERT INTO employees (name, department, fingerprint, device, team, leave_days, active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                INSERT INTO employees (
+                    name, department, fingerprint, device, team, leave_days, normal_rules, active, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """,
-                (name, department, fingerprint, device, team, leave_days, now),
+                (name, department, fingerprint, device, team, leave_days, int(normal_rules), now),
             )
             conn.commit()
             employee_id = cursor.lastrowid
@@ -1041,16 +1072,27 @@ def create_employee(name: str, department: str, fingerprint: str, device: str, t
         "device": device,
         "team": team,
         "leave_days": leave_days,
+        "normal_rules": normal_rules,
     }
 
 
-def update_employee(employee_id: int, name: str, department: str, fingerprint: str, device: str, team: str = "", leave_days=None) -> bool:
+def update_employee(
+    employee_id: int,
+    name: str,
+    department: str,
+    fingerprint: str,
+    device: str,
+    team: str = "",
+    leave_days=None,
+    normal_rules=False,
+) -> bool:
     name = name.strip()
     department = department.strip()
     fingerprint = normalize_fingerprint_id(fingerprint)
     device = normalize_device(device)
     team = normalize_employee_team(department, team)
     leave_days = normalize_leave_days(leave_days if leave_days is not None else DEFAULT_LEAVE_DAYS)
+    normal_rules = normalize_normal_rules(normal_rules)
     init_db()
     with DB_LOCK:
         conn = db()
@@ -1058,10 +1100,11 @@ def update_employee(employee_id: int, name: str, department: str, fingerprint: s
             cursor = conn.execute(
                 """
                 UPDATE employees
-                SET name = ?, department = ?, fingerprint = ?, device = ?, team = ?, leave_days = ?
+                SET name = ?, department = ?, fingerprint = ?, device = ?, team = ?,
+                    leave_days = ?, normal_rules = ?
                 WHERE id = ?
                 """,
-                (name, department, fingerprint, device, team, leave_days, employee_id),
+                (name, department, fingerprint, device, team, leave_days, int(normal_rules), employee_id),
             )
             conn.commit()
             updated = cursor.rowcount > 0
@@ -1121,6 +1164,9 @@ def import_employees(rows: list, departments: set) -> tuple[dict, list]:
         name = row.get("name") or ""
         department = row.get("department") or ""
         team = row.get("team") or ""
+        normal_rules = normalize_normal_rules(
+            row.get("normal_rules") or row.get("tele_sales") or row.get("telesales") or ""
+        )
         fingerprint = normalize_fingerprint_id(row.get("fingerprint") or row.get("ac-no.") or row.get("ac-no") or "")
         device = normalize_device(row.get("device") or row.get("machine") or "")
         if department not in departments:
@@ -1158,19 +1204,30 @@ def import_employees(rows: list, departments: set) -> tuple[dict, list]:
                 conn.execute(
                     """
                     UPDATE employees
-                    SET name = ?, department = ?, team = ?, active = 1
+                    SET name = ?, department = ?, team = ?, normal_rules = ?, active = 1
                     WHERE id = ?
                     """,
-                    (name.strip(), department.strip(), team, existing["id"]),
+                    (name.strip(), department.strip(), team, int(normal_rules), existing["id"]),
                 )
                 created["updated"] += 1
             else:
                 conn.execute(
                     """
-                    INSERT INTO employees (name, department, fingerprint, device, team, active, created_at)
-                    VALUES (?, ?, ?, ?, ?, 1, ?)
+                    INSERT INTO employees (
+                        name, department, fingerprint, device, team, leave_days, normal_rules, active, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
                     """,
-                    (name.strip(), department.strip(), fingerprint, device, team, now),
+                    (
+                        name.strip(),
+                        department.strip(),
+                        fingerprint,
+                        device,
+                        team,
+                        DEFAULT_LEAVE_DAYS,
+                        int(normal_rules),
+                        now,
+                    ),
                 )
                 created["added"] += 1
             conn.commit()

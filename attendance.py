@@ -526,11 +526,15 @@ def notes_ar(types: list) -> str:
     return " - ".join(labels)
 
 
-def skips_clock_out(department: str) -> bool:
+def skips_clock_out(department: str, normal_rules: bool = False) -> bool:
+    if normal_rules:
+        return False
     return is_sales_department(department)
 
 
-def skips_monthly_saturday(department: str) -> bool:
+def skips_monthly_saturday(department: str, normal_rules: bool = False) -> bool:
+    if normal_rules:
+        return False
     return is_sales_department(department)
 
 
@@ -561,9 +565,10 @@ def classify_day(
     department: str = "",
     holiday: str = "",
     late_excuse_minutes: int = 0,
+    normal_rules: bool = False,
 ) -> dict:
     missing_punch_types = list(missing_punch_types or [])
-    skip_out = skips_clock_out(department)
+    skip_out = skips_clock_out(department, normal_rules)
     missing_keys = {str(item).strip().lower() for item in missing_punch_types}
     has_missing_in = "missing punch in" in missing_keys
     has_missing_out = "missing punch out" in missing_keys
@@ -743,6 +748,7 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
         remaining = MONTHLY_LATE_ALLOWANCE_MINUTES
         name = (employee or {}).get("name") or sample.get("name") or fingerprint
         department = (employee or {}).get("department") or ""
+        normal_rules = bool((employee or {}).get("normal_rules"))
         for day in calendar:
             punch = punches_by_day.get(day) or {
                 "fingerprint": fingerprint,
@@ -769,6 +775,7 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
                 department,
                 holiday_label,
                 excuse_minutes,
+                normal_rules,
             )
             remaining = result["remaining"]
             allowance_used += result["used"]
@@ -830,7 +837,7 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
             if punch.get("clock_in") or punch.get("clock_out") or covering_types(saturday_work, device, fingerprint, day):
                 has_monthly_saturday = True
                 break
-        if saturday_days and not has_monthly_saturday and not skips_monthly_saturday(department):
+        if saturday_days and not has_monthly_saturday and not skips_monthly_saturday(department, normal_rules):
             target = saturday_days[-1]
             for row in export_rows:
                 if row["date"] != target:

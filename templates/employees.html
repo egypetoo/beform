@@ -49,7 +49,7 @@
         <form class="form-shell" method="post" action="{{ url_for('employees_import') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Upload employees</h2>
-            <p class="muted">Excel columns: <strong>name, department, fingerprint, device, team</strong>. Device is F8, F9, or Maadi. Team is optional: leave it empty to link the employee to the department only. Re-uploading the same device + fingerprint updates the record.</p>
+            <p class="muted">Excel columns: <strong>name, department, fingerprint, device, team, normal_rules</strong>. Device is F8, F9, or Maadi. Team is optional: leave it empty to link the employee to the department only. Set <strong>normal_rules</strong> to <strong>1</strong> for Tele Sales (Sales team + normal attendance rules). Re-uploading the same device + fingerprint updates the record.</p>
             <section class="field">
                 <label for="sheet">Employees file</label>
                 <input id="sheet" name="sheet" type="file" accept=".xlsx,.csv" required>
@@ -104,6 +104,14 @@
                        value="{{ default_leave_days }}" required>
                 <p class="muted">Default is {{ default_leave_days }}. Change this to give more or fewer days.</p>
             </section>
+            <section class="field">
+                <label for="normal_rules">Attendance rules</label>
+                <select id="normal_rules" name="normal_rules">
+                    <option value="0" selected>Department default (Sales exceptions if Sales)</option>
+                    <option value="1">Normal rules (Tele Sales)</option>
+                </select>
+                <p class="muted">Use <strong>Normal rules</strong> for Tele Sales: keep their Sales team for review, but apply regular attendance and request rules.</p>
+            </section>
             <button type="submit">Add employee</button>
         </form>
 
@@ -148,6 +156,7 @@
                                 <th>Department</th>
                                 <th>Team</th>
                                 <th>Leave days</th>
+                                <th>Rules</th>
                                 <th>Fingerprint</th>
                                 <th>Device</th>
                                 <th></th>
@@ -162,6 +171,7 @@
                                     data-original-department="{% for dept in departments %}{% if dept.label == employee.department %}{{ dept.value }}{% endif %}{% endfor %}"
                                     data-original-team="{{ employee.team or '' }}"
                                     data-original-leave="{{ employee.leave_days }}"
+                                    data-original-rules="{{ '1' if employee.normal_rules else '0' }}"
                                     data-original-fingerprint="{{ employee.fingerprint }}"
                                     data-original-device="{{ employee.device }}">
                                     <td class="card-check">
@@ -192,6 +202,12 @@
                                         <input form="employee-save-form" class="inline-edit leave-days-input" type="number"
                                                name="leave_days" value="{{ employee.leave_days }}"
                                                min="0" max="365" step="1" required aria-label="Leave days">
+                                    </td>
+                                    <td data-label="Rules">
+                                        <select form="employee-save-form" name="normal_rules" aria-label="Attendance rules">
+                                            <option value="0" {% if not employee.normal_rules %}selected{% endif %}>Sales / default</option>
+                                            <option value="1" {% if employee.normal_rules %}selected{% endif %}>Tele Sales (normal)</option>
+                                        </select>
                                     </td>
                                     <td data-label="Fingerprint">
                                         <input form="employee-save-form" class="inline-edit" type="text" name="fingerprint"
@@ -370,6 +386,7 @@
                 department: (row.querySelector('select[name="department"]') || {}).value || '',
                 team: (row.querySelector('select[name="team"]') || {}).value || '',
                 leave: (row.querySelector('input[name="leave_days"]') || {}).value || '',
+                rules: (row.querySelector('select[name="normal_rules"]') || {}).value || '0',
                 fingerprint: (row.querySelector('input[name="fingerprint"]') || {}).value || '',
                 device: (row.querySelector('select[name="device"]') || {}).value || '',
             };
@@ -381,6 +398,7 @@
                 || current.department !== (row.dataset.originalDepartment || '')
                 || current.team !== (row.dataset.originalTeam || '')
                 || String(current.leave) !== String(row.dataset.originalLeave || '')
+                || String(current.rules) !== String(row.dataset.originalRules || '0')
                 || current.fingerprint !== (row.dataset.originalFingerprint || '')
                 || current.device !== (row.dataset.originalDevice || '')
             );
