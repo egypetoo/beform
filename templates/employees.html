@@ -205,9 +205,8 @@
                                     </td>
                                     <td data-label="Rules">
                                         <select form="employee-save-form" name="normal_rules" aria-label="Attendance rules"
-                                                class="employee-rules">
-                                            <option value="0" {% if not employee.normal_rules %}selected{% endif %}>Sales</option>
-                                            <option value="1" {% if employee.normal_rules %}selected{% endif %}>Tele Sales</option>
+                                                class="employee-rules"
+                                                data-rules="{{ '1' if employee.normal_rules else '0' }}">
                                         </select>
                                     </td>
                                     <td data-label="Fingerprint">
@@ -251,13 +250,26 @@
         function syncRulesVisibility(deptSelect, rulesSelect) {
             if (!rulesSelect) return;
             const sales = isSalesDepartment(deptSelect ? deptSelect.value : '');
-            // Keep the field enabled so bulk save still posts a value for every row.
-            rulesSelect.value = sales ? rulesSelect.value : '0';
-            rulesSelect.style.opacity = sales ? '1' : '0.35';
-            rulesSelect.style.pointerEvents = sales ? '' : 'none';
-            rulesSelect.title = sales
-                ? 'Sales vs Tele Sales rules'
-                : 'Only available for Sales department';
+            const current = sales
+                ? ((rulesSelect.value || rulesSelect.dataset.rules || '0') === '1' ? '1' : '0')
+                : '0';
+            rulesSelect.innerHTML = '';
+            if (sales) {
+                rulesSelect.appendChild(new Option('Sales exceptions', '0'));
+                rulesSelect.appendChild(new Option('Tele Sales (normal)', '1'));
+                rulesSelect.value = current;
+                rulesSelect.dataset.rules = current;
+                rulesSelect.style.opacity = '1';
+                rulesSelect.style.pointerEvents = '';
+                rulesSelect.title = 'Sales field staff vs Tele Sales';
+            } else {
+                rulesSelect.appendChild(new Option('—', '0'));
+                rulesSelect.value = '0';
+                rulesSelect.dataset.rules = '0';
+                rulesSelect.style.opacity = '0.45';
+                rulesSelect.style.pointerEvents = 'none';
+                rulesSelect.title = 'Not used outside Sales';
+            }
         }
 
         function fillTeamSelect(select, departmentValue, selectedTeam) {
@@ -303,9 +315,16 @@
             };
             deptSelect.addEventListener('change', () => {
                 select.dataset.team = '';
+                if (rulesSelect) rulesSelect.dataset.rules = '0';
                 refresh();
             });
             refresh();
+        });
+
+        document.querySelectorAll('.employee-rules').forEach((select) => {
+            select.addEventListener('change', () => {
+                select.dataset.rules = select.value || '0';
+            });
         });
 
         document.querySelectorAll('input[name="name"]').forEach((input) => {
