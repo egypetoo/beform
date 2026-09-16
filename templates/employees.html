@@ -104,13 +104,13 @@
                        value="{{ default_leave_days }}" required>
                 <p class="muted">Default is {{ default_leave_days }}. Change this to give more or fewer days.</p>
             </section>
-            <section class="field">
+            <section class="field" id="normal-rules-card" hidden>
                 <label for="normal_rules">Attendance rules</label>
                 <select id="normal_rules" name="normal_rules">
-                    <option value="0" selected>Department default (Sales exceptions if Sales)</option>
-                    <option value="1">Normal rules (Tele Sales)</option>
+                    <option value="0" selected>Sales (default exceptions)</option>
+                    <option value="1">Tele Sales (normal rules)</option>
                 </select>
-                <p class="muted">Use <strong>Normal rules</strong> for Tele Sales: keep their Sales team for review, but apply regular attendance and request rules.</p>
+                <p class="muted">Only for Sales. Tele Sales stay on a Sales team for review, but follow normal attendance/request rules.</p>
             </section>
             <button type="submit">Add employee</button>
         </form>
@@ -204,9 +204,10 @@
                                                min="0" max="365" step="1" required aria-label="Leave days">
                                     </td>
                                     <td data-label="Rules">
-                                        <select form="employee-save-form" name="normal_rules" aria-label="Attendance rules">
-                                            <option value="0" {% if not employee.normal_rules %}selected{% endif %}>Sales / default</option>
-                                            <option value="1" {% if employee.normal_rules %}selected{% endif %}>Tele Sales (normal)</option>
+                                        <select form="employee-save-form" name="normal_rules" aria-label="Attendance rules"
+                                                class="employee-rules">
+                                            <option value="0" {% if not employee.normal_rules %}selected{% endif %}>Sales</option>
+                                            <option value="1" {% if employee.normal_rules %}selected{% endif %}>Tele Sales</option>
                                         </select>
                                     </td>
                                     <td data-label="Fingerprint">
@@ -241,6 +242,23 @@
     </main>
     <script>
         const teamsForDepartment = {{ teams_for_department | tojson }};
+        const salesDepartments = {{ sales_department_values | tojson }};
+
+        function isSalesDepartment(value) {
+            return salesDepartments.includes(value || '');
+        }
+
+        function syncRulesVisibility(deptSelect, rulesSelect) {
+            if (!rulesSelect) return;
+            const sales = isSalesDepartment(deptSelect ? deptSelect.value : '');
+            // Keep the field enabled so bulk save still posts a value for every row.
+            rulesSelect.value = sales ? rulesSelect.value : '0';
+            rulesSelect.style.opacity = sales ? '1' : '0.35';
+            rulesSelect.style.pointerEvents = sales ? '' : 'none';
+            rulesSelect.title = sales
+                ? 'Sales vs Tele Sales rules'
+                : 'Only available for Sales department';
+        }
 
         function fillTeamSelect(select, departmentValue, selectedTeam) {
             const teams = teamsForDepartment[departmentValue] || [];
@@ -256,16 +274,33 @@
 
         const addDepartment = document.getElementById('department');
         const addTeam = document.getElementById('team');
+        const addRulesCard = document.getElementById('normal-rules-card');
+        const addRules = document.getElementById('normal_rules');
+        function syncAddRules() {
+            const sales = isSalesDepartment(addDepartment ? addDepartment.value : '');
+            if (addRulesCard) addRulesCard.hidden = !sales;
+            if (addRules) {
+                if (!sales) addRules.value = '0';
+            }
+        }
         if (addDepartment && addTeam) {
-            addDepartment.addEventListener('change', () => fillTeamSelect(addTeam, addDepartment.value, ''));
+            addDepartment.addEventListener('change', () => {
+                fillTeamSelect(addTeam, addDepartment.value, '');
+                syncAddRules();
+            });
             fillTeamSelect(addTeam, addDepartment.value, '');
+            syncAddRules();
         }
 
         document.querySelectorAll('.employee-team').forEach((select) => {
             const row = select.closest('tr');
             const deptSelect = row ? row.querySelector('.employee-department') : null;
+            const rulesSelect = row ? row.querySelector('.employee-rules') : null;
             if (!deptSelect) return;
-            const refresh = () => fillTeamSelect(select, deptSelect.value, select.dataset.team || '');
+            const refresh = () => {
+                fillTeamSelect(select, deptSelect.value, select.dataset.team || '');
+                syncRulesVisibility(deptSelect, rulesSelect);
+            };
             deptSelect.addEventListener('change', () => {
                 select.dataset.team = '';
                 refresh();

@@ -2736,6 +2736,7 @@ def employees_admin_context() -> dict:
         },
         "leave_balance_visible": user_store.leave_balance_visible(),
         "default_leave_days": user_store.DEFAULT_LEAVE_DAYS,
+        "sales_department_values": sales_department_values(),
     }
 
 
@@ -2877,6 +2878,8 @@ def save_employees_bulk_from_form() -> tuple[int, list]:
         leave_days = leave_days_list[index]
         normal_rules = normal_rules_list[index]
         department_label = maps["labels"].get(department_value, department_value)
+        if not attendance.is_sales_department(department_label):
+            normal_rules = "0"
         issues = user_store.validate_employee(
             name,
             department_label,
@@ -2950,6 +2953,8 @@ def employees_admin():
         leave_days = request.form.get("leave_days", str(user_store.DEFAULT_LEAVE_DAYS))
         normal_rules = request.form.get("normal_rules") == "1"
         department_label = maps["labels"].get(department_value, "")
+        if not attendance.is_sales_department(department_label):
+            normal_rules = False
         errors = user_store.validate_employee(
             name,
             department_label,

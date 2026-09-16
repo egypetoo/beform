@@ -184,6 +184,13 @@ def normalize_normal_rules(value) -> bool:
     return text in {"1", "true", "yes", "y", "on", "tele", "tele sales", "telesales", "normal"}
 
 
+def department_allows_normal_rules(department: str) -> bool:
+    text = " ".join((department or "").strip().lower().split())
+    if not text:
+        return False
+    return text in {"sales", "مبيعات"} or "sales" in text or "مبيعات" in text
+
+
 def _ensure_payroll_adjustments_table(conn) -> None:
     conn.execute(
         """
@@ -1043,7 +1050,7 @@ def create_employee(
     device = normalize_device(device)
     team = normalize_employee_team(department, team)
     leave_days = normalize_leave_days(leave_days if leave_days is not None else DEFAULT_LEAVE_DAYS)
-    normal_rules = normalize_normal_rules(normal_rules)
+    normal_rules = normalize_normal_rules(normal_rules) and department_allows_normal_rules(department)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     init_db()
     with DB_LOCK:
@@ -1092,7 +1099,7 @@ def update_employee(
     device = normalize_device(device)
     team = normalize_employee_team(department, team)
     leave_days = normalize_leave_days(leave_days if leave_days is not None else DEFAULT_LEAVE_DAYS)
-    normal_rules = normalize_normal_rules(normal_rules)
+    normal_rules = normalize_normal_rules(normal_rules) and department_allows_normal_rules(department)
     init_db()
     with DB_LOCK:
         conn = db()
@@ -1173,6 +1180,8 @@ def import_employees(rows: list, departments: set) -> tuple[dict, list]:
             canonical = next((item for item in departments if item.lower() == department.lower()), "")
             department = canonical or department
         team = normalize_employee_team(department, team)
+        if not department_allows_normal_rules(department):
+            normal_rules = False
         key = (device, fingerprint)
         if fingerprint and device and key in seen:
             errors.append(f"Row {index}: fingerprint {fingerprint} on {device} is duplicated in the file.")
