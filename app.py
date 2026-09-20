@@ -168,7 +168,27 @@ def today_values():
     return {
         "today": now.strftime("%Y-%m-%d"),
         "today_display": now.strftime("%A, %B %d, %Y"),
+        "today_is_saturday": now.weekday() == 5,
     }
+
+
+def leave_groups_for_form() -> list:
+    if not today_values()["today_is_saturday"]:
+        return LEAVE_GROUPS
+    saturday_options = []
+    for group in LEAVE_GROUPS:
+        for option in group["options"]:
+            if option["value"] == "monthly_saturday":
+                saturday_options.append(option)
+    if not saturday_options:
+        return []
+    return [
+        {
+            "title": "Work",
+            "title_ar": "العمل",
+            "options": saturday_options,
+        }
+    ]
 
 
 def shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
@@ -900,7 +920,7 @@ def employees_for_fingerprint_lookup(fingerprint: str) -> list:
 def index_context(form) -> dict:
     mark_form_opened()
     return {
-        "leave_groups": LEAVE_GROUPS,
+        "leave_groups": leave_groups_for_form(),
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
         "official_holidays": official_holidays_for_form(),
@@ -1489,6 +1509,8 @@ def index():
                 team = ""
         if request_type not in options:
             errors.append("Request type is required")
+        if today_values()["today_is_saturday"] and request_type and request_type != "monthly_saturday":
+            errors.append("On Saturdays only Monthly Saturday Work can be submitted.")
         department_label = matched_department or department_maps()["labels"].get(department, "")
         uses_sales_exceptions = (
             attendance.is_sales_department(department_label)

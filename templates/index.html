@@ -95,6 +95,9 @@
                         </optgroup>
                     {% endfor %}
                 </select>
+                {% if today_is_saturday %}
+                    <p class="field-hint">Today is Saturday — only Monthly Saturday Work is available.</p>
+                {% endif %}
             </section>
 
             <section class="field leave-dates" id="leave-dates-card">
@@ -177,6 +180,7 @@
         const saturdayType = 'monthly_saturday';
         const personalExcuse = 'personal_excuse';
         const today = '{{ today }}';
+        const todayIsSaturday = {{ 'true' if today_is_saturday else 'false' }};
 
         function weekday(value) {
             if (!value) return -1;
@@ -323,13 +327,40 @@
             );
             Array.from(requestType.options).forEach((option) => {
                 if (!option.value) return;
-                const blocked = applySalesBlock && salesBlockedTypes.includes(option.value);
+                let blocked = false;
+                if (todayIsSaturday && option.value !== saturdayType) {
+                    blocked = true;
+                }
+                if (applySalesBlock && salesBlockedTypes.includes(option.value)) {
+                    blocked = true;
+                }
                 option.hidden = blocked;
                 option.disabled = blocked;
             });
-            if (applySalesBlock && salesBlockedTypes.includes(requestType.value)) {
+            Array.from(requestType.querySelectorAll('optgroup')).forEach((group) => {
+                const visible = Array.from(group.querySelectorAll('option')).some(
+                    (option) => !option.hidden && !option.disabled
+                );
+                group.hidden = !visible;
+                group.disabled = !visible;
+            });
+            const selected = requestType.options[requestType.selectedIndex];
+            if (selected && selected.value && (selected.hidden || selected.disabled)) {
                 requestType.value = '';
                 updateFields();
+            }
+            if (
+                todayIsSaturday
+                && !applySalesBlock
+                && !requestType.value
+            ) {
+                const saturdayOption = Array.from(requestType.options).find(
+                    (option) => option.value === saturdayType && !option.hidden && !option.disabled
+                );
+                if (saturdayOption) {
+                    requestType.value = saturdayType;
+                    updateFields();
+                }
             }
         }
 
