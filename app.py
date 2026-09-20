@@ -84,13 +84,48 @@ else:
     limiter = None
 
 
-def limit_route(limit_value: str):
-    """Apply Flask-Limiter to POST requests when installed; otherwise no-op."""
+def limit_route(limit_value):
+    """Apply Flask-Limiter to POST requests when installed; otherwise no-op.
+
+    limit_value may be a string (e.g. \"10 per minute\") or a callable that
+    returns such a string, so limits can change by day of month.
+    """
     def decorator(view):
         if limiter is None:
             return view
         return limiter.limit(limit_value, methods=["POST"])(view)
     return decorator
+
+
+def in_form_batch_window(day: int | None = None) -> bool:
+    current = datetime.now().day if day is None else int(day)
+    return FORM_BATCH_WINDOW_START_DAY <= current <= FORM_BATCH_WINDOW_END_DAY
+
+
+def form_rate_limits() -> dict:
+    if in_form_batch_window():
+        return {
+            "ip": BATCH_FORM_SUBMITS_PER_IP,
+            "fp": BATCH_FORM_SUBMITS_PER_FP,
+            "fp_day": BATCH_FORM_SUBMITS_PER_FP_DAY,
+            "ip_window": FORM_SUBMIT_WINDOW_SECONDS,
+            "fp_window": FORM_FP_WINDOW_SECONDS,
+            "fp_day_window": FORM_FP_DAY_WINDOW_SECONDS,
+            "batch": True,
+        }
+    return {
+        "ip": MAX_FORM_SUBMITS_PER_IP,
+        "fp": MAX_FORM_SUBMITS_PER_FP,
+        "fp_day": MAX_FORM_SUBMITS_PER_FP_DAY,
+        "ip_window": FORM_SUBMIT_WINDOW_SECONDS,
+        "fp_window": FORM_FP_WINDOW_SECONDS,
+        "fp_day_window": FORM_FP_DAY_WINDOW_SECONDS,
+        "batch": False,
+    }
+
+
+def form_flask_limit() -> str:
+    return "60 per minute" if in_form_batch_window() else "30 per minute"
 
 
 ROWS_CACHE = {}
@@ -113,25 +148,33 @@ MAX_TRACK_ATTEMPTS = 8
 TRACK_WINDOW_SECONDS = 300
 FORM_SUBMIT_ATTEMPTS = {}
 FORM_SUBMIT_LOCK = Lock()
-# Shared office IPs need headroom; per-fingerprint caps the individual.
+# Normal days (outside 20–25). Shared office IPs need headroom.
 MAX_FORM_SUBMITS_PER_IP = 20
 FORM_SUBMIT_WINDOW_SECONDS = 60
 FORM_FP_ATTEMPTS = {}
-# Allows end-of-month batching (~5 requests per minute per employee).
 MAX_FORM_SUBMITS_PER_FP = 5
 FORM_FP_WINDOW_SECONDS = 60
 FORM_FP_DAY_ATTEMPTS = {}
 MAX_FORM_SUBMITS_PER_FP_DAY = 40
 FORM_FP_DAY_WINDOW_SECONDS = 86400
+# Days 20–25: end-of-cycle batching window (more open).
+BATCH_FORM_SUBMITS_PER_IP = 40
+BATCH_FORM_SUBMITS_PER_FP = 10
+BATCH_FORM_SUBMITS_PER_FP_DAY = 80
+FORM_BATCH_WINDOW_START_DAY = 20
+FORM_BATCH_WINDOW_END_DAY = 25
 LOOKUP_ATTEMPTS = {}
 LOOKUP_LOCK = Lock()
 LOOKUP_FP_ATTEMPTS = {}
-MAX_LOOKUPS_PER_IP = 8
+# Shared office Wi‑Fi: many people type fingerprints in a short window.
+MAX_LOOKUPS_PER_IP = 40
 LOOKUP_WINDOW_SECONDS = 300
-MAX_LOOKUPS_PER_FP = 4
+MAX_LOOKUPS_PER_FP = 15
 LOOKUP_FP_WINDOW_SECONDS = 3600
 LOOKUP_HIT_ATTEMPTS = {}
-MAX_LOOKUP_HITS_PER_IP = 12
+# Successful name reveals per IP per day (office shared IP needs headroom).
+MAX_LOOKUP_HITS_PER_IP = 120
+BATCH_LOOKUP_HITS_PER_IP = 250
 LOOKUP_HIT_WINDOW_SECONDS = 86400
 LOOKUP_TICKET_SECONDS = 3600
 LOOKUP_MIN_MS = 0.12
@@ -512,11 +555,12 @@ def lookup_fingerprint_is_limited(fingerprint: str) -> bool:
 
 
 def lookup_hits_are_limited(ip: str) -> bool:
+    max_hits = BATCH_LOOKUP_HITS_PER_IP if in_form_batch_window() else MAX_LOOKUP_HITS_PER_IP
     return _rate_limited(
         LOOKUP_HIT_ATTEMPTS,
         LOOKUP_LOCK,
         ip or "unknown",
-        MAX_LOOKUP_HITS_PER_IP,
+        max_hits,
         LOOKUP_HIT_WINDOW_SECONDS,
     )
 
@@ -711,32 +755,35 @@ def _rate_limited(store: dict, lock: Lock, key: str, max_count: int, window_seco
 
 
 def form_submit_is_limited(ip: str) -> bool:
+    limits = form_rate_limits()
     return _rate_limited(
         FORM_SUBMIT_ATTEMPTS,
         FORM_SUBMIT_LOCK,
         ip or "unknown",
-        MAX_FORM_SUBMITS_PER_IP,
-        FORM_SUBMIT_WINDOW_SECONDS,
+        limits["ip"],
+        limits["ip_window"],
     )
 
 
 def form_fingerprint_is_limited(fingerprint: str) -> bool:
+    limits = form_rate_limits()
     return _rate_limited(
         FORM_FP_ATTEMPTS,
         FORM_SUBMIT_LOCK,
         normalize_fingerprint(fingerprint),
-        MAX_FORM_SUBMITS_PER_FP,
-        FORM_FP_WINDOW_SECONDS,
+        limits["fp"],
+        limits["fp_window"],
     )
 
 
 def form_fingerprint_day_is_limited(fingerprint: str) -> bool:
+    limits = form_rate_limits()
     return _rate_limited(
         FORM_FP_DAY_ATTEMPTS,
         FORM_SUBMIT_LOCK,
         normalize_fingerprint(fingerprint),
-        MAX_FORM_SUBMITS_PER_FP_DAY,
-        FORM_FP_DAY_WINDOW_SECONDS,
+        limits["fp_day"],
+        limits["fp_day_window"],
     )
 
 
@@ -1424,7 +1471,7 @@ def pwa_service_worker():
 
 
 @app.route("/", methods=["GET", "POST"])
-@limit_route("30 per minute")
+@limit_route(form_flask_limit)
 def index():
     schedule_sheet_sync()
     options = option_lookup()
@@ -1646,9 +1693,12 @@ def index():
             return render_template("index.html", **index_context(request.form))
 
         if form_fingerprint_is_limited(fingerprint_id) or form_fingerprint_day_is_limited(fingerprint_id):
+            limits = form_rate_limits()
             flash(
-                "Too many requests for this fingerprint. You can submit up to 5 per minute "
-                "(and up to 40 per day). Please wait a minute and try again.",
+                f"Too many requests for this fingerprint. You can submit up to {limits['fp']} per minute "
+                f"(and up to {limits['fp_day']} per day"
+                + (" during days 20–25" if limits["batch"] else "")
+                + "). Please wait a minute and try again.",
                 "error",
             )
             return render_template("index.html", **index_context(request.form))
