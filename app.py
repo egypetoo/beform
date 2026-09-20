@@ -113,13 +113,15 @@ MAX_TRACK_ATTEMPTS = 8
 TRACK_WINDOW_SECONDS = 300
 FORM_SUBMIT_ATTEMPTS = {}
 FORM_SUBMIT_LOCK = Lock()
-MAX_FORM_SUBMITS_PER_IP = 5
-FORM_SUBMIT_WINDOW_SECONDS = 600
+# Shared office IPs need headroom; per-fingerprint caps the individual.
+MAX_FORM_SUBMITS_PER_IP = 20
+FORM_SUBMIT_WINDOW_SECONDS = 60
 FORM_FP_ATTEMPTS = {}
-MAX_FORM_SUBMITS_PER_FP = 4
-FORM_FP_WINDOW_SECONDS = 3600
+# Allows end-of-month batching (~5 requests per minute per employee).
+MAX_FORM_SUBMITS_PER_FP = 5
+FORM_FP_WINDOW_SECONDS = 60
 FORM_FP_DAY_ATTEMPTS = {}
-MAX_FORM_SUBMITS_PER_FP_DAY = 6
+MAX_FORM_SUBMITS_PER_FP_DAY = 40
 FORM_FP_DAY_WINDOW_SECONDS = 86400
 LOOKUP_ATTEMPTS = {}
 LOOKUP_LOCK = Lock()
@@ -1422,7 +1424,7 @@ def pwa_service_worker():
 
 
 @app.route("/", methods=["GET", "POST"])
-@limit_route("20 per 10 minutes")
+@limit_route("30 per minute")
 def index():
     schedule_sheet_sync()
     options = option_lookup()
@@ -1440,7 +1442,7 @@ def index():
             return render_template("index.html", **index_context(request.form))
 
         if form_submit_is_limited(client_ip()):
-            flash("Too many requests from this connection. Please wait a few minutes and try again.", "error")
+            flash("Too many requests from this connection. Please wait about a minute and try again.", "error")
             return render_template("index.html", **index_context(request.form))
 
         fingerprint_id = request.form.get("fingerprint_id", "").strip()
@@ -1644,7 +1646,11 @@ def index():
             return render_template("index.html", **index_context(request.form))
 
         if form_fingerprint_is_limited(fingerprint_id) or form_fingerprint_day_is_limited(fingerprint_id):
-            flash("Too many requests for this fingerprint. Please wait and try again later.", "error")
+            flash(
+                "Too many requests for this fingerprint. You can submit up to 5 per minute "
+                "(and up to 40 per day). Please wait a minute and try again.",
+                "error",
+            )
             return render_template("index.html", **index_context(request.form))
 
         try:
