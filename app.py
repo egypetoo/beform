@@ -2002,7 +2002,7 @@ def logout():
 
 
 def remote_work_days_summary(rows: list, date_from: str = "", date_to: str = "") -> dict:
-    """Unique approved Work Remotely days per employee (overlaps counted once)."""
+    """Unique approved remote + annual vacation days per employee (overlaps once)."""
     if not date_from and not date_to:
         start = cycle_start_for(datetime.now())
         end = cycle_end_for(start)
@@ -2019,7 +2019,11 @@ def remote_work_days_summary(rows: list, date_from: str = "", date_to: str = "")
         if status != "approved":
             continue
         request_type = str(row.get("Request Type") or "").strip().lower()
-        if request_type != "work remotely":
+        if request_type == "work remotely":
+            bucket = "remote"
+        elif request_type == "annual vacation":
+            bucket = "vacation"
+        else:
             continue
         fingerprint = normalize_fingerprint(row.get("Fingerprint Number"))
         if not fingerprint:
@@ -2042,32 +2046,51 @@ def remote_work_days_summary(rows: list, date_from: str = "", date_to: str = "")
                 "device": str(row.get("Device") or "").strip(),
                 "department": str(row.get("Department") or "").strip(),
                 "team": str(row.get("Team") or "").strip(),
-                "days": set(),
-                "requests": 0,
+                "remote_days": set(),
+                "remote_requests": 0,
+                "vacation_days": set(),
+                "vacation_requests": 0,
             }
             by_person[key] = item
-        item["days"].update(days)
-        item["requests"] += 1
+        if bucket == "remote":
+            item["remote_days"].update(days)
+            item["remote_requests"] += 1
+        else:
+            item["vacation_days"].update(days)
+            item["vacation_requests"] += 1
         if not item["name"] and row.get("Name"):
             item["name"] = str(row.get("Name")).strip()
 
     summary = []
     for item in by_person.values():
+        remote_count = len(item["remote_days"])
+        vacation_count = len(item["vacation_days"])
         summary.append({
             "name": item["name"],
             "fingerprint": item["fingerprint"],
             "device": item["device"],
             "department": item["department"],
             "team": item["team"],
-            "days": len(item["days"]),
-            "requests": item["requests"],
+            "days": remote_count,
+            "requests": item["remote_requests"],
+            "vacation_days": vacation_count,
+            "vacation_requests": item["vacation_requests"],
         })
-    summary.sort(key=lambda row: (-row["days"], row["name"].lower(), row["fingerprint"]))
+    summary.sort(
+        key=lambda row: (
+            -(row["days"] + row["vacation_days"]),
+            -row["days"],
+            -row["vacation_days"],
+            row["name"].lower(),
+            row["fingerprint"],
+        )
+    )
     return {
         "date_from": date_from,
         "date_to": date_to,
         "total_people": len(summary),
         "total_days": sum(item["days"] for item in summary),
+        "total_vacation_days": sum(item["vacation_days"] for item in summary),
         "people": summary,
     }
 

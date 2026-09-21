@@ -95,9 +95,9 @@
 
             {% if remote_summary %}
                 <section class="leave-balance-card" style="margin: 1rem 0 1.25rem;">
-                    <h2 class="section-title">Work Remotely summary</h2>
+                    <h2 class="section-title">Remote & vacation summary</h2>
                     <p class="muted">
-                        Unique approved remote days
+                        Unique approved Work Remotely and Annual Vacation days
                         ({{ remote_summary.date_from }} → {{ remote_summary.date_to }}).
                         Overlapping requests count each day once.
                         {% if not date_from and not date_to %}
@@ -107,7 +107,8 @@
                     {% if remote_summary.people %}
                         <p class="muted">
                             {{ remote_summary.total_people }} employee{{ 's' if remote_summary.total_people != 1 else '' }}
-                            · {{ remote_summary.total_days }} unique day{{ 's' if remote_summary.total_days != 1 else '' }}
+                            · {{ remote_summary.total_days }} remote day{{ 's' if remote_summary.total_days != 1 else '' }}
+                            · {{ remote_summary.total_vacation_days }} vacation day{{ 's' if remote_summary.total_vacation_days != 1 else '' }}
                         </p>
                         <div class="table-wrap">
                             <table>
@@ -117,7 +118,9 @@
                                         <th>Fingerprint</th>
                                         <th>Team</th>
                                         <th>Remote days</th>
-                                        <th>Requests</th>
+                                        <th>Remote requests</th>
+                                        <th>Vacation days</th>
+                                        <th>Vacation requests</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -127,14 +130,16 @@
                                             <td data-label="Fingerprint">{{ person.fingerprint }}</td>
                                             <td data-label="Team">{{ person.team or '—' }}</td>
                                             <td data-label="Remote days"><strong>{{ person.days }}</strong></td>
-                                            <td data-label="Requests">{{ person.requests }}</td>
+                                            <td data-label="Remote requests">{{ person.requests }}</td>
+                                            <td data-label="Vacation days"><strong>{{ person.vacation_days }}</strong></td>
+                                            <td data-label="Vacation requests">{{ person.vacation_requests }}</td>
                                         </tr>
                                     {% endfor %}
                                 </tbody>
                             </table>
                         </div>
                     {% else %}
-                        <p class="empty-state">No approved Work Remotely days in this range.</p>
+                        <p class="empty-state">No approved remote or vacation days in this range.</p>
                     {% endif %}
                 </section>
             {% endif %}
