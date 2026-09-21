@@ -93,6 +93,52 @@
                 {% endfor %}
             </div>
 
+            {% if remote_summary %}
+                <section class="leave-balance-card" style="margin: 1rem 0 1.25rem;">
+                    <h2 class="section-title">Work Remotely summary</h2>
+                    <p class="muted">
+                        Unique approved remote days
+                        ({{ remote_summary.date_from }} → {{ remote_summary.date_to }}).
+                        Overlapping requests count each day once.
+                        {% if not date_from and not date_to %}
+                            Default range is the current payroll cycle (26th–25th). Use From/To to change it.
+                        {% endif %}
+                    </p>
+                    {% if remote_summary.people %}
+                        <p class="muted">
+                            {{ remote_summary.total_people }} employee{{ 's' if remote_summary.total_people != 1 else '' }}
+                            · {{ remote_summary.total_days }} unique day{{ 's' if remote_summary.total_days != 1 else '' }}
+                        </p>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Fingerprint</th>
+                                        <th>Team</th>
+                                        <th>Remote days</th>
+                                        <th>Requests</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for person in remote_summary.people %}
+                                        <tr>
+                                            <td class="card-name" data-label="Name">{{ person.name }}</td>
+                                            <td data-label="Fingerprint">{{ person.fingerprint }}</td>
+                                            <td data-label="Team">{{ person.team or '—' }}</td>
+                                            <td data-label="Remote days"><strong>{{ person.days }}</strong></td>
+                                            <td data-label="Requests">{{ person.requests }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <p class="empty-state">No approved Work Remotely days in this range.</p>
+                    {% endif %}
+                </section>
+            {% endif %}
+
             {% if rows %}
                 <form method="post" action="{{ url_for('update_status') }}" id="bulk-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

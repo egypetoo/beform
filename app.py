@@ -1197,6 +1197,7 @@ def check_create_conflicts(data: dict, existing_rows: list) -> dict:
 
     duplicate = False
     remote_conflict = False
+    remote_overlap = False
     saturday_conflict = False
 
     for row in existing_rows:
@@ -1239,6 +1240,8 @@ def check_create_conflicts(data: dict, existing_rows: list) -> dict:
                 remote_conflict = True
             if new_is_remote and existing_type in {"missing punch in", "missing punch out"}:
                 remote_conflict = True
+            if new_is_remote and existing_type == "work remotely":
+                remote_overlap = True
             if new_is_saturday and existing_type in {
                 "work remotely",
                 "annual vacation",
@@ -1252,6 +1255,8 @@ def check_create_conflicts(data: dict, existing_rows: list) -> dict:
 
     if duplicate:
         return {"duplicate": True}
+    if remote_overlap:
+        return {"conflict": True, "conflict_type": "remote_overlap"}
     if remote_conflict:
         return {"conflict": True}
     if saturday_conflict:
@@ -1688,6 +1693,12 @@ def index():
         if conflict.get("conflict"):
             if conflict.get("conflict_type") == "saturday":
                 flash("This Saturday overlaps another leave request.", "error")
+            elif conflict.get("conflict_type") == "remote_overlap":
+                flash(
+                    "This Work Remotely period overlaps another remote request. "
+                    "Choose dates that are not already covered.",
+                    "error",
+                )
             else:
                 flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
             return render_template("index.html", **index_context(request.form))
@@ -1990,6 +2001,77 @@ def logout():
     return redirect(url_for("login"))
 
 
+def remote_work_days_summary(rows: list, date_from: str = "", date_to: str = "") -> dict:
+    """Unique approved Work Remotely days per employee (overlaps counted once)."""
+    if not date_from and not date_to:
+        start = cycle_start_for(datetime.now())
+        end = cycle_end_for(start)
+        date_from = start.strftime("%Y-%m-%d")
+        date_to = end.strftime("%Y-%m-%d")
+    elif date_from and not date_to:
+        date_to = date_from
+    elif date_to and not date_from:
+        date_from = date_to
+
+    by_person = {}
+    for row in rows or []:
+        status = str(row.get("Status") or "Pending").strip().lower()
+        if status != "approved":
+            continue
+        request_type = str(row.get("Request Type") or "").strip().lower()
+        if request_type != "work remotely":
+            continue
+        fingerprint = normalize_fingerprint(row.get("Fingerprint Number"))
+        if not fingerprint:
+            continue
+        days = set()
+        for day in attendance.date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+            if date_from and day < date_from:
+                continue
+            if date_to and day > date_to:
+                continue
+            days.add(day)
+        if not days:
+            continue
+        key = (fingerprint, str(row.get("Device") or "").strip().lower())
+        item = by_person.get(key)
+        if not item:
+            item = {
+                "name": str(row.get("Name") or "").strip() or fingerprint,
+                "fingerprint": fingerprint,
+                "device": str(row.get("Device") or "").strip(),
+                "department": str(row.get("Department") or "").strip(),
+                "team": str(row.get("Team") or "").strip(),
+                "days": set(),
+                "requests": 0,
+            }
+            by_person[key] = item
+        item["days"].update(days)
+        item["requests"] += 1
+        if not item["name"] and row.get("Name"):
+            item["name"] = str(row.get("Name")).strip()
+
+    summary = []
+    for item in by_person.values():
+        summary.append({
+            "name": item["name"],
+            "fingerprint": item["fingerprint"],
+            "device": item["device"],
+            "department": item["department"],
+            "team": item["team"],
+            "days": len(item["days"]),
+            "requests": item["requests"],
+        })
+    summary.sort(key=lambda row: (-row["days"], row["name"].lower(), row["fingerprint"]))
+    return {
+        "date_from": date_from,
+        "date_to": date_to,
+        "total_people": len(summary),
+        "total_days": sum(item["days"] for item in summary),
+        "people": summary,
+    }
+
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -2052,6 +2134,28 @@ def dashboard():
             row for row in rows
             if str(row.get("Team") or "").strip().lower() == team_filter.lower()
         ]
+
+    # Summary ignores status/type table chips so managers always see remote totals.
+    summary_rows = list(rows)
+    if date_from or date_to:
+        summary_rows = [row for row in summary_rows if row_matches_date_range(row, date_from, date_to)]
+    if search_query:
+        needle = search_query.lower()
+        summary_rows = [
+            row for row in summary_rows
+            if needle in " ".join([
+                str(row.get("Name") or ""),
+                str(row.get("Fingerprint Number") or ""),
+                str(row.get("Device") or ""),
+                str(row.get("Department") or ""),
+                str(row.get("Team") or ""),
+                str(row.get("Request Type") or ""),
+                str(row.get("Notes") or ""),
+                str(row.get("Rejection Reason") or ""),
+            ]).lower()
+        ]
+    remote_summary = remote_work_days_summary(summary_rows, date_from, date_to)
+
     if status_filter and status_filter != "All":
         rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
     if type_filter:
@@ -2078,6 +2182,7 @@ def dashboard():
         "dashboard.html",
         manager=manager,
         rows=rows,
+        remote_summary=remote_summary,
         status_filter=status_filter,
         search_query=search_query,
         type_filter=type_filter,
