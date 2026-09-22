@@ -168,6 +168,9 @@
                         <button class="btn-sm btn-approve" type="submit" data-action="Approved">Approve selected</button>
                         <button class="btn-sm btn-reject" type="submit" data-action="Rejected">Reject selected</button>
                     </div>
+                    <p class="muted" style="margin:0.35rem 0 0.75rem;">
+                        You can change Approved ↔ Rejected later. Rejecting still requires a reason.
+                    </p>
 
                     <div class="table-wrap">
                         <table>
@@ -194,7 +197,7 @@
                                     {% set current_status = row.get('Status') or 'Pending' %}
                                     <tr>
                                         <td class="card-check">
-                                            {% if current_status == 'Pending' and row.get('Request ID') %}
+                                            {% if row.get('Request ID') and current_status in ['Pending', 'Approved', 'Rejected'] %}
                                                 <input class="row-check" type="checkbox" name="selected"
                                                        value="{{ row.get('Request ID') }}||{{ row.get('Department', '') }}">
                                             {% endif %}
@@ -214,15 +217,22 @@
                                         </td>
                                         <td class="wrap-cell" data-label="Reason">{{ row.get('Rejection Reason', '') if current_status == 'Rejected' else '' }}</td>
                                         <td class="card-actions" data-label="Action">
-                                            {% if current_status == 'Pending' and row.get('Request ID') %}
+                                            {% if row.get('Request ID') %}
                                                 <div class="inline-actions">
-                                                    <button class="btn-sm btn-approve row-action" type="submit" data-action="Approved"
-                                                            data-id="{{ row.get('Request ID') }}"
-                                                            data-dept="{{ row.get('Department', '') }}">Approve</button>
-                                                    <button class="btn-sm btn-reject row-action" type="submit" data-action="Rejected"
-                                                            data-id="{{ row.get('Request ID') }}"
-                                                            data-dept="{{ row.get('Department', '') }}">Reject</button>
+                                                    {% if current_status != 'Approved' %}
+                                                        <button class="btn-sm btn-approve row-action" type="submit" data-action="Approved"
+                                                                data-id="{{ row.get('Request ID') }}"
+                                                                data-dept="{{ row.get('Department', '') }}">Approve</button>
+                                                    {% endif %}
+                                                    {% if current_status != 'Rejected' %}
+                                                        <button class="btn-sm btn-reject row-action" type="submit" data-action="Rejected"
+                                                                data-id="{{ row.get('Request ID') }}"
+                                                                data-dept="{{ row.get('Department', '') }}">Reject</button>
+                                                    {% endif %}
                                                 </div>
+                                                {% if row.get('Reviewed By') %}
+                                                    <div class="muted" style="margin-top:0.35rem;">{{ row.get('Reviewed By', '') }}</div>
+                                                {% endif %}
                                             {% else %}
                                                 <span class="muted">{{ row.get('Reviewed By', '') }}</span>
                                             {% endif %}

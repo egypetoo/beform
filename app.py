@@ -187,7 +187,7 @@ MIN_FORM_FILL_SECONDS = 2
 LOGIN_AUDIT_PATH = BASE_DIR / "data" / "login_audit.log"
 LOGIN_AUDIT_LOCK = Lock()
 HR_PASSWORD_HASH_PATH = BASE_DIR / "data" / "hr_password.hash"
-SHEET_SCRIPT_VERSION = "beform-2026-09-09"
+SHEET_SCRIPT_VERSION = "beform-2026-09-22"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 TURNSTILE_PASS_SECONDS = 20 * 60
 DATE_SPAN_LIMITS = {
@@ -1173,7 +1173,7 @@ def _payroll_cycle_start(date_text: str) -> str:
     return cycle_start_for(day).strftime("%Y-%m-%d")
 
 
-def check_create_conflicts(data: dict, existing_rows: list) -> dict:
+def check_create_conflicts(data: dict, existing_rows: list, exclude_request_ids: set | None = None) -> dict:
     fingerprint = normalize_fingerprint(data.get("fingerprint_id"))
     device = str(data.get("device") or "").strip()
     request_type = _norm_conflict_text(data.get("request_type"))
@@ -1183,35 +1183,40 @@ def check_create_conflicts(data: dict, existing_rows: list) -> dict:
     punch_out = _norm_conflict_text(data.get("punch_out_time"))
     from_time = _norm_conflict_text(data.get("from_time"))
     to_time = _norm_conflict_text(data.get("to_time"))
+    covering_types = attendance.COVERING_TYPES
+    punch_types = {"missing punch in", "missing punch out"}
     new_is_saturday = request_type == "monthly saturday work"
-    new_is_leave = request_type in {
-        "work remotely",
-        "annual vacation",
-        "sickness vacation",
-        "sick leave",
-        "unpaid leave",
-    }
-    new_is_punch = request_type in {"missing punch in", "missing punch out"}
-    new_is_remote = request_type == "work remotely"
+    new_is_covering = request_type in covering_types
+    new_is_punch = request_type in punch_types
+    new_is_excuse = request_type == "personal excuse"
     cycle = _payroll_cycle_start(from_date) if new_is_saturday else ""
+    excluded = {
+        str(item or "").strip()
+        for item in (exclude_request_ids or set())
+        if str(item or "").strip()
+    }
 
     duplicate = False
-    remote_conflict = False
-    remote_overlap = False
+    day_conflict = False
+    day_conflict_with = ""
+    punch_cover_conflict = False
     saturday_conflict = False
 
     for row in existing_rows:
         if str(row.get("Status") or "").strip() == "Rejected":
             continue
-        if normalize_fingerprint(row.get("Fingerprint Number")) != fingerprint:
+        row_id = str(row.get("Request ID") or row.get("request_id") or "").strip()
+        if row_id and row_id in excluded:
             continue
-        row_device = str(row.get("Device") or "").strip()
+        if normalize_fingerprint(row.get("Fingerprint Number") or row.get("fingerprint_id")) != fingerprint:
+            continue
+        row_device = str(row.get("Device") or row.get("device") or "").strip()
         if device and row_device and row_device.lower() != device.lower():
             continue
 
-        existing_type = _norm_conflict_text(row.get("Request Type"))
-        existing_from = _norm_conflict_date(row.get("From Date"))
-        existing_to = _norm_conflict_date(row.get("To Date"))
+        existing_type = _norm_conflict_text(row.get("Request Type") or row.get("request_type"))
+        existing_from = _norm_conflict_date(row.get("From Date") or row.get("start_date"))
+        existing_to = _norm_conflict_date(row.get("To Date") or row.get("end_date"))
 
         if (
             new_is_saturday
@@ -1226,42 +1231,82 @@ def check_create_conflicts(data: dict, existing_rows: list) -> dict:
             and existing_type == request_type
             and existing_from == from_date
             and existing_to == to_date
-            and _norm_conflict_text(row.get("Punch In Time")) == punch_in
-            and _norm_conflict_text(row.get("Punch Out Time")) == punch_out
-            and _norm_conflict_text(row.get("From Time")) == from_time
-            and _norm_conflict_text(row.get("To Time")) == to_time
+            and _norm_conflict_text(row.get("Punch In Time") or row.get("punch_in_time")) == punch_in
+            and _norm_conflict_text(row.get("Punch Out Time") or row.get("punch_out_time")) == punch_out
+            and _norm_conflict_text(row.get("From Time") or row.get("from_time")) == from_time
+            and _norm_conflict_text(row.get("To Time") or row.get("to_time")) == to_time
         ):
             duplicate = True
 
-        if (new_is_punch or new_is_remote or new_is_saturday or new_is_leave) and _dates_overlap(
-            from_date, to_date, existing_from, existing_to
-        ):
-            if new_is_punch and existing_type == "work remotely":
-                remote_conflict = True
-            if new_is_remote and existing_type in {"missing punch in", "missing punch out"}:
-                remote_conflict = True
-            if new_is_remote and existing_type == "work remotely":
-                remote_overlap = True
-            if new_is_saturday and existing_type in {
-                "work remotely",
-                "annual vacation",
-                "sickness vacation",
-                "sick leave",
-                "unpaid leave",
-            }:
-                saturday_conflict = True
-            if new_is_leave and existing_type == "monthly saturday work":
-                saturday_conflict = True
+        if not _dates_overlap(from_date, to_date, existing_from, existing_to):
+            continue
+
+        existing_is_covering = existing_type in covering_types
+        existing_is_punch = existing_type in punch_types
+        existing_is_excuse = existing_type == "personal excuse"
+
+        # Full-day requests cannot share a day (vacation + mission, remote + sick, etc.).
+        if new_is_covering and existing_is_covering:
+            day_conflict = True
+            day_conflict_with = existing_type
+        # Excuse / punch cannot sit on a covered leave day.
+        if (new_is_excuse or new_is_punch) and existing_is_covering:
+            day_conflict = True
+            day_conflict_with = existing_type
+        if new_is_covering and (existing_is_excuse or existing_is_punch):
+            day_conflict = True
+            day_conflict_with = existing_type
+        if new_is_punch and existing_is_covering:
+            punch_cover_conflict = True
+            day_conflict_with = existing_type
+        if new_is_covering and existing_is_punch:
+            punch_cover_conflict = True
+            day_conflict_with = existing_type
+        if new_is_saturday and existing_is_covering:
+            saturday_conflict = True
+            day_conflict_with = existing_type
+        if new_is_covering and existing_type == "monthly saturday work":
+            saturday_conflict = True
+            day_conflict_with = existing_type
 
     if duplicate:
         return {"duplicate": True}
-    if remote_overlap:
-        return {"conflict": True, "conflict_type": "remote_overlap"}
-    if remote_conflict:
-        return {"conflict": True}
+    if day_conflict:
+        return {
+            "conflict": True,
+            "conflict_type": "day_overlap",
+            "conflict_with": day_conflict_with,
+        }
+    if punch_cover_conflict:
+        return {
+            "conflict": True,
+            "conflict_type": "punch_cover",
+            "conflict_with": day_conflict_with,
+        }
     if saturday_conflict:
-        return {"conflict": True, "conflict_type": "saturday"}
+        return {
+            "conflict": True,
+            "conflict_type": "saturday",
+            "conflict_with": day_conflict_with,
+        }
     return {}
+
+
+def conflict_type_label(request_type: str) -> str:
+    text = _norm_conflict_text(request_type)
+    labels = {
+        "work remotely": "Work Remotely",
+        "business mission": "Business Mission",
+        "sick leave": "Sick Leave",
+        "unpaid leave": "Unpaid Leave",
+        "annual vacation": "Annual Vacation",
+        "sickness vacation": "Sickness Vacation",
+        "missing punch in": "Missing Punch In",
+        "missing punch out": "Missing Punch Out",
+        "monthly saturday work": "Monthly Saturday Work",
+        "personal excuse": "Personal Excuse",
+    }
+    return labels.get(text, (request_type or "another request").strip() or "another request")
 
 
 def conflict_source_rows(fingerprint: str) -> list:
@@ -1691,16 +1736,28 @@ def index():
             flash("This request was already submitted.", "error")
             return render_template("index.html", **index_context(request.form))
         if conflict.get("conflict"):
+            other = conflict_type_label(conflict.get("conflict_with") or "")
             if conflict.get("conflict_type") == "saturday":
-                flash("This Saturday overlaps another leave request.", "error")
-            elif conflict.get("conflict_type") == "remote_overlap":
                 flash(
-                    "This Work Remotely period overlaps another remote request. "
-                    "Choose dates that are not already covered.",
+                    f"This Saturday overlaps another request ({other}). Choose a different date.",
+                    "error",
+                )
+            elif conflict.get("conflict_type") == "day_overlap":
+                flash(
+                    f"This request overlaps another request on the same day ({other}). "
+                    "You cannot submit conflicting requests for the same dates.",
+                    "error",
+                )
+            elif conflict.get("conflict_type") == "punch_cover":
+                flash(
+                    f"Missing Punch cannot be submitted on a day already covered by {other}.",
                     "error",
                 )
             else:
-                flash("Work Remotely and Missing Punch cannot be submitted for the same day.", "error")
+                flash(
+                    f"This request conflicts with an existing request ({other}) on the same day.",
+                    "error",
+                )
             return render_template("index.html", **index_context(request.form))
 
         if form_fingerprint_is_limited(fingerprint_id) or form_fingerprint_day_is_limited(fingerprint_id):
@@ -2425,18 +2482,54 @@ def update_status():
         if row.get("Request ID")
     }
     authorized = []
+    skipped_same = 0
+    blocked_conflict = []
     for item in items:
         request_id_value = item["request_id"]
         row = visible_by_id.get(request_id_value)
         if not row or not can_review_row(manager, row):
             continue
+        current_status = str(row.get("Status") or "Pending").strip()
+        if current_status == status:
+            skipped_same += 1
+            continue
+        if status == "Approved":
+            conflict = check_create_conflicts(
+                {
+                    "fingerprint_id": row.get("Fingerprint Number"),
+                    "device": row.get("Device"),
+                    "request_type": row.get("Request Type"),
+                    "start_date": row.get("From Date"),
+                    "end_date": row.get("To Date"),
+                    "punch_in_time": row.get("Punch In Time"),
+                    "punch_out_time": row.get("Punch Out Time"),
+                    "from_time": row.get("From Time"),
+                    "to_time": row.get("To Time"),
+                },
+                conflict_source_rows(str(row.get("Fingerprint Number") or "")),
+                exclude_request_ids={request_id_value},
+            )
+            if conflict.get("saturday_month") or conflict.get("duplicate") or conflict.get("conflict"):
+                blocked_conflict.append(str(row.get("Name") or request_id_value))
+                continue
         authorized.append({
             "request_id": request_id_value,
             "department": str(row.get("Department") or "").strip(),
         })
 
+    if blocked_conflict:
+        shown = ", ".join(blocked_conflict[:5])
+        extra = f" and {len(blocked_conflict) - 5} more" if len(blocked_conflict) > 5 else ""
+        flash(
+            f"Could not approve because of overlapping requests: {shown}{extra}.",
+            "error",
+        )
+
     if not authorized:
-        flash("You can only review requests assigned to you.", "error")
+        if skipped_same and not blocked_conflict:
+            flash("Selected requests already have that status.", "error")
+        elif not blocked_conflict:
+            flash("You can only review requests assigned to you.", "error")
         return redirect(url_for("dashboard", **dashboard_redirect_args()))
 
     try:

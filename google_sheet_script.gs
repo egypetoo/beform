@@ -27,7 +27,7 @@ function doGet(e) {
   return jsonResponse({
     ok: true,
     ping: true,
-    version: "beform-2026-09-09",
+    version: "beform-2026-09-22",
     via: "GET",
     hint: "If you see this version, the new script is deployed.",
     secret_configured: Boolean(getSheetSecret()),
@@ -46,7 +46,7 @@ function doPost(e) {
     return jsonResponse({
       ok: true,
       ping: true,
-      version: "beform-2026-09-09",
+      version: "beform-2026-09-22",
       via: "POST",
       actions: ["ping", "list", "lookup", "create", "set_status", "delete_by_notes", "delete_requests"],
       secret_configured: true,
@@ -188,13 +188,15 @@ function checkCreateConflicts(values, data) {
   const fromTime = normalizeText(data.from_time);
   const toTime = normalizeText(data.to_time);
   const newIsSaturday = isSaturdayWorkType(type);
-  const newIsLeave = isOffDayLeave(type);
+  const newIsCovering = isCoveringType(type);
   const newIsPunch = isPunchType(type);
-  const newIsRemote = isRemoteType(type);
+  const newIsExcuse = type === "personal excuse";
   const cycle = newIsSaturday ? payrollCycleStart(fromDate) : "";
 
   let duplicate = false;
-  let remoteConflict = false;
+  let dayConflict = false;
+  let dayConflictWith = "";
+  let punchCoverConflict = false;
   let saturdayConflict = false;
 
   for (let i = values.length - 1; i >= 1; i--) {
@@ -231,30 +233,55 @@ function checkCreateConflicts(values, data) {
       duplicate = true;
     }
 
-    if ((newIsPunch || newIsRemote || newIsSaturday || newIsLeave) && datesOverlap(fromDate, toDate, existingFrom, existingTo)) {
-      if (newIsPunch && isRemoteType(existingType)) {
-        remoteConflict = true;
-      }
-      if (newIsRemote && isPunchType(existingType)) {
-        remoteConflict = true;
-      }
-      if (newIsSaturday && isOffDayLeave(existingType)) {
-        saturdayConflict = true;
-      }
-      if (newIsLeave && isSaturdayWorkType(existingType)) {
-        saturdayConflict = true;
-      }
+    if (!datesOverlap(fromDate, toDate, existingFrom, existingTo)) {
+      continue;
+    }
+
+    const existingIsCovering = isCoveringType(existingType);
+    const existingIsPunch = isPunchType(existingType);
+    const existingIsExcuse = existingType === "personal excuse";
+
+    if (newIsCovering && existingIsCovering) {
+      dayConflict = true;
+      dayConflictWith = existingType;
+    }
+    if ((newIsExcuse || newIsPunch) && existingIsCovering) {
+      dayConflict = true;
+      dayConflictWith = existingType;
+    }
+    if (newIsCovering && (existingIsExcuse || existingIsPunch)) {
+      dayConflict = true;
+      dayConflictWith = existingType;
+    }
+    if (newIsPunch && existingIsCovering) {
+      punchCoverConflict = true;
+      dayConflictWith = existingType;
+    }
+    if (newIsCovering && existingIsPunch) {
+      punchCoverConflict = true;
+      dayConflictWith = existingType;
+    }
+    if (newIsSaturday && existingIsCovering) {
+      saturdayConflict = true;
+      dayConflictWith = existingType;
+    }
+    if (newIsCovering && isSaturdayWorkType(existingType)) {
+      saturdayConflict = true;
+      dayConflictWith = existingType;
     }
   }
 
   if (duplicate) {
     return { ok: true, duplicate: true };
   }
-  if (remoteConflict) {
-    return { ok: true, conflict: true };
+  if (dayConflict) {
+    return { ok: true, conflict: true, conflict_type: "day_overlap", conflict_with: dayConflictWith };
+  }
+  if (punchCoverConflict) {
+    return { ok: true, conflict: true, conflict_type: "punch_cover", conflict_with: dayConflictWith };
   }
   if (saturdayConflict) {
-    return { ok: true, conflict: true, conflict_type: "saturday" };
+    return { ok: true, conflict: true, conflict_type: "saturday", conflict_with: dayConflictWith };
   }
   return null;
 }
@@ -263,12 +290,17 @@ function isSaturdayWorkType(type) {
   return type === "monthly saturday work";
 }
 
-function isOffDayLeave(type) {
+function isCoveringType(type) {
   return type === "work remotely"
+    || type === "business mission"
     || type === "annual vacation"
     || type === "sickness vacation"
     || type === "sick leave"
     || type === "unpaid leave";
+}
+
+function isOffDayLeave(type) {
+  return isCoveringType(type);
 }
 
 function payrollCycleStart(dateText) {
