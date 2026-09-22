@@ -1630,7 +1630,29 @@ def index():
                 errors.append("To time is required")
         if request_type == "personal_excuse" and from_time and to_time:
             if not attendance.is_whole_hour_excuse(from_time, to_time):
-                errors.append("Late excuse must be whole hours only (1, 2, 3 hours). Fractions are not allowed.")
+                errors.append(
+                    "Late excuse must be whole hours only (1–4 hours). Fractions are not allowed."
+                )
+            else:
+                duration = attendance.excuse_duration_minutes(from_time, to_time) or 0
+                if duration > attendance.MONTHLY_LATE_ALLOWANCE_MINUTES:
+                    errors.append("Late excuse cannot exceed 4 hours in one request.")
+                elif fingerprint_id and start_date:
+                    exceed = personal_excuse_would_exceed(
+                        fingerprint_id,
+                        from_time,
+                        to_time,
+                        start_date,
+                        end_date or start_date,
+                        name=name,
+                    )
+                    if exceed:
+                        errors.append(
+                            "Personal Excuse allowance is 4 hours per payroll cycle (26th–25th). "
+                            f"Used {attendance.format_hours(exceed['used'])}, "
+                            f"remaining {attendance.format_hours(exceed['remaining'])}, "
+                            f"this request needs {attendance.format_hours(exceed['duration'])}."
+                        )
         if request_type in options:
             if not start_date:
                 if request_type in SATURDAY_TYPES:
@@ -2512,6 +2534,20 @@ def update_status():
             if conflict.get("saturday_month") or conflict.get("duplicate") or conflict.get("conflict"):
                 blocked_conflict.append(str(row.get("Name") or request_id_value))
                 continue
+            request_type = str(row.get("Request Type") or "").strip().lower()
+            if request_type == attendance.LATE_EXCUSE_TYPE:
+                exceed = personal_excuse_would_exceed(
+                    str(row.get("Fingerprint Number") or ""),
+                    str(row.get("From Time") or ""),
+                    str(row.get("To Time") or ""),
+                    str(row.get("From Date") or ""),
+                    str(row.get("To Date") or ""),
+                    exclude_request_ids={request_id_value},
+                    name=str(row.get("Name") or ""),
+                )
+                if exceed:
+                    blocked_conflict.append(str(row.get("Name") or request_id_value))
+                    continue
         authorized.append({
             "request_id": request_id_value,
             "department": str(row.get("Department") or "").strip(),
@@ -3057,25 +3093,112 @@ def count_annual_leave_used(request_rows: list, year: int | None = None) -> int:
     return len(used_days)
 
 
-def count_personal_excuse_used_minutes(request_rows: list, cycle_start: str, cycle_end: str) -> int:
+def count_personal_excuse_used_minutes(
+    request_rows: list,
+    cycle_start: str,
+    cycle_end: str,
+    *,
+    statuses: set | None = None,
+    exclude_request_ids: set | None = None,
+) -> int:
+    """Sum personal-excuse minutes in a payroll cycle.
+
+    Each request counts once (its duration), not once per calendar day.
+    Default statuses: approved only (for Track balance display).
+    """
+    allowed = {str(item).strip().lower() for item in (statuses or {"approved"})}
+    excluded = {
+        str(item or "").strip()
+        for item in (exclude_request_ids or set())
+        if str(item or "").strip()
+    }
     total = 0
     for row in request_rows or []:
-        status = str(row.get("Status") or "Pending").strip().lower()
-        if status != "approved":
+        request_id = str(row.get("Request ID") or row.get("request_id") or "").strip()
+        if request_id and request_id in excluded:
             continue
-        request_type = str(row.get("Request Type") or "").strip().lower()
+        status = str(row.get("Status") or "Pending").strip().lower()
+        if status not in allowed:
+            continue
+        request_type = str(row.get("Request Type") or row.get("request_type") or "").strip().lower()
         if request_type != attendance.LATE_EXCUSE_TYPE:
             continue
         duration = attendance.excuse_duration_minutes(
-            str(row.get("From Time") or ""),
-            str(row.get("To Time") or ""),
+            str(row.get("From Time") or row.get("from_time") or ""),
+            str(row.get("To Time") or row.get("to_time") or ""),
         )
         if not duration or duration <= 0:
             duration = 60
-        for day in attendance.date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
-            if cycle_start <= day <= cycle_end:
-                total += duration
+        days_in_cycle = [
+            day
+            for day in attendance.date_range(
+                str(row.get("From Date") or row.get("start_date") or ""),
+                str(row.get("To Date") or row.get("end_date") or ""),
+            )
+            if cycle_start <= day <= cycle_end
+        ]
+        if days_in_cycle:
+            total += duration
     return total
+
+
+def personal_excuse_would_exceed(
+    fingerprint: str,
+    from_time: str,
+    to_time: str,
+    start_date: str,
+    end_date: str = "",
+    *,
+    exclude_request_ids: set | None = None,
+    name: str = "",
+) -> dict | None:
+    """Return exceed info if this excuse would go over the monthly 4-hour allowance."""
+    duration = attendance.excuse_duration_minutes(from_time, to_time)
+    if not duration or duration <= 0:
+        return None
+    if duration > attendance.MONTHLY_LATE_ALLOWANCE_MINUTES:
+        return {
+            "duration": duration,
+            "used": 0,
+            "remaining": 0,
+            "entitlement": attendance.MONTHLY_LATE_ALLOWANCE_MINUTES,
+        }
+    day = (start_date or "")[:10]
+    if not day:
+        return None
+    try:
+        day_dt = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return None
+    cycle_start = cycle_start_for(day_dt)
+    cycle_end = cycle_end_for(cycle_start)
+    cycle_start_str = cycle_start.strftime("%Y-%m-%d")
+    cycle_end_str = cycle_end.strftime("%Y-%m-%d")
+    if not (cycle_start_str <= day <= cycle_end_str):
+        # Multi-day shouldn't happen for excuses; still guard.
+        pass
+    try:
+        rows = lookup_by_fingerprint(fingerprint, name) if name else conflict_source_rows(fingerprint)
+    except Exception:
+        rows = conflict_source_rows(fingerprint)
+    used = count_personal_excuse_used_minutes(
+        rows or [],
+        cycle_start_str,
+        cycle_end_str,
+        statuses={"approved", "pending"},
+        exclude_request_ids=exclude_request_ids,
+    )
+    entitlement = attendance.MONTHLY_LATE_ALLOWANCE_MINUTES
+    remaining = max(0, entitlement - used)
+    if duration > remaining:
+        return {
+            "duration": duration,
+            "used": used,
+            "remaining": remaining,
+            "entitlement": entitlement,
+            "cycle_label": f"{cycle_start.strftime('%d %b')} – {cycle_end.strftime('%d %b %Y')}",
+        }
+    return None
 
 
 def personal_excuse_balance_summary(name: str, fingerprint: str, request_rows: list | None = None) -> dict | None:

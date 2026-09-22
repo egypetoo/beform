@@ -118,7 +118,7 @@
             </section>
 
             <section class="field time-range" id="time-range-card">
-                <p class="field-hint hidden" id="excuse-hint">Late excuse is by the hour only: 1, 2, or 3 hours. Half hours and quarter hours are not allowed.</p>
+                <p class="field-hint hidden" id="excuse-hint">Late excuse is whole hours only: 1–4 hours, and total approved+pending excuses cannot exceed 4 hours per payroll cycle (26th–25th).</p>
                 <div class="time-grid">
                     <div>
                         <label for="from_time">From Time <span>*</span></label>
@@ -634,7 +634,7 @@
                 const duration = end - start;
                 if (!Number.isFinite(duration) || duration < 60 || duration % 60 !== 0) {
                     event.preventDefault();
-                    alert('Late excuse must be whole hours only (1, 2, or 3 hours). Fractions are not allowed.');
+                    alert('Late excuse must be whole hours only (1–4 hours). Fractions are not allowed.');
                     return;
                 }
             }

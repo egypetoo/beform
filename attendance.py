@@ -163,7 +163,12 @@ def excuse_duration_minutes(from_time: str, to_time: str) -> int | None:
 
 def is_whole_hour_excuse(from_time: str, to_time: str) -> bool:
     duration = excuse_duration_minutes(from_time, to_time)
-    return duration is not None and duration >= 60 and duration % 60 == 0
+    return (
+        duration is not None
+        and duration >= 60
+        and duration % 60 == 0
+        and duration <= MONTHLY_LATE_ALLOWANCE_MINUTES
+    )
 
 
 def evaluate_shift(clock_in: str, clock_out: str) -> dict:
