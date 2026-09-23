@@ -384,7 +384,11 @@ def coverage_index(requests: list) -> dict:
             continue
         device = user_store.normalize_device(row.get("Device") or "")
         request_type = str(row.get("Request Type") or "").strip()
-        for day in date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+        for day in request_days(
+            str(row.get("From Date") or ""),
+            str(row.get("To Date") or ""),
+            request_type,
+        ):
             index[(device, fingerprint, day)].append(request_type)
             if not device:
                 index[("", fingerprint, day)].append(request_type)
@@ -419,7 +423,11 @@ def type_index(requests: list, wanted) -> dict:
         if not fingerprint:
             continue
         device = user_store.normalize_device(row.get("Device") or "")
-        for day in date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+        for day in request_days(
+            str(row.get("From Date") or ""),
+            str(row.get("To Date") or ""),
+            request_type,
+        ):
             index[(device, fingerprint, day)].append(request_type)
             if not device:
                 index[("", fingerprint, day)].append(request_type)
@@ -449,7 +457,11 @@ def late_excuse_minutes_index(requests: list) -> dict:
         )
         if not duration or duration <= 0:
             duration = 60
-        for day in date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+        for day in request_days(
+            str(row.get("From Date") or ""),
+            str(row.get("To Date") or ""),
+            LATE_EXCUSE_TYPE,
+        ):
             index[(device, fingerprint, day)] += duration
             if not device:
                 index[("", fingerprint, day)] += duration
@@ -492,6 +504,19 @@ def is_friday(day: str) -> bool:
 
 def is_saturday(day: str) -> bool:
     return weekday_index(day) == 5
+
+
+def is_weekend(day: str) -> bool:
+    return is_friday(day) or is_saturday(day)
+
+
+def request_days(start: str, end: str, request_type: str = "") -> list:
+    """Expand a request date range, skipping Fri/Sat except Monthly Saturday Work."""
+    days = date_range(start, end)
+    type_key = (request_type or "").strip().lower()
+    if type_key == SATURDAY_WORK_TYPE:
+        return days
+    return [day for day in days if not is_weekend(day)]
 
 
 def work_calendar(start: str, end: str) -> list:

@@ -187,7 +187,7 @@ MIN_FORM_FILL_SECONDS = 2
 LOGIN_AUDIT_PATH = BASE_DIR / "data" / "login_audit.log"
 LOGIN_AUDIT_LOCK = Lock()
 HR_PASSWORD_HASH_PATH = BASE_DIR / "data" / "hr_password.hash"
-SHEET_SCRIPT_VERSION = "beform-2026-09-22"
+SHEET_SCRIPT_VERSION = "beform-2026-09-23"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 TURNSTILE_PASS_SECONDS = 20 * 60
 DATE_SPAN_LIMITS = {
@@ -1164,6 +1164,19 @@ def _dates_overlap(from_a, to_a, from_b, to_b) -> bool:
     return start_a <= end_b and start_b <= end_a
 
 
+def _request_days_overlap(
+    from_a,
+    to_a,
+    type_a: str,
+    from_b,
+    to_b,
+    type_b: str,
+) -> bool:
+    days_a = set(attendance.request_days(from_a or to_a, to_a or from_a, type_a))
+    days_b = set(attendance.request_days(from_b or to_b, to_b or from_b, type_b))
+    return bool(days_a & days_b)
+
+
 def _payroll_cycle_start(date_text: str) -> str:
     text = _norm_conflict_date(date_text)
     try:
@@ -1238,7 +1251,14 @@ def check_create_conflicts(data: dict, existing_rows: list, exclude_request_ids:
         ):
             duplicate = True
 
-        if not _dates_overlap(from_date, to_date, existing_from, existing_to):
+        if not _request_days_overlap(
+            from_date,
+            to_date,
+            request_type,
+            existing_from,
+            existing_to,
+            existing_type,
+        ):
             continue
 
         existing_is_covering = existing_type in covering_types
@@ -1720,6 +1740,19 @@ def index():
                     + extra
                     + "."
                 )
+        if (
+            request_type
+            and request_type in options
+            and request_type not in SATURDAY_TYPES
+            and start_date
+        ):
+            type_en = (options.get(request_type) or {}).get("en") or request_type
+            working_days = attendance.request_days(start_date, end_date or start_date, type_en)
+            if not working_days:
+                errors.append(
+                    "Friday and Saturday are off. Choose working days, "
+                    "or use Monthly Saturday Work for Saturday."
+                )
 
         if errors:
             for error in errors:
@@ -2108,7 +2141,11 @@ def remote_work_days_summary(rows: list, date_from: str = "", date_to: str = "")
         if not fingerprint:
             continue
         days = set()
-        for day in attendance.date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+        for day in attendance.request_days(
+            str(row.get("From Date") or ""),
+            str(row.get("To Date") or ""),
+            request_type,
+        ):
             if date_from and day < date_from:
                 continue
             if date_to and day > date_to:
@@ -3087,7 +3124,11 @@ def count_annual_leave_used(request_rows: list, year: int | None = None) -> int:
         request_type = str(row.get("Request Type") or "").strip().lower()
         if request_type != "annual vacation":
             continue
-        for day in attendance.date_range(str(row.get("From Date") or ""), str(row.get("To Date") or "")):
+        for day in attendance.request_days(
+            str(row.get("From Date") or ""),
+            str(row.get("To Date") or ""),
+            "annual vacation",
+        ):
             if year_start <= day <= year_end:
                 used_days.add(day)
     return len(used_days)
@@ -3131,9 +3172,10 @@ def count_personal_excuse_used_minutes(
             duration = 60
         days_in_cycle = [
             day
-            for day in attendance.date_range(
+            for day in attendance.request_days(
                 str(row.get("From Date") or row.get("start_date") or ""),
                 str(row.get("To Date") or row.get("end_date") or ""),
+                attendance.LATE_EXCUSE_TYPE,
             )
             if cycle_start <= day <= cycle_end
         ]

@@ -27,7 +27,7 @@ function doGet(e) {
   return jsonResponse({
     ok: true,
     ping: true,
-    version: "beform-2026-09-22",
+    version: "beform-2026-09-23",
     via: "GET",
     hint: "If you see this version, the new script is deployed.",
     secret_configured: Boolean(getSheetSecret()),
@@ -46,7 +46,7 @@ function doPost(e) {
     return jsonResponse({
       ok: true,
       ping: true,
-      version: "beform-2026-09-22",
+      version: "beform-2026-09-23",
       via: "POST",
       actions: ["ping", "list", "lookup", "create", "set_status", "delete_by_notes", "delete_requests"],
       secret_configured: true,
@@ -233,7 +233,7 @@ function checkCreateConflicts(values, data) {
       duplicate = true;
     }
 
-    if (!datesOverlap(fromDate, toDate, existingFrom, existingTo)) {
+    if (!requestDaysOverlap(fromDate, toDate, type, existingFrom, existingTo, existingType)) {
       continue;
     }
 
@@ -341,6 +341,75 @@ function datesOverlap(fromA, toA, fromB, toB) {
     return false;
   }
   return startA <= endB && startB <= endA;
+}
+
+function isWeekendDay(dayText) {
+  const parts = String(dayText || "").split("-");
+  if (parts.length < 3) {
+    return false;
+  }
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (!year || !month || !day) {
+    return false;
+  }
+  // JS: 0=Sun ... 5=Fri, 6=Sat
+  const weekday = new Date(year, month - 1, day).getDay();
+  return weekday === 5 || weekday === 6;
+}
+
+function dateRangeList(startText, endText) {
+  const start = normalizeDate(startText);
+  const end = normalizeDate(endText || startText) || start;
+  if (!start) {
+    return [];
+  }
+  const partsStart = start.split("-").map(Number);
+  const partsEnd = end.split("-").map(Number);
+  let begin = new Date(partsStart[0], partsStart[1] - 1, partsStart[2]);
+  let finish = new Date(partsEnd[0], partsEnd[1] - 1, partsEnd[2]);
+  if (finish < begin) {
+    const tmp = begin;
+    begin = finish;
+    finish = tmp;
+  }
+  const days = [];
+  const cursor = new Date(begin.getTime());
+  while (cursor <= finish && days.length < 60) {
+    const yyyy = String(cursor.getFullYear());
+    const mm = String(cursor.getMonth() + 1).padStart(2, "0");
+    const dd = String(cursor.getDate()).padStart(2, "0");
+    days.push(yyyy + "-" + mm + "-" + dd);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+function requestDays(startText, endText, requestType) {
+  const days = dateRangeList(startText, endText);
+  const typeKey = normalizeText(requestType);
+  if (typeKey === "monthly saturday work") {
+    return days;
+  }
+  return days.filter(function (day) {
+    return !isWeekendDay(day);
+  });
+}
+
+function requestDaysOverlap(fromA, toA, typeA, fromB, toB, typeB) {
+  const daysA = requestDays(fromA, toA, typeA);
+  const daysB = requestDays(fromB, toB, typeB);
+  if (!daysA.length || !daysB.length) {
+    return false;
+  }
+  const setB = {};
+  daysB.forEach(function (day) {
+    setB[day] = true;
+  });
+  return daysA.some(function (day) {
+    return setB[day];
+  });
 }
 
 function appendMappedRow(sheet, valuesByHeader, headers) {
