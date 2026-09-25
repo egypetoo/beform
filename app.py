@@ -2569,7 +2569,16 @@ def update_status():
                 exclude_request_ids={request_id_value},
             )
             if conflict.get("saturday_month") or conflict.get("duplicate") or conflict.get("conflict"):
-                blocked_conflict.append(str(row.get("Name") or request_id_value))
+                other = conflict_type_label(conflict.get("conflict_with") or "")
+                who = str(row.get("Name") or request_id_value)
+                this_type = str(row.get("Request Type") or "request")
+                this_dates = f"{row.get('From Date') or ''}→{row.get('To Date') or ''}"
+                if conflict.get("conflict_with"):
+                    blocked_conflict.append(
+                        f"{who}: {this_type} ({this_dates}) overlaps {other}"
+                    )
+                else:
+                    blocked_conflict.append(f"{who}: {this_type} ({this_dates})")
                 continue
             request_type = str(row.get("Request Type") or "").strip().lower()
             if request_type == attendance.LATE_EXCUSE_TYPE:
@@ -2583,7 +2592,12 @@ def update_status():
                     name=str(row.get("Name") or ""),
                 )
                 if exceed:
-                    blocked_conflict.append(str(row.get("Name") or request_id_value))
+                    who = str(row.get("Name") or request_id_value)
+                    blocked_conflict.append(
+                        f"{who}: Personal Excuse would exceed 4:00 allowance "
+                        f"(used {attendance.format_hours(exceed['used'])}, "
+                        f"remaining {attendance.format_hours(exceed['remaining'])})"
+                    )
                     continue
         authorized.append({
             "request_id": request_id_value,
@@ -2591,10 +2605,10 @@ def update_status():
         })
 
     if blocked_conflict:
-        shown = ", ".join(blocked_conflict[:5])
-        extra = f" and {len(blocked_conflict) - 5} more" if len(blocked_conflict) > 5 else ""
+        shown = "; ".join(blocked_conflict[:3])
+        extra = f" (+{len(blocked_conflict) - 3} more)" if len(blocked_conflict) > 3 else ""
         flash(
-            f"Could not approve because of overlapping requests: {shown}{extra}.",
+            f"Could not approve because of overlapping requests. {shown}{extra}.",
             "error",
         )
 
