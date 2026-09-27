@@ -20,7 +20,7 @@
             <h1>تقييم KPI الشهري</h1>
             <p class="subtitle">Rate each point out of {{ weight }} (five points = 100%). The total is the sum of the five scores. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
             <div class="form-links">
-                <a class="excel-link" href="{{ url_for('kpi_export', cycle=cycle_start) }}">Export Excel for accounting</a>
+                <a class="excel-link" href="{{ url_for('kpi_export', cycle=cycle_start) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
             </div>
@@ -56,11 +56,17 @@
             <input type="hidden" name="employee_count" value="{{ employees|length }}">
             <h2 class="section-title">Employees · {{ cycle_label }}</h2>
             <p class="muted">
-                Evaluated {{ totals.evaluated }} of {{ employees|length }} ·
-                Total KPI amount {{ '{:,.2f}'.format(totals.kpi_amount) }} ·
-                Total payout {{ '{:,.2f}'.format(totals.payout_amount) }}
+                Evaluated {{ totals.evaluated }} of {{ employees|length }}
+                {% if show_money %}
+                    · Total KPI amount {{ '{:,.2f}'.format(totals.kpi_amount) }}
+                    · Total payout {{ '{:,.2f}'.format(totals.payout_amount) }}
+                {% endif %}
             </p>
-            <p class="muted">The KPI amount is saved per employee and reused next month until you change it. Leave all five scores empty to remove an evaluation.</p>
+            {% if show_money %}
+                <p class="muted">The KPI amount is visible to HR only. It is saved per employee and reused next month until you change it. Leave all five scores empty to remove an evaluation.</p>
+            {% else %}
+                <p class="muted">HR sets the KPI amount for each employee. Leave all five scores empty to remove an evaluation.</p>
+            {% endif %}
             {% if employees %}
                 <div class="table-wrap">
                     <table class="kpi-table">
@@ -68,13 +74,13 @@
                             <tr>
                                 <th>Name</th>
                                 {% if manager.role != 'team' %}<th>Team</th>{% endif %}
-                                <th>KPI amount</th>
+                                {% if show_money %}<th>KPI amount</th>{% endif %}
                                 {% for criterion in criteria %}
                                     <th title="{{ criterion.en }}">{{ criterion.ar }} (من {{ weight }})</th>
                                 {% endfor %}
                                 <th>Total</th>
                                 <th>KPI %</th>
-                                <th>Payout</th>
+                                {% if show_money %}<th>Payout</th>{% endif %}
                             </tr>
                         </thead>
                         <tbody>
@@ -87,10 +93,12 @@
                                         <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
                                     </td>
                                     {% if manager.role != 'team' %}<td data-label="Team">{{ person.team or '-' }}</td>{% endif %}
-                                    <td data-label="KPI amount">
-                                        <input name="kpi_amount__{{ i }}" type="number" min="0" max="1000000" step="0.01"
-                                               value="{{ person.kpi_amount if person.kpi_amount else '' }}" placeholder="0" data-kpi-amount>
-                                    </td>
+                                    {% if show_money %}
+                                        <td data-label="KPI amount">
+                                            <input name="kpi_amount__{{ i }}" type="number" min="0" max="1000000" step="0.01"
+                                                   value="{{ person.kpi_amount if person.kpi_amount else '' }}" placeholder="0" data-kpi-amount>
+                                        </td>
+                                    {% endif %}
                                     {% for criterion in criteria %}
                                         <td data-label="{{ criterion.ar }}">
                                             <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="{{ weight }}" step="0.5"
@@ -100,7 +108,9 @@
                                     {% endfor %}
                                     <td data-label="Total" class="kpi-total" data-kpi-total>{{ '%g'|format(person.result.total) ~ '%' if person.result else '—' }}</td>
                                     <td data-label="KPI %" class="kpi-total" data-kpi-percent>{{ '%g'|format(person.result.payout_percent) ~ '%' if person.result else '—' }}</td>
-                                    <td data-label="Payout" class="kpi-total" data-kpi-payout>{{ '{:,.2f}'.format(person.result.payout_amount) if person.result else '—' }}</td>
+                                    {% if show_money %}
+                                        <td data-label="Payout" class="kpi-total" data-kpi-payout>{{ '{:,.2f}'.format(person.result.payout_amount) if person.result else '—' }}</td>
+                                    {% endif %}
                                 </tr>
                             {% endfor %}
                         </tbody>
@@ -108,7 +118,7 @@
                 </div>
                 <button type="submit">Save KPI</button>
                 <p class="muted">
-                    <a class="excel-link" href="{{ url_for('kpi_export', cycle=cycle_start) }}">Export Excel for accounting</a>
+                    <a class="excel-link" href="{{ url_for('kpi_export', cycle=cycle_start) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
                     — the file uses the saved values, so save your changes first.
                 </p>
             {% else %}
@@ -132,7 +142,7 @@
                     if (filled.length !== scores.length) {
                         totalCell.textContent = '—';
                         percentCell.textContent = '—';
-                        payoutCell.textContent = '—';
+                        if (payoutCell) payoutCell.textContent = '—';
                         return;
                     }
                     const total = scores.reduce(
@@ -140,16 +150,18 @@
                         0
                     );
                     const percent = total >= fullAt ? 100 : total;
-                    const amount = parseFloat(amountInput.value) || 0;
                     totalCell.textContent = format(total) + '%';
                     percentCell.textContent = format(percent) + '%';
                     percentCell.classList.toggle('kpi-full', percent === 100);
-                    payoutCell.textContent = (amount * percent / 100).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                    });
+                    if (payoutCell && amountInput) {
+                        const amount = parseFloat(amountInput.value) || 0;
+                        payoutCell.textContent = (amount * percent / 100).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                        });
+                    }
                 };
-                scores.concat([amountInput]).forEach((input) => input.addEventListener('input', update));
+                scores.concat(amountInput ? [amountInput] : []).forEach((input) => input.addEventListener('input', update));
             });
         })();
     </script>

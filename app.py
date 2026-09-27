@@ -4012,6 +4012,7 @@ def kpi_admin():
     if cycle_start not in cycle_starts:
         cycle_start = current_cycle_value()
     employees = kpi_employees_for(manager, cycle_start)
+    show_money = is_hr(manager)
 
     if request.method == "POST":
         if not csrf_is_valid():
@@ -4029,7 +4030,11 @@ def kpi_admin():
                 continue
             label = person["name"] or fingerprint
             try:
-                kpi_amount = parse_money_amount(request.form.get(f"kpi_amount__{index}", ""))
+                kpi_amount = (
+                    parse_money_amount(request.form.get(f"kpi_amount__{index}", ""))
+                    if show_money
+                    else None
+                )
                 scores = {
                     item["key"]: parse_kpi_score(request.form.get(f"{item['key']}__{index}", ""))
                     for item in KPI_CRITERIA
@@ -4078,10 +4083,11 @@ def kpi_admin():
         cycle_label=cycle_label_for(cycle_start),
         cycles=cycles,
         totals=totals,
+        show_money=show_money,
     )
 
 
-def kpi_export_sheet(employees: list, cycle_start: str) -> dict:
+def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True) -> dict:
     headers = [
         "الاسم",
         "رقم البصمه",
@@ -4096,6 +4102,7 @@ def kpi_export_sheet(employees: list, cycle_start: str) -> dict:
         "الحالة",
         "قيّمه",
     ]
+    money_columns = {5, 5 + len(KPI_CRITERIA) + 3}
     rows = []
     total_amount = 0.0
     total_payout = 0.0
@@ -4119,15 +4126,19 @@ def kpi_export_sheet(employees: list, cycle_start: str) -> dict:
             person["updated_by"],
         ])
     blank_scores = [""] * len(KPI_CRITERIA)
-    rows.append(["الإجمالي", "", "", "", "", round(total_amount, 2), *blank_scores, "", "", round(total_payout, 2), "", ""])
-    amount_col = 5
-    first_score_col = amount_col + 1
-    payout_col = first_score_col + len(KPI_CRITERIA) + 2
+    if show_money:
+        rows.append(["الإجمالي", "", "", "", "", round(total_amount, 2), *blank_scores, "", "", round(total_payout, 2), "", ""])
+    numeric_columns = set(range(5, 5 + len(KPI_CRITERIA) + 4))
+    if not show_money:
+        keep = [index for index in range(len(headers)) if index not in money_columns]
+        numeric_columns = {keep.index(index) for index in numeric_columns if index in keep}
+        headers = [headers[index] for index in keep]
+        rows = [[row[index] for index in keep] for row in rows]
     return {
         "name": f"KPI {cycle_label_for(cycle_start)}",
         "headers": headers,
         "rows": rows,
-        "numeric_columns": {amount_col, *range(first_score_col, payout_col + 1)},
+        "numeric_columns": numeric_columns,
     }
 
 
@@ -4146,7 +4157,7 @@ def kpi_export():
     if manager_role(manager) == "team" and manager.get("team"):
         scope = f"{scope}-{user_store.slug_from_label(manager['team'])}"
     return Response(
-        build_xlsx_workbook([kpi_export_sheet(employees, cycle_start)]),
+        build_xlsx_workbook([kpi_export_sheet(employees, cycle_start, show_money=is_hr(manager))]),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=kpi-{scope}-{cycle_start}.xlsx"},
     )

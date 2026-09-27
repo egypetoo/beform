@@ -1881,7 +1881,8 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
     """Upsert KPI scores per employee for a cycle.
 
     Items with ``scores`` set to None delete that cycle's evaluation. ``kpi_amount``
-    is also stored on the employee as the default for later cycles.
+    is also stored on the employee as the default for later cycles; pass None to keep
+    the current amount. Re-saving unchanged scores keeps the original evaluator.
     """
     cycle = str(cycle_start or "").strip()[:10]
     if not cycle:
@@ -1897,11 +1898,25 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
                 fingerprint = normalize_fingerprint_id(item.get("fingerprint"))
                 if not fingerprint:
                     continue
-                kpi_amount = max(0.0, float(item.get("kpi_amount") or 0))
-                conn.execute(
-                    "UPDATE employees SET kpi_amount = ? WHERE device = ? AND fingerprint = ?",
-                    (kpi_amount, device, fingerprint),
-                )
+                existing = conn.execute(
+                    "SELECT * FROM kpi_evaluations WHERE cycle_start = ? AND device = ? AND fingerprint = ?",
+                    (cycle, device, fingerprint),
+                ).fetchone()
+                if item.get("kpi_amount") is None:
+                    if existing is not None:
+                        kpi_amount = float(existing["kpi_amount"] or 0)
+                    else:
+                        employee = conn.execute(
+                            "SELECT kpi_amount FROM employees WHERE device = ? AND fingerprint = ?",
+                            (device, fingerprint),
+                        ).fetchone()
+                        kpi_amount = float((employee["kpi_amount"] if employee else 0) or 0)
+                else:
+                    kpi_amount = max(0.0, float(item.get("kpi_amount") or 0))
+                    conn.execute(
+                        "UPDATE employees SET kpi_amount = ? WHERE device = ? AND fingerprint = ?",
+                        (kpi_amount, device, fingerprint),
+                    )
                 scores = item.get("scores")
                 if scores is None:
                     conn.execute(
@@ -1910,6 +1925,11 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
                     )
                     continue
                 values = [min(100.0, max(0.0, float(scores.get(key) or 0))) for key in KPI_CRITERIA_KEYS]
+                evaluator = (updated_by or "").strip()
+                evaluated_at = now
+                if existing is not None and [float(existing[key] or 0) for key in KPI_CRITERIA_KEYS] == values:
+                    evaluator = existing["updated_by"] or evaluator
+                    evaluated_at = existing["updated_at"] or now
                 conn.execute(
                     f"""
                     INSERT INTO kpi_evaluations (
@@ -1935,8 +1955,8 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
                         str(item.get("team") or "").strip(),
                         *values,
                         kpi_amount,
-                        (updated_by or "").strip(),
-                        now,
+                        evaluator,
+                        evaluated_at,
                     ),
                 )
                 saved += 1
