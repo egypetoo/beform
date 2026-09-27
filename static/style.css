@@ -727,6 +727,18 @@ button.filter-chip.active {
     font-size: 13px;
 }
 
+.kpi-cycle-select {
+    width: auto;
+    max-width: 100%;
+    padding: 7px 12px;
+    font-size: 13px;
+    border-radius: 999px;
+}
+
+.kpi-panel[hidden] {
+    display: none;
+}
+
 .kpi-hero {
     display: flex;
     align-items: flex-end;
@@ -781,17 +793,6 @@ button.filter-chip.active {
 
 .kpi-bar > span.kpi-bar-full {
     background: linear-gradient(90deg, #22b566, #3ddc84);
-}
-
-.kpi-bar > i {
-    position: absolute;
-    top: -4px;
-    bottom: -4px;
-    width: 2px;
-    margin-left: -1px;
-    background: var(--text);
-    opacity: 0.55;
-    border-radius: 2px;
 }
 
 .kpi-bar-legend {

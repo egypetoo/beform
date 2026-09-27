@@ -361,7 +361,7 @@ def kpi_history_for_employee(employee: dict | None) -> list:
     for item in user_store.kpi_evaluations_for_employee(
         employee.get("device") or "",
         employee.get("fingerprint") or "",
-        limit=3,
+        limit=12,
     ):
         result = kpi_result(item["scores"], item["kpi_amount"])
         history.append({

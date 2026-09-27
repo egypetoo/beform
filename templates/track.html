@@ -144,31 +144,39 @@
         {% endif %}
 
         {% if kpi_history %}
-            {% for kpi in kpi_history %}
-                {% set is_full = kpi.payout_percent >= 100 %}
-                <section class="form-shell leave-balance-card kpi-card">
-                    <div class="kpi-card-head">
-                        <h2 class="section-title">KPI</h2>
-                        <span class="kpi-cycle">{{ kpi.cycle_label }}</span>
-                    </div>
+            <section class="form-shell leave-balance-card kpi-card">
+                <div class="kpi-card-head">
+                    <h2 class="section-title">KPI</h2>
+                    {% if kpi_history|length > 1 %}
+                        <select class="kpi-cycle-select" id="kpi-cycle" aria-label="Payroll cycle">
+                            {% for kpi in kpi_history %}
+                                <option value="{{ loop.index0 }}">{{ kpi.cycle_label }}</option>
+                            {% endfor %}
+                        </select>
+                    {% else %}
+                        <span class="kpi-cycle">{{ kpi_history[0].cycle_label }}</span>
+                    {% endif %}
+                </div>
 
+                {% for kpi in kpi_history %}
+                    {% set is_full = kpi.total >= kpi.full_payout_at %}
+                    <div class="kpi-panel" data-kpi-panel="{{ loop.index0 }}" {{ '' if loop.first else 'hidden' }}>
                     <div class="kpi-hero">
                         <div>
                             <span class="kpi-hero-label">Your KPI</span>
-                            <strong class="kpi-hero-value">{{ '%g'|format(kpi.payout_percent) }}%</strong>
+                            <strong class="kpi-hero-value">{{ '%g'|format(kpi.total) }}%</strong>
                         </div>
-                        <span class="kpi-badge {{ 'kpi-badge-full' if is_full else '' }}">
-                            {{ 'Full KPI' if is_full else 'Partial KPI' }}
-                        </span>
+                        {% if is_full %}
+                            <span class="kpi-badge kpi-badge-full">Excellent</span>
+                        {% endif %}
                     </div>
 
-                    <div class="kpi-bar" role="img" aria-label="Evaluation total {{ '%g'|format(kpi.total) }}%">
+                    <div class="kpi-bar" role="img" aria-label="KPI {{ '%g'|format(kpi.total) }}%">
                         <span class="{{ 'kpi-bar-full' if is_full else '' }}" style="width: {{ [kpi.total, 100]|min }}%"></span>
-                        <i style="left: {{ kpi.full_payout_at }}%" title="{{ kpi.full_payout_at }}% = full KPI"></i>
                     </div>
                     <div class="kpi-bar-legend">
-                        <span>Evaluation total {{ '%g'|format(kpi.total) }}%</span>
-                        <span>Full KPI from {{ kpi.full_payout_at }}%</span>
+                        <span>0%</span>
+                        <span>100%</span>
                     </div>
 
                     <ul class="kpi-criteria" dir="rtl">
@@ -183,12 +191,24 @@
                             </li>
                         {% endfor %}
                     </ul>
+                    </div>
+                {% endfor %}
 
-                    {% if loop.first %}
-                        <p class="muted kpi-note">Each point is out of {{ kpi.max_score }} and the total is their sum. {{ kpi.full_payout_at }}% or more earns the full KPI; below that you earn the same percentage as your total.</p>
-                    {% endif %}
-                </section>
-            {% endfor %}
+                <p class="muted kpi-note">Your KPI is the sum of the five points (each out of {{ kpi_history[0].max_score }}).</p>
+            </section>
+            {% if kpi_history|length > 1 %}
+                <script>
+                    (function () {
+                        const select = document.getElementById('kpi-cycle');
+                        const panels = document.querySelectorAll('[data-kpi-panel]');
+                        select.addEventListener('change', () => {
+                            panels.forEach((panel) => {
+                                panel.hidden = panel.dataset.kpiPanel !== select.value;
+                            });
+                        });
+                    })();
+                </script>
+            {% endif %}
         {% endif %}
 
         {% if rows %}
