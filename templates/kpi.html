@@ -20,6 +20,7 @@
             <h1>تقييم KPI الشهري</h1>
             <p class="subtitle">Rate each point out of {{ weight }} (five points = 100%). The total is the sum of the five scores. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
             <div class="form-links">
+                <a class="excel-link" href="{{ url_for('kpi_export', cycle=cycle_start) }}">Export Excel for accounting</a>
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
             </div>
@@ -106,6 +107,10 @@
                     </table>
                 </div>
                 <button type="submit">Save KPI</button>
+                <p class="muted">
+                    <a class="excel-link" href="{{ url_for('kpi_export', cycle=cycle_start) }}">Export Excel for accounting</a>
+                    — the file uses the saved values, so save your changes first.
+                </p>
             {% else %}
                 <p class="empty-state">No active employees in a KPI department for your account.</p>
             {% endif %}

@@ -2770,13 +2770,22 @@ def _xlsx_cell_ref(row: int, col: int) -> str:
     return f"{letters}{row}"
 
 
-def _xlsx_sheet_xml(headers: list, rows: list) -> str:
+def _xlsx_sheet_xml(headers: list, rows: list, numeric_columns=()) -> str:
+    numeric_columns = set(numeric_columns or ())
     xml_rows = []
     for row_index, values in enumerate([headers, *rows], start=1):
         cells = []
         for col_index, value in enumerate(values, start=1):
-            text = escape(str(value or ""))
             ref = _xlsx_cell_ref(row_index, col_index)
+            if (
+                row_index > 1
+                and col_index - 1 in numeric_columns
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            ):
+                cells.append(f'<c r="{ref}"><v>{value}</v></c>')
+                continue
+            text = escape(str(value or ""))
             cells.append(f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>')
         xml_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
     return (
@@ -2804,7 +2813,10 @@ def build_xlsx_workbook(sheets: list) -> bytes:
             f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
             f'Target="worksheets/sheet{index}.xml"/>'
         )
-        parts.append((f"xl/worksheets/sheet{index}.xml", _xlsx_sheet_xml(sheet["headers"], sheet["rows"])))
+        parts.append((
+            f"xl/worksheets/sheet{index}.xml",
+            _xlsx_sheet_xml(sheet["headers"], sheet["rows"], sheet.get("numeric_columns")),
+        ))
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", (
@@ -4066,6 +4078,77 @@ def kpi_admin():
         cycle_label=cycle_label_for(cycle_start),
         cycles=cycles,
         totals=totals,
+    )
+
+
+def kpi_export_sheet(employees: list, cycle_start: str) -> dict:
+    headers = [
+        "الاسم",
+        "رقم البصمه",
+        "الجهاز",
+        "القسم",
+        "التيم",
+        "قيمة الـ KPI",
+        *[f"{item['ar']} (من {KPI_WEIGHT_PERCENT})" for item in KPI_CRITERIA],
+        "إجمالي التقييم %",
+        "نسبة الـ KPI المستحقة %",
+        "المبلغ المستحق",
+        "الحالة",
+        "قيّمه",
+    ]
+    rows = []
+    total_amount = 0.0
+    total_payout = 0.0
+    for person in employees:
+        result = person["result"]
+        total_amount += person["kpi_amount"]
+        if result:
+            total_payout += result["payout_amount"]
+        rows.append([
+            person["name"],
+            person["fingerprint"],
+            person["device"],
+            person["department"],
+            person["team"],
+            person["kpi_amount"],
+            *[person["scores"].get(item["key"], "") if result else "" for item in KPI_CRITERIA],
+            result["total"] if result else "",
+            result["payout_percent"] if result else "",
+            result["payout_amount"] if result else "",
+            "تم التقييم" if result else "لم يتم التقييم",
+            person["updated_by"],
+        ])
+    blank_scores = [""] * len(KPI_CRITERIA)
+    rows.append(["الإجمالي", "", "", "", "", round(total_amount, 2), *blank_scores, "", "", round(total_payout, 2), "", ""])
+    amount_col = 5
+    first_score_col = amount_col + 1
+    payout_col = first_score_col + len(KPI_CRITERIA) + 2
+    return {
+        "name": f"KPI {cycle_label_for(cycle_start)}",
+        "headers": headers,
+        "rows": rows,
+        "numeric_columns": {amount_col, *range(first_score_col, payout_col + 1)},
+    }
+
+
+@app.route("/kpi/export.xlsx")
+@login_required
+def kpi_export():
+    manager = session.get("manager") or {}
+    if not can_manage_kpi(manager):
+        flash("KPI evaluation is not enabled for your department yet.", "error")
+        return redirect(url_for("dashboard"))
+    cycle_start = (request.args.get("cycle") or current_cycle_value())[:10]
+    if cycle_start not in {item["start"] for item in payroll_cycles()}:
+        cycle_start = current_cycle_value()
+    employees = kpi_employees_for(manager, cycle_start)
+    scope = "all" if is_hr(manager) else user_store.slug_from_label(manager.get("department") or "") or "kpi"
+    if manager_role(manager) == "team" and manager.get("team"):
+        scope = f"{scope}-{user_store.slug_from_label(manager['team'])}"
+    return Response(
+        build_xlsx_workbook([kpi_export_sheet(employees, cycle_start)]),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=kpi-{scope}-{cycle_start}.xlsx"},
     )
 
 
