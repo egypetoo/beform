@@ -3999,6 +3999,32 @@ def kpi_employees_for(manager: dict, cycle_start: str) -> list:
     return rows
 
 
+def kpi_filter_options(employees: list) -> dict:
+    teams = {}
+    for person in employees:
+        department = person["department"]
+        teams.setdefault(department, set())
+        if person["team"]:
+            teams[department].add(person["team"])
+    return {department: sorted(values, key=str.lower) for department, values in sorted(teams.items())}
+
+
+def kpi_filtered(employees: list, department: str, team: str) -> list:
+    department = department.strip().lower()
+    team = team.strip().lower()
+    return [
+        person for person in employees
+        if (not department or person["department"].strip().lower() == department)
+        and (not team or person["team"].strip().lower() == team)
+    ]
+
+
+def kpi_request_filters(manager: dict) -> tuple[str, str]:
+    if not is_hr(manager):
+        return "", ""
+    return (request.values.get("dept") or "").strip(), (request.values.get("team") or "").strip()
+
+
 @app.route("/kpi", methods=["GET", "POST"])
 @login_required
 def kpi_admin():
@@ -4011,14 +4037,21 @@ def kpi_admin():
     cycle_start = (request.form.get("cycle_start") or request.args.get("cycle") or current_cycle_value())[:10]
     if cycle_start not in cycle_starts:
         cycle_start = current_cycle_value()
-    employees = kpi_employees_for(manager, cycle_start)
+    all_employees = kpi_employees_for(manager, cycle_start)
     show_money = is_hr(manager)
+    dept_filter, team_filter = kpi_request_filters(manager)
+    employees = kpi_filtered(all_employees, dept_filter, team_filter)
+    redirect_args = {"cycle": cycle_start}
+    if dept_filter:
+        redirect_args["dept"] = dept_filter
+    if team_filter:
+        redirect_args["team"] = team_filter
 
     if request.method == "POST":
         if not csrf_is_valid():
             flash("The form expired. Please refresh and try again.", "error")
-            return redirect(url_for("kpi_admin", cycle=cycle_start))
-        allowed = {f"{item['device']}|{item['fingerprint']}": item for item in employees}
+            return redirect(url_for("kpi_admin", **redirect_args))
+        allowed = {f"{item['device']}|{item['fingerprint']}": item for item in all_employees}
         items = []
         errors = []
         count = max(0, int(request.form.get("employee_count") or 0))
@@ -4065,7 +4098,7 @@ def kpi_admin():
                 manager.get("name") or manager.get("username") or "",
             )
             flash(f"Saved KPI for {saved} employee{'s' if saved != 1 else ''}.", "success")
-        return redirect(url_for("kpi_admin", cycle=cycle_start))
+        return redirect(url_for("kpi_admin", **redirect_args))
 
     totals = {
         "kpi_amount": round(sum(item["kpi_amount"] for item in employees), 2),
@@ -4084,6 +4117,11 @@ def kpi_admin():
         cycles=cycles,
         totals=totals,
         show_money=show_money,
+        show_filters=is_hr(manager),
+        filter_options=kpi_filter_options(all_employees),
+        dept_filter=dept_filter,
+        team_filter=team_filter,
+        export_args=redirect_args,
     )
 
 
@@ -4152,8 +4190,17 @@ def kpi_export():
     cycle_start = (request.args.get("cycle") or current_cycle_value())[:10]
     if cycle_start not in {item["start"] for item in payroll_cycles()}:
         cycle_start = current_cycle_value()
-    employees = kpi_employees_for(manager, cycle_start)
-    scope = "all" if is_hr(manager) else user_store.slug_from_label(manager.get("department") or "") or "kpi"
+    dept_filter, team_filter = kpi_request_filters(manager)
+    employees = kpi_filtered(kpi_employees_for(manager, cycle_start), dept_filter, team_filter)
+    if is_hr(manager):
+        scope = "-".join(
+            part for part in (
+                user_store.slug_from_label(dept_filter),
+                user_store.slug_from_label(team_filter),
+            ) if part
+        ) or "all"
+    else:
+        scope = user_store.slug_from_label(manager.get("department") or "") or "kpi"
     if manager_role(manager) == "team" and manager.get("team"):
         scope = f"{scope}-{user_store.slug_from_label(manager['team'])}"
     return Response(

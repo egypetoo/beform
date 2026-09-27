@@ -20,7 +20,7 @@
             <h1>تقييم KPI الشهري</h1>
             <p class="subtitle">Rate each point out of {{ weight }} (five points = 100%). The total is the sum of the five scores. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
             <div class="form-links">
-                <a class="excel-link" href="{{ url_for('kpi_export', cycle=cycle_start) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
+                <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
             </div>
@@ -36,8 +36,8 @@
             {% endif %}
         {% endwith %}
 
-        <form class="form-shell" method="get">
-            <h2 class="section-title">Choose payroll cycle</h2>
+        <form class="form-shell" method="get" id="kpi-filter">
+            <h2 class="section-title">{{ 'Filters' if show_filters else 'Choose payroll cycle' }}</h2>
             <section class="field">
                 <label for="cycle">Payroll cycle (26th to 25th)</label>
                 <select id="cycle" name="cycle" onchange="this.form.submit()">
@@ -48,11 +48,36 @@
                     {% endfor %}
                 </select>
             </section>
+            {% if show_filters %}
+                <section class="field">
+                    <label for="dept">Department</label>
+                    <select id="dept" name="dept">
+                        <option value="">All KPI departments</option>
+                        {% for department in filter_options %}
+                            <option value="{{ department }}" {{ 'selected' if department|lower == dept_filter|lower else '' }}>{{ department }}</option>
+                        {% endfor %}
+                    </select>
+                </section>
+                <section class="field">
+                    <label for="team">Team</label>
+                    <select id="team" name="team">
+                        <option value="">All teams</option>
+                        {% for department, teams in filter_options.items() %}
+                            {% for team in teams %}
+                                <option value="{{ team }}" data-dept="{{ department }}" {{ 'selected' if team|lower == team_filter|lower and (not dept_filter or department|lower == dept_filter|lower) else '' }}>{{ team }}{% if not dept_filter %} · {{ department }}{% endif %}</option>
+                            {% endfor %}
+                        {% endfor %}
+                    </select>
+                </section>
+                <button type="submit">Show employees</button>
+            {% endif %}
         </form>
 
         <form class="form-shell users-shell" method="post" id="kpi-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="cycle_start" value="{{ cycle_start }}">
+            <input type="hidden" name="dept" value="{{ dept_filter }}">
+            <input type="hidden" name="team" value="{{ team_filter }}">
             <input type="hidden" name="employee_count" value="{{ employees|length }}">
             <h2 class="section-title">Employees · {{ cycle_label }}</h2>
             <p class="muted">
@@ -118,7 +143,7 @@
                 </div>
                 <button type="submit">Save KPI</button>
                 <p class="muted">
-                    <a class="excel-link" href="{{ url_for('kpi_export', cycle=cycle_start) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
+                    <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
                     — the file uses the saved values, so save your changes first.
                 </p>
             {% else %}
@@ -127,6 +152,22 @@
         </form>
     </main>
     <script>
+        (function () {
+            const dept = document.getElementById('dept');
+            const team = document.getElementById('team');
+            if (!dept || !team) return;
+            const syncTeams = () => {
+                Array.from(team.options).forEach((option) => {
+                    if (!option.dataset.dept) return;
+                    const visible = !dept.value || option.dataset.dept === dept.value;
+                    option.hidden = !visible;
+                    option.disabled = !visible;
+                    if (!visible && option.selected) team.value = '';
+                });
+            };
+            dept.addEventListener('change', syncTeams);
+            syncTeams();
+        })();
         (function () {
             const weight = {{ weight }};
             const fullAt = {{ full_payout_at }};
