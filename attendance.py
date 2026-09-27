@@ -64,6 +64,7 @@ WINDOW_START = "09:00"
 FLEX_END = "10:00"
 WINDOW_END = "10:15"
 QUARTER_UNTIL = "11:00"
+TELE_SALES_LATEST_OUT = "18:00"
 REQUIRED_MINUTES = 510
 QUARTER_WORKED_MINUTES = 7 * 60 + 30
 DAILY_GRACE_MINUTES = 15
@@ -171,12 +172,13 @@ def is_whole_hour_excuse(from_time: str, to_time: str) -> bool:
     )
 
 
-def evaluate_shift(clock_in: str, clock_out: str) -> dict:
+def evaluate_shift(clock_in: str, clock_out: str, latest_out: str = "") -> dict:
     in_minutes = minutes_of(clock_in)
     out_minutes = minutes_of(clock_out)
     start = minutes_of(WINDOW_START)
     flex_end = minutes_of(FLEX_END)
     allowed = minutes_of(WINDOW_END)
+    latest_out_minutes = minutes_of(latest_out) if latest_out else None
     late_minutes = 0
     late_from_start = 0
     late_past_flex = 0
@@ -193,13 +195,16 @@ def evaluate_shift(clock_in: str, clock_out: str) -> dict:
         late_past_flex = max(0, in_minutes - flex_end) if flex_end is not None else 0
         effective_start = in_minutes if start is None else max(in_minutes, start)
         expected_out = effective_start + REQUIRED_MINUTES
+        if latest_out_minutes is not None:
+            expected_out = min(expected_out, max(effective_start, latest_out_minutes))
+        required_minutes = expected_out - effective_start
         if out_minutes is not None:
             raw_out = out_minutes
             if raw_out < in_minutes:
                 raw_out += 24 * 60
             worked_minutes = raw_out - in_minutes
             credited_minutes = max(0, raw_out - effective_start)
-            short_minutes = max(0, REQUIRED_MINUTES - credited_minutes)
+            short_minutes = max(0, required_minutes - credited_minutes)
             early_out = max(0, expected_out - raw_out)
             deviation = late_minutes + early_out
             grace_used = min(DAILY_GRACE_MINUTES, deviation)
@@ -568,6 +573,14 @@ def skips_monthly_saturday(department: str, normal_rules: bool = False) -> bool:
     return is_sales_department(department)
 
 
+def is_tele_sales(department: str, normal_rules: bool = False) -> bool:
+    return bool(normal_rules) and is_sales_department(department)
+
+
+def latest_out_for(department: str, normal_rules: bool = False) -> str:
+    return TELE_SALES_LATEST_OUT if is_tele_sales(department, normal_rules) else ""
+
+
 def missing_punch_reason(types: list) -> str:
     labels = []
     seen = set()
@@ -599,6 +612,7 @@ def classify_day(
 ) -> dict:
     missing_punch_types = list(missing_punch_types or [])
     skip_out = skips_clock_out(department, normal_rules)
+    latest_out = latest_out_for(department, normal_rules)
     missing_keys = {str(item).strip().lower() for item in missing_punch_types}
     has_missing_in = "missing punch in" in missing_keys
     has_missing_out = "missing punch out" in missing_keys
@@ -664,7 +678,7 @@ def classify_day(
             "deduction": DEDUCTION_HALF,
             "reason": "نسيان بصمة انصراف",
         }
-    shift = evaluate_shift(clock_in, clock_out)
+    shift = evaluate_shift(clock_in, clock_out, latest_out)
     morning = late_penalty(clock_in)
     used = 0
     morning_reason = ""
@@ -676,9 +690,9 @@ def classify_day(
             remaining -= needed
             day_budget -= needed
             used = needed
-            # Excuse covers lateness: leave time stays 18:30 (8.5h from flex end),
+            # Excuse covers lateness: leave time stays 18:30 (18:00 for Tele Sales),
             # not 8.5h counted from the late arrival.
-            shift = evaluate_shift(FLEX_END, clock_out)
+            shift = evaluate_shift(FLEX_END, clock_out, latest_out)
         else:
             morning_reason = "تأخير من 10:16 إلى 11:00" if morning == DEDUCTION_QUARTER else "تأخير بعد 11:00"
             if late_excuse:
@@ -844,7 +858,11 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
                 missing_total += 1
                 full_days += 1
             elif deduction in {DEDUCTION_HALF, DEDUCTION_QUARTER}:
-                shift = evaluate_shift(punch.get("clock_in") or "", punch.get("clock_out") or "")
+                shift = evaluate_shift(
+                    punch.get("clock_in") or "",
+                    punch.get("clock_out") or "",
+                    latest_out_for(department, normal_rules),
+                )
                 late.append({
                     "date": day,
                     "label": weekday_label(day),
