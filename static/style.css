@@ -710,6 +710,159 @@ button.filter-chip.active {
     line-height: 1;
 }
 
+.kpi-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.kpi-card-head .section-title {
+    margin-bottom: 0;
+}
+
+.kpi-cycle {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.kpi-hero {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 16px 0 12px;
+}
+
+.kpi-hero-label {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.kpi-hero-value {
+    font-size: 44px;
+    line-height: 1;
+    color: var(--orange);
+}
+
+.kpi-badge {
+    border: 1px solid var(--border);
+    background: #101010;
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.kpi-badge-full {
+    color: #3ddc84;
+    border-color: rgba(61, 220, 132, 0.35);
+    background: rgba(61, 220, 132, 0.08);
+}
+
+.kpi-bar {
+    position: relative;
+    height: 10px;
+    border-radius: 999px;
+    background: #1c1c1c;
+    overflow: visible;
+}
+
+.kpi-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--orange), var(--orange-soft));
+}
+
+.kpi-bar > span.kpi-bar-full {
+    background: linear-gradient(90deg, #22b566, #3ddc84);
+}
+
+.kpi-bar > i {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--text);
+    opacity: 0.55;
+    border-radius: 2px;
+}
+
+.kpi-bar-legend {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+    font-size: 11px;
+    margin: 8px 0 18px;
+}
+
+.kpi-criteria {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.kpi-criteria li {
+    background: #101010;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+}
+
+.kpi-criteria-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.kpi-criteria-label {
+    font-size: 14px;
+    color: var(--text);
+}
+
+.kpi-criteria-score {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--orange);
+    white-space: nowrap;
+}
+
+.kpi-criteria-score small {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--muted);
+}
+
+.kpi-mini-bar {
+    height: 5px;
+    border-radius: 999px;
+    background: #1c1c1c;
+    overflow: hidden;
+}
+
+.kpi-mini-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--orange);
+    margin-right: auto;
+}
+
+.kpi-note {
+    margin-top: 14px;
+}
+
 .leave-toggle {
     display: flex;
     align-items: center;

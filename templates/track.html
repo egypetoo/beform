@@ -145,28 +145,47 @@
 
         {% if kpi_history %}
             {% for kpi in kpi_history %}
-                <section class="form-shell leave-balance-card">
-                    <h2 class="section-title">KPI {{ kpi.cycle_label }}</h2>
-                    <div class="leave-balance-grid">
-                        <div>
-                            <span>Your KPI</span>
-                            <strong>{{ '%g'|format(kpi.payout_percent) }}%</strong>
-                        </div>
-                        <div>
-                            <span>Evaluation total</span>
-                            <strong>{{ '%g'|format(kpi.total) }}%</strong>
-                        </div>
+                {% set is_full = kpi.payout_percent >= 100 %}
+                <section class="form-shell leave-balance-card kpi-card">
+                    <div class="kpi-card-head">
+                        <h2 class="section-title">KPI</h2>
+                        <span class="kpi-cycle">{{ kpi.cycle_label }}</span>
                     </div>
-                    <div class="leave-balance-grid">
+
+                    <div class="kpi-hero">
+                        <div>
+                            <span class="kpi-hero-label">Your KPI</span>
+                            <strong class="kpi-hero-value">{{ '%g'|format(kpi.payout_percent) }}%</strong>
+                        </div>
+                        <span class="kpi-badge {{ 'kpi-badge-full' if is_full else '' }}">
+                            {{ 'Full KPI' if is_full else 'Partial KPI' }}
+                        </span>
+                    </div>
+
+                    <div class="kpi-bar" role="img" aria-label="Evaluation total {{ '%g'|format(kpi.total) }}%">
+                        <span class="{{ 'kpi-bar-full' if is_full else '' }}" style="width: {{ [kpi.total, 100]|min }}%"></span>
+                        <i style="left: {{ kpi.full_payout_at }}%" title="{{ kpi.full_payout_at }}% = full KPI"></i>
+                    </div>
+                    <div class="kpi-bar-legend">
+                        <span>Evaluation total {{ '%g'|format(kpi.total) }}%</span>
+                        <span>Full KPI from {{ kpi.full_payout_at }}%</span>
+                    </div>
+
+                    <ul class="kpi-criteria" dir="rtl">
                         {% for criterion in kpi.criteria %}
-                            <div>
-                                <span>{{ criterion.ar }}</span>
-                                <strong>{{ '%g'|format(criterion.score) }} / {{ kpi.max_score }}</strong>
-                            </div>
+                            {% set ratio = (criterion.score / kpi.max_score * 100) if kpi.max_score else 0 %}
+                            <li>
+                                <div class="kpi-criteria-row">
+                                    <span class="kpi-criteria-label">{{ criterion.ar }}</span>
+                                    <span class="kpi-criteria-score" dir="ltr">{{ '%g'|format(criterion.score) }}<small> / {{ kpi.max_score }}</small></span>
+                                </div>
+                                <div class="kpi-mini-bar"><span style="width: {{ [ratio, 100]|min }}%"></span></div>
+                            </li>
                         {% endfor %}
-                    </div>
+                    </ul>
+
                     {% if loop.first %}
-                        <p class="muted">Each point is scored out of 20 and the total is their sum. 90% or more earns the full KPI (100%); below 90% you earn the same percentage as your total.</p>
+                        <p class="muted kpi-note">Each point is out of {{ kpi.max_score }} and the total is their sum. {{ kpi.full_payout_at }}% or more earns the full KPI; below that you earn the same percentage as your total.</p>
                     {% endif %}
                 </section>
             {% endfor %}

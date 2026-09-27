@@ -373,6 +373,7 @@ def kpi_history_for_employee(employee: dict | None) -> list:
                 for criterion in KPI_CRITERIA
             ],
             "max_score": KPI_WEIGHT_PERCENT,
+            "full_payout_at": KPI_FULL_PAYOUT_AT,
         })
     return history
 
