@@ -158,6 +158,17 @@
                     {% endif %}
                 </div>
 
+                {% if kpi_history|length > 1 %}
+                    {% set overall = ((kpi_history|sum(attribute='total')) / (kpi_history|length))|round(1) %}
+                    <div class="kpi-overall">
+                        <div>
+                            <span class="kpi-overall-label">Overall KPI</span>
+                            <span class="kpi-overall-meta">Average of {{ kpi_history|length }} months</span>
+                        </div>
+                        <strong class="kpi-overall-value">{{ '%g'|format(overall) }}%</strong>
+                    </div>
+                {% endif %}
+
                 {% for kpi in kpi_history %}
                     {% set is_full = kpi.total >= kpi.full_payout_at %}
                     <div class="kpi-panel" data-kpi-panel="{{ loop.index0 }}" {{ '' if loop.first else 'hidden' }}>

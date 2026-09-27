@@ -739,6 +739,38 @@ button.filter-chip.active {
     display: none;
 }
 
+.kpi-overall {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid rgba(245, 130, 32, 0.28);
+    border-radius: 12px;
+    background: rgba(245, 130, 32, 0.07);
+}
+
+.kpi-overall-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.kpi-overall-meta {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+.kpi-overall-value {
+    font-size: 26px;
+    line-height: 1;
+    color: var(--orange);
+}
+
 .kpi-hero {
     display: flex;
     align-items: flex-end;
