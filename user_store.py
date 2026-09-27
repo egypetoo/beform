@@ -1722,23 +1722,21 @@ def has_pending_form_requests() -> bool:
     return bool(row)
 
 
-def unsynced_form_requests(days: int = 21, limit: int = 10) -> dict:
-    """Recent requests that are not in the Google Sheet (still pending or blocked by the sheet)."""
-    cutoff = (datetime.now() - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d %H:%M:%S")
+def unsynced_form_requests(limit: int = 10) -> dict:
+    """Requests that are not in the Google Sheet (still pending or blocked by the sheet)."""
     init_db()
     conn = db()
     rows = conn.execute(
         """
         SELECT * FROM form_requests
-        WHERE sync_status IN ('pending', 'blocked') AND submitted_at >= ?
+        WHERE sync_status IN ('pending', 'blocked')
         ORDER BY submitted_at DESC
         LIMIT ?
         """,
-        (cutoff, max(1, int(limit))),
+        (max(1, int(limit)),),
     ).fetchall()
     total = conn.execute(
-        "SELECT COUNT(*) FROM form_requests WHERE sync_status IN ('pending', 'blocked') AND submitted_at >= ?",
-        (cutoff,),
+        "SELECT COUNT(*) FROM form_requests WHERE sync_status IN ('pending', 'blocked')"
     ).fetchone()[0]
     conn.close()
     return {"total": int(total or 0), "rows": [_form_request_dict(row) for row in rows]}
@@ -1857,8 +1855,8 @@ def requeue_form_requests_for_sheet_sync(days: int = 21) -> int:
             """
             UPDATE form_requests
             SET sync_status = 'pending', sync_error = '', sync_attempts = 0
-            WHERE sync_status IN ('synced', 'blocked')
-              AND submitted_at >= ?
+            WHERE sync_status = 'blocked'
+               OR (sync_status = 'synced' AND submitted_at >= ?)
             """,
             (cutoff,),
         )

@@ -157,7 +157,7 @@ MIN_FORM_FILL_SECONDS = 2
 LOGIN_AUDIT_PATH = BASE_DIR / "data" / "login_audit.log"
 LOGIN_AUDIT_LOCK = Lock()
 HR_PASSWORD_HASH_PATH = BASE_DIR / "data" / "hr_password.hash"
-SHEET_SCRIPT_VERSION = "beform-2026-09-27"
+SHEET_SCRIPT_VERSION = "beform-2026-09-27b"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 TURNSTILE_PASS_SECONDS = 20 * 60
 DATE_SPAN_LIMITS = {
@@ -2673,7 +2673,7 @@ def check_sheet_bridge() -> dict:
         ping = sheet_api({"action": "ping"})
         result["version_ok"] = bool(ping.get("ping") and ping.get("version") == SHEET_SCRIPT_VERSION)
         if not result["version_ok"]:
-            result["message"] = "Script deployed but version mismatch. Paste google_sheet_MINIMAL.gs and redeploy."
+            result["message"] = "Script deployed but version mismatch. Paste google_sheet_script.gs and redeploy (Manage deployments → Edit → New version)."
             return result
         listing = sheet_api({"action": "list", "department": "ALL"})
         result["list_ok"] = "rows" in listing
@@ -2758,13 +2758,13 @@ def resync_sheet_requests():
     if not health.get("ok"):
         flash("Sheet bridge FAIL: " + health.get("message", ""), "error")
         return redirect(url_for("dashboard"))
-    queued = user_store.requeue_form_requests_for_sheet_sync(21)
+    queued = user_store.requeue_form_requests_for_sheet_sync(2)
     synced = flush_sheet_sync(40)
     flash(
         f"Queued {queued} request(s). Synced {synced} to Google Sheet now.",
         "success",
     )
-    unsynced = user_store.unsynced_form_requests(21, 10)
+    unsynced = user_store.unsynced_form_requests(10)
     if unsynced["total"]:
         details = "; ".join(
             f"{row.get('name')} – {row.get('request_type')} {row.get('start_date') or row.get('request_date')} "

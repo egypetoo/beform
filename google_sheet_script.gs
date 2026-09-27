@@ -27,7 +27,7 @@ function doGet(e) {
   return jsonResponse({
     ok: true,
     ping: true,
-    version: "beform-2026-09-27",
+    version: "beform-2026-09-27b",
     via: "GET",
     hint: "If you see this version, the new script is deployed.",
     secret_configured: Boolean(getSheetSecret()),
@@ -46,7 +46,7 @@ function doPost(e) {
     return jsonResponse({
       ok: true,
       ping: true,
-      version: "beform-2026-09-27",
+      version: "beform-2026-09-27b",
       via: "POST",
       actions: ["ping", "list", "lookup", "create", "set_status", "delete_by_notes", "delete_requests"],
       secret_configured: true,
@@ -96,10 +96,9 @@ function doPost(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const deptSheet = getOrCreateSheet(ss, data.department || "Other");
   const deptHeaders = ensureHeaders(deptSheet);
-  const values = recentSheetValues(deptSheet, deptHeaders, 800);
-  const blocked = checkCreateConflicts(values, data);
-  if (blocked) {
-    return jsonResponse(blocked);
+  const values = recentSheetValues(deptSheet, deptHeaders, 2000);
+  if (hasRequestId(values, data.request_id)) {
+    return jsonResponse({ ok: true, duplicate: true });
   }
 
   const valuesByHeader = {
@@ -150,293 +149,22 @@ function normalizeText(value) {
   return String(value == null ? "" : value).trim().toLowerCase();
 }
 
-function normalizeDate(value) {
-  if (Object.prototype.toString.call(value) === "[object Date]") {
-    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+// The app (SQLite) already validates conflicts; the sheet only mirrors and skips re-sent Request IDs.
+function hasRequestId(values, requestId) {
+  const id = String(requestId || "").trim();
+  if (!id || !values || values.length < 2) {
+    return false;
   }
-  const text = String(value == null ? "" : value).trim();
-  return text.split(" ")[0];
-}
-
-function checkCreateConflicts(values, data) {
-  if (!values || values.length < 2) {
-    return null;
+  const idCol = values[0].indexOf("Request ID");
+  if (idCol < 0) {
+    return false;
   }
-
-  const headers = values[0];
-  const fpCol = headers.indexOf("Fingerprint Number");
-  const deviceCol = headers.indexOf("Device");
-  const typeCol = headers.indexOf("Request Type");
-  const fromCol = headers.indexOf("From Date");
-  const toCol = headers.indexOf("To Date");
-  const statusCol = headers.indexOf("Status");
-  const punchInCol = headers.indexOf("Punch In Time");
-  const punchOutCol = headers.indexOf("Punch Out Time");
-  const fromTimeCol = headers.indexOf("From Time");
-  const toTimeCol = headers.indexOf("To Time");
-  if (fpCol < 0 || typeCol < 0) {
-    return null;
-  }
-
-  const fp = normalizeText(data.fingerprint_id);
-  const device = normalizeText(data.device);
-  const type = normalizeText(data.request_type);
-  const fromDate = normalizeDate(data.start_date);
-  const toDate = normalizeDate(data.end_date);
-  const punchIn = normalizeText(data.punch_in_time);
-  const punchOut = normalizeText(data.punch_out_time);
-  const fromTime = normalizeText(data.from_time);
-  const toTime = normalizeText(data.to_time);
-  const newIsSaturday = isSaturdayWorkType(type);
-  const newIsCovering = isCoveringType(type);
-  const newIsPunch = isPunchType(type);
-  const newIsExcuse = type === "personal excuse";
-  const newTakesSaturday = newIsSaturday || isSaturdayVacation(fromDate, toDate, type);
-  const cycle = newTakesSaturday ? payrollCycleStart(fromDate) : "";
-
-  let duplicate = false;
-  let dayConflict = false;
-  let dayConflictWith = "";
-  let punchCoverConflict = false;
-  let saturdayConflict = false;
-
   for (let i = values.length - 1; i >= 1; i--) {
-    const row = values[i];
-    const status = String(row[statusCol] || "").trim();
-    if (status === "Rejected") {
-      continue;
-    }
-    if (normalizeText(row[fpCol]) !== fp) {
-      continue;
-    }
-    if (deviceCol >= 0 && device && normalizeText(row[deviceCol]) && normalizeText(row[deviceCol]) !== device) {
-      continue;
-    }
-
-    const existingType = normalizeText(row[typeCol]);
-    const existingFrom = fromCol >= 0 ? normalizeDate(row[fromCol]) : "";
-    const existingTo = toCol >= 0 ? normalizeDate(row[toCol]) : "";
-
-    const existingTakesSaturday = isSaturdayWorkType(existingType)
-      || isSaturdayVacation(existingFrom, existingTo, existingType);
-    if (newTakesSaturday && cycle && existingTakesSaturday && payrollCycleStart(existingFrom) === cycle) {
-      return { ok: true, duplicate: true, saturday_month: true };
-    }
-
-    if (
-      !duplicate
-      && existingType === type
-      && (fromCol < 0 || existingFrom === fromDate)
-      && (toCol < 0 || existingTo === toDate)
-      && (punchInCol < 0 || normalizeText(row[punchInCol]) === punchIn)
-      && (punchOutCol < 0 || normalizeText(row[punchOutCol]) === punchOut)
-      && (fromTimeCol < 0 || normalizeText(row[fromTimeCol]) === fromTime)
-      && (toTimeCol < 0 || normalizeText(row[toTimeCol]) === toTime)
-    ) {
-      duplicate = true;
-    }
-
-    if (!requestDaysOverlap(fromDate, toDate, type, existingFrom, existingTo, existingType)) {
-      continue;
-    }
-
-    const existingIsCovering = isCoveringType(existingType);
-    const existingIsPunch = isPunchType(existingType);
-    const existingIsExcuse = existingType === "personal excuse";
-
-    if (newIsCovering && existingIsCovering) {
-      dayConflict = true;
-      dayConflictWith = existingType;
-    }
-    if ((newIsExcuse || newIsPunch) && existingIsCovering) {
-      dayConflict = true;
-      dayConflictWith = existingType;
-    }
-    if (newIsCovering && (existingIsExcuse || existingIsPunch)) {
-      dayConflict = true;
-      dayConflictWith = existingType;
-    }
-    if (newIsPunch && existingIsCovering) {
-      punchCoverConflict = true;
-      dayConflictWith = existingType;
-    }
-    if (newIsCovering && existingIsPunch) {
-      punchCoverConflict = true;
-      dayConflictWith = existingType;
-    }
-    if (newIsSaturday && existingIsCovering) {
-      saturdayConflict = true;
-      dayConflictWith = existingType;
-    }
-    if (newIsCovering && isSaturdayWorkType(existingType)) {
-      saturdayConflict = true;
-      dayConflictWith = existingType;
+    if (String(values[i][idCol] || "").trim() === id) {
+      return true;
     }
   }
-
-  if (duplicate) {
-    return { ok: true, duplicate: true };
-  }
-  if (dayConflict) {
-    return { ok: true, conflict: true, conflict_type: "day_overlap", conflict_with: dayConflictWith };
-  }
-  if (punchCoverConflict) {
-    return { ok: true, conflict: true, conflict_type: "punch_cover", conflict_with: dayConflictWith };
-  }
-  if (saturdayConflict) {
-    return { ok: true, conflict: true, conflict_type: "saturday", conflict_with: dayConflictWith };
-  }
-  return null;
-}
-
-function isSaturdayWorkType(type) {
-  return type === "monthly saturday work";
-}
-
-function isCoveringType(type) {
-  return type === "work remotely"
-    || type === "business mission"
-    || type === "annual vacation"
-    || type === "sickness vacation"
-    || type === "sick leave"
-    || type === "unpaid leave";
-}
-
-function isOffDayLeave(type) {
-  return isCoveringType(type);
-}
-
-function payrollCycleStart(dateText) {
-  const parts = String(dateText || "").split("-");
-  if (parts.length < 3) {
-    return "";
-  }
-  let year = parseInt(parts[0], 10);
-  let month = parseInt(parts[1], 10);
-  const day = parseInt(parts[2], 10);
-  if (!year || !month || !day) {
-    return "";
-  }
-  if (day < 26) {
-    month -= 1;
-    if (month < 1) {
-      month = 12;
-      year -= 1;
-    }
-  }
-  return year + "-" + String(month).padStart(2, "0") + "-26";
-}
-
-function isPunchType(type) {
-  return type === "missing punch in" || type === "missing punch out";
-}
-
-function isRemoteType(type) {
-  return type === "work remotely";
-}
-
-function datesOverlap(fromA, toA, fromB, toB) {
-  const startA = fromA || toA;
-  const endA = toA || fromA;
-  const startB = fromB || toB;
-  const endB = toB || fromB;
-  if (!startA || !startB) {
-    return false;
-  }
-  return startA <= endB && startB <= endA;
-}
-
-function isWeekendDay(dayText) {
-  const parts = String(dayText || "").split("-");
-  if (parts.length < 3) {
-    return false;
-  }
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10);
-  const day = parseInt(parts[2], 10);
-  if (!year || !month || !day) {
-    return false;
-  }
-  // JS: 0=Sun ... 5=Fri, 6=Sat
-  const weekday = new Date(year, month - 1, day).getDay();
-  return weekday === 5 || weekday === 6;
-}
-
-function dateRangeList(startText, endText) {
-  const start = normalizeDate(startText);
-  const end = normalizeDate(endText || startText) || start;
-  if (!start) {
-    return [];
-  }
-  const partsStart = start.split("-").map(Number);
-  const partsEnd = end.split("-").map(Number);
-  let begin = new Date(partsStart[0], partsStart[1] - 1, partsStart[2]);
-  let finish = new Date(partsEnd[0], partsEnd[1] - 1, partsEnd[2]);
-  if (finish < begin) {
-    const tmp = begin;
-    begin = finish;
-    finish = tmp;
-  }
-  const days = [];
-  const cursor = new Date(begin.getTime());
-  while (cursor <= finish && days.length < 60) {
-    const yyyy = String(cursor.getFullYear());
-    const mm = String(cursor.getMonth() + 1).padStart(2, "0");
-    const dd = String(cursor.getDate()).padStart(2, "0");
-    days.push(yyyy + "-" + mm + "-" + dd);
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return days;
-}
-
-function isSaturdayDay(dayText) {
-  const parts = String(dayText || "").split("-");
-  if (parts.length < 3) {
-    return false;
-  }
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10);
-  const day = parseInt(parts[2], 10);
-  if (!year || !month || !day) {
-    return false;
-  }
-  return new Date(year, month - 1, day).getDay() === 6;
-}
-
-// A single-day Annual Vacation on a Saturday replaces the monthly Saturday.
-function isSaturdayVacation(startText, endText, requestType) {
-  if (normalizeText(requestType) !== "annual vacation") {
-    return false;
-  }
-  const first = normalizeDate(startText || endText);
-  const last = normalizeDate(endText || startText);
-  return Boolean(first) && first === last && isSaturdayDay(first);
-}
-
-function requestDays(startText, endText, requestType) {
-  const days = dateRangeList(startText, endText);
-  const typeKey = normalizeText(requestType);
-  if (typeKey === "monthly saturday work" || isSaturdayVacation(startText, endText, typeKey)) {
-    return days;
-  }
-  return days.filter(function (day) {
-    return !isWeekendDay(day);
-  });
-}
-
-function requestDaysOverlap(fromA, toA, typeA, fromB, toB, typeB) {
-  const daysA = requestDays(fromA, toA, typeA);
-  const daysB = requestDays(fromB, toB, typeB);
-  if (!daysA.length || !daysB.length) {
-    return false;
-  }
-  const setB = {};
-  daysB.forEach(function (day) {
-    setB[day] = true;
-  });
-  return daysA.some(function (day) {
-    return setB[day];
-  });
+  return false;
 }
 
 function appendMappedRow(sheet, valuesByHeader, headers) {
