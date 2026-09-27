@@ -128,14 +128,14 @@ FORM_SUBMIT_LOCK = Lock()
 FORM_FP_DAY_ATTEMPTS = {}
 MAX_FORM_SUBMITS_PER_FP_DAY = 40
 FORM_FP_DAY_WINDOW_SECONDS = 86400
-# Days 20–25: end-of-cycle batching window (more open).
+# Days 20â€“25: end-of-cycle batching window (more open).
 BATCH_FORM_SUBMITS_PER_FP_DAY = 80
 FORM_BATCH_WINDOW_START_DAY = 20
 FORM_BATCH_WINDOW_END_DAY = 25
 LOOKUP_ATTEMPTS = {}
 LOOKUP_LOCK = Lock()
 LOOKUP_FP_ATTEMPTS = {}
-# Shared office Wi‑Fi: many people type fingerprints in a short window.
+# Shared office Wiâ€‘Fi: many people type fingerprints in a short window.
 MAX_LOOKUPS_PER_IP = 40
 LOOKUP_WINDOW_SECONDS = 300
 MAX_LOOKUPS_PER_FP = 100
@@ -156,7 +156,7 @@ MIN_FORM_FILL_SECONDS = 2
 LOGIN_AUDIT_PATH = BASE_DIR / "data" / "login_audit.log"
 LOGIN_AUDIT_LOCK = Lock()
 HR_PASSWORD_HASH_PATH = BASE_DIR / "data" / "hr_password.hash"
-SHEET_SCRIPT_VERSION = "beform-2026-09-23"
+SHEET_SCRIPT_VERSION = "beform-2026-09-27"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 TURNSTILE_PASS_SECONDS = 20 * 60
 DATE_SPAN_LIMITS = {
@@ -199,7 +199,7 @@ def leave_groups_for_form() -> list:
     return [
         {
             "title": "Work",
-            "title_ar": "العمل",
+            "title_ar": "Ø§Ù„Ø¹Ù…Ù„",
             "options": saturday_options,
         }
     ]
@@ -231,7 +231,7 @@ def payroll_cycles(count: int = 8) -> list:
         end = cycle_end_for(start)
         cycles.append({
             "value": start.strftime("%Y-%m-%d"),
-            "label": f"{start.strftime('%d %b')} – {end.strftime('%d %b %Y')}",
+            "label": f"{start.strftime('%d %b')} â€“ {end.strftime('%d %b %Y')}",
             "start": start.strftime("%Y-%m-%d"),
             "end": end.strftime("%Y-%m-%d"),
         })
@@ -336,30 +336,30 @@ def load_attendance_report(token: str) -> dict | None:
 LEAVE_GROUPS = [
     {
         "title": "Work",
-        "title_ar": "العمل",
+        "title_ar": "Ø§Ù„Ø¹Ù…Ù„",
         "options": [
-            {"value": "work_remotely", "en": "Work Remotely", "ar": "عمل عن بعد"},
-            {"value": "monthly_saturday", "en": "Monthly Saturday Work", "ar": "عمل السبت الشهري"},
+            {"value": "work_remotely", "en": "Work Remotely", "ar": "Ø¹Ù…Ù„ Ø¹Ù† Ø¨Ø¹Ø¯"},
+            {"value": "monthly_saturday", "en": "Monthly Saturday Work", "ar": "Ø¹Ù…Ù„ Ø§Ù„Ø³Ø¨Øª Ø§Ù„Ø´Ù‡Ø±ÙŠ"},
         ],
     },
     {
         "title": "Leaves",
-        "title_ar": "الإجازات",
+        "title_ar": "Ø§Ù„Ø¥Ø¬Ø§Ø²Ø§Øª",
         "options": [
-            {"value": "business_mission", "en": "Business Mission", "ar": "مهمة عمل"},
-            {"value": "sick_leave", "en": "Sick Leave", "ar": "إجازة مرضية"},
-            {"value": "personal_excuse", "en": "Personal Excuse", "ar": "إذن تأخير"},
-            {"value": "unpaid_leave", "en": "Unpaid Leave", "ar": "إجازة بدون راتب"},
-            {"value": "missing_punch_in", "en": "Missing Punch In", "ar": "نسيان بصمة حضور"},
-            {"value": "missing_punch_out", "en": "Missing Punch Out", "ar": "نسيان بصمة انصراف"},
+            {"value": "business_mission", "en": "Business Mission", "ar": "Ù…Ù‡Ù…Ø© Ø¹Ù…Ù„"},
+            {"value": "sick_leave", "en": "Sick Leave", "ar": "Ø¥Ø¬Ø§Ø²Ø© Ù…Ø±Ø¶ÙŠØ©"},
+            {"value": "personal_excuse", "en": "Personal Excuse", "ar": "Ø¥Ø°Ù† ØªØ£Ø®ÙŠØ±"},
+            {"value": "unpaid_leave", "en": "Unpaid Leave", "ar": "Ø¥Ø¬Ø§Ø²Ø© Ø¨Ø¯ÙˆÙ† Ø±Ø§ØªØ¨"},
+            {"value": "missing_punch_in", "en": "Missing Punch In", "ar": "Ù†Ø³ÙŠØ§Ù† Ø¨ØµÙ…Ø© Ø­Ø¶ÙˆØ±"},
+            {"value": "missing_punch_out", "en": "Missing Punch Out", "ar": "Ù†Ø³ÙŠØ§Ù† Ø¨ØµÙ…Ø© Ø§Ù†ØµØ±Ø§Ù"},
         ],
     },
     {
         "title": "Vacations",
-        "title_ar": "الإجازات السنوية / المرضية",
+        "title_ar": "Ø§Ù„Ø¥Ø¬Ø§Ø²Ø§Øª Ø§Ù„Ø³Ù†ÙˆÙŠØ© / Ø§Ù„Ù…Ø±Ø¶ÙŠØ©",
         "options": [
-            {"value": "annual_vacation", "en": "Annual Vacation", "ar": "إجازة سنوية"},
-            {"value": "sickness_vacation", "en": "Sickness Vacation", "ar": "إجازة مرضية طويلة"},
+            {"value": "annual_vacation", "en": "Annual Vacation", "ar": "Ø¥Ø¬Ø§Ø²Ø© Ø³Ù†ÙˆÙŠØ©"},
+            {"value": "sickness_vacation", "en": "Sickness Vacation", "ar": "Ø¥Ø¬Ø§Ø²Ø© Ù…Ø±Ø¶ÙŠØ© Ø·ÙˆÙŠÙ„Ø©"},
         ],
     },
 ]
@@ -763,7 +763,7 @@ def turnstile_is_valid() -> tuple[bool, str]:
     if not token:
         return False, "missing_token"
     try:
-        # Do not send remoteip — wrong IP behind proxies often breaks verification.
+        # Do not send remoteip â€” wrong IP behind proxies often breaks verification.
         response = requests.post(
             TURNSTILE_VERIFY_URL,
             data={
@@ -996,16 +996,16 @@ def sheet_api(payload: dict) -> dict:
     if action == "ping":
         if not data.get("ping") or data.get("version") != SHEET_SCRIPT_VERSION:
             raise RuntimeError(
-                "Google Apps Script is outdated. Paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version → Deploy."
+                "Google Apps Script is outdated. Paste google_sheet_script.gs, then Deploy â†’ Manage deployments â†’ Edit â†’ New version â†’ Deploy."
             )
         return data
     if action == "list" and "rows" not in data:
         raise RuntimeError(
-            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version."
+            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy â†’ Manage deployments â†’ Edit â†’ New version."
         )
     if action == "create" and "duplicate" not in data and not data.get("conflict") and not data.get("saturday_month"):
         raise RuntimeError(
-            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version."
+            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy â†’ Manage deployments â†’ Edit â†’ New version."
         )
     return data
 
@@ -1031,7 +1031,7 @@ def save_submission(row: dict) -> dict:
 
 
 def merge_local_requests(sheet_rows: list, department: str = "ALL") -> list:
-    """Build request list for the app. Sheet rows are ignored — DB is source of truth."""
+    """Build request list for the app. Sheet rows are ignored â€” DB is source of truth."""
     del sheet_rows  # kept for call-site compatibility; sheet is display-only
     local_rows = user_store.form_request_sheet_rows(department)
     merged = [row for row in local_rows if not is_spam_request_row(row)]
@@ -1148,7 +1148,8 @@ def check_create_conflicts(data: dict, existing_rows: list, exclude_request_ids:
     new_is_covering = request_type in covering_types
     new_is_punch = request_type in punch_types
     new_is_excuse = request_type == "personal excuse"
-    cycle = _payroll_cycle_start(from_date) if new_is_saturday else ""
+    new_takes_saturday = new_is_saturday or attendance.is_saturday_vacation(from_date, to_date, request_type)
+    cycle = _payroll_cycle_start(from_date) if new_takes_saturday else ""
     excluded = {
         str(item or "").strip()
         for item in (exclude_request_ids or set())
@@ -1177,10 +1178,13 @@ def check_create_conflicts(data: dict, existing_rows: list, exclude_request_ids:
         existing_from = _norm_conflict_date(row.get("From Date") or row.get("start_date"))
         existing_to = _norm_conflict_date(row.get("To Date") or row.get("end_date"))
 
+        existing_takes_saturday = existing_type == "monthly saturday work" or attendance.is_saturday_vacation(
+            existing_from, existing_to, existing_type
+        )
         if (
-            new_is_saturday
+            new_takes_saturday
             and cycle
-            and existing_type == "monthly saturday work"
+            and existing_takes_saturday
             and _payroll_cycle_start(existing_from) == cycle
         ):
             return {"duplicate": True, "saturday_month": True}
@@ -1276,7 +1280,7 @@ def conflict_type_label(request_type: str) -> str:
 
 
 def conflict_source_rows(fingerprint: str) -> list:
-    # Database only — Google Sheet is a display mirror, not a conflict source.
+    # Database only â€” Google Sheet is a display mirror, not a conflict source.
     return user_store.form_requests_as_sheet_rows(fingerprint)
 
 
@@ -1526,7 +1530,7 @@ def index():
         fingerprint_id = parse_fingerprint_id(fingerprint_id) or ""
         if not fingerprint_id:
             if request.form.get("fingerprint_id", "").strip():
-                errors.append("Fingerprint number must be 1–10 digits only")
+                errors.append("Fingerprint number must be 1â€“10 digits only")
             else:
                 errors.append("Fingerprint number is required")
         if not department:
@@ -1592,7 +1596,7 @@ def index():
         if request_type == "personal_excuse" and from_time and to_time:
             if not attendance.is_whole_hour_excuse(from_time, to_time):
                 errors.append(
-                    "Late excuse must be whole hours only (1–4 hours). Fractions are not allowed."
+                    "Late excuse must be whole hours only (1â€“4 hours). Fractions are not allowed."
                 )
             else:
                 duration = attendance.excuse_duration_minutes(from_time, to_time) or 0
@@ -1609,7 +1613,7 @@ def index():
                     )
                     if exceed:
                         errors.append(
-                            "Personal Excuse allowance is 4 hours per payroll cycle (26th–25th). "
+                            "Personal Excuse allowance is 4 hours per payroll cycle (26thâ€“25th). "
                             f"Used {attendance.format_hours(exceed['used'])}, "
                             f"remaining {attendance.format_hours(exceed['remaining'])}, "
                             f"this request needs {attendance.format_hours(exceed['duration'])}."
@@ -1692,7 +1696,7 @@ def index():
             if not working_days:
                 errors.append(
                     "Friday and Saturday are off. Choose working days, "
-                    "or use Monthly Saturday Work for Saturday."
+                    "or use Monthly Saturday Work (or a one-day Annual Vacation) for Saturday."
                 )
 
         if errors:
@@ -1726,7 +1730,11 @@ def index():
 
         conflict = check_create_conflicts(row, conflict_source_rows(fingerprint_id))
         if conflict.get("saturday_month"):
-            flash("Only one working Saturday is allowed per month (26th to 25th). You already submitted one.", "error")
+            flash(
+                "Only one Saturday is allowed per month (26th to 25th): either Monthly Saturday Work "
+                "or an Annual Vacation on a Saturday. You already submitted one.",
+                "error",
+            )
             return render_template("index.html", **index_context(request.form))
         if conflict.get("duplicate"):
             flash("This request was already submitted.", "error")
@@ -1900,7 +1908,7 @@ def track():
         else:
             parsed_fp = parse_fingerprint_id(fingerprint_id)
             if not parsed_fp:
-                flash("Fingerprint number must be 1–10 digits only.", "error")
+                flash("Fingerprint number must be 1â€“10 digits only.", "error")
                 fingerprint_id = ""
             else:
                 fingerprint_id = parsed_fp
@@ -2509,7 +2517,7 @@ def update_status():
                 other = conflict_type_label(conflict.get("conflict_with") or "")
                 who = str(row.get("Name") or request_id_value)
                 this_type = str(row.get("Request Type") or "request")
-                this_dates = f"{row.get('From Date') or ''}→{row.get('To Date') or ''}"
+                this_dates = f"{row.get('From Date') or ''}â†’{row.get('To Date') or ''}"
                 if conflict.get("conflict_with"):
                     blocked_conflict.append(
                         f"{who}: {this_type} ({this_dates}) overlaps {other}"
@@ -3189,7 +3197,7 @@ def personal_excuse_would_exceed(
             "used": used,
             "remaining": remaining,
             "entitlement": entitlement,
-            "cycle_label": f"{cycle_start.strftime('%d %b')} – {cycle_end.strftime('%d %b %Y')}",
+            "cycle_label": f"{cycle_start.strftime('%d %b')} â€“ {cycle_end.strftime('%d %b %Y')}",
         }
     return None
 
@@ -3213,7 +3221,7 @@ def personal_excuse_balance_summary(name: str, fingerprint: str, request_rows: l
     used = count_personal_excuse_used_minutes(rows or [], cycle_start_str, cycle_end_str)
     remaining = max(0, entitlement - used)
     return {
-        "cycle_label": f"{cycle_start.strftime('%d %b')} – {cycle_end.strftime('%d %b %Y')}",
+        "cycle_label": f"{cycle_start.strftime('%d %b')} â€“ {cycle_end.strftime('%d %b %Y')}",
         "entitlement": attendance.format_hours(entitlement),
         "used": attendance.format_hours(used),
         "remaining": attendance.format_hours(remaining),
@@ -3662,7 +3670,7 @@ def attendance_report():
         if unknown_device:
             flash("Some rows have no device. Name the files with F8, F9, or Maadi, or use the machine export.", "error")
         try:
-            # Closing uses database requests only — Google Sheet is a display mirror.
+            # Closing uses database requests only â€” Google Sheet is a display mirror.
             requests_rows = merge_local_requests([], "ALL")
         except Exception as exc:
             (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
@@ -3693,7 +3701,7 @@ def attendance_report():
             ]
             if skipped:
                 flash(
-                    f"Skipped {skipped} fingerprint(s) not in the employee list. Uncheck “Registered only” to include them.",
+                    f"Skipped {skipped} fingerprint(s) not in the employee list. Uncheck â€œRegistered onlyâ€ to include them.",
                     "success",
                 )
         if request.form.get("department"):

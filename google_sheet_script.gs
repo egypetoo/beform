@@ -1,12 +1,12 @@
 /**
- * SHEET_SECRET lives in Script Properties (Project Settings → Script properties),
+ * SHEET_SECRET lives in Script Properties (Project Settings â†’ Script properties),
  * NOT in this source file (keeps the secret out of Git).
  *
  * One-time setup:
  * 1) Put your secret in NEW_SHEET_SECRET below
  * 2) Run setupSheetSecret() from the Apps Script editor
  * 3) Clear NEW_SHEET_SECRET back to ""
- * 4) Deploy → Manage deployments → Edit → New version
+ * 4) Deploy â†’ Manage deployments â†’ Edit â†’ New version
  * 5) Put the same secret in server .env as SHEET_SECRET=
  */
 var NEW_SHEET_SECRET = "";
@@ -27,7 +27,7 @@ function doGet(e) {
   return jsonResponse({
     ok: true,
     ping: true,
-    version: "beform-2026-09-23",
+    version: "beform-2026-09-27",
     via: "GET",
     hint: "If you see this version, the new script is deployed.",
     secret_configured: Boolean(getSheetSecret()),
@@ -46,7 +46,7 @@ function doPost(e) {
     return jsonResponse({
       ok: true,
       ping: true,
-      version: "beform-2026-09-23",
+      version: "beform-2026-09-27",
       via: "POST",
       actions: ["ping", "list", "lookup", "create", "set_status", "delete_by_notes", "delete_requests"],
       secret_configured: true,
@@ -191,7 +191,8 @@ function checkCreateConflicts(values, data) {
   const newIsCovering = isCoveringType(type);
   const newIsPunch = isPunchType(type);
   const newIsExcuse = type === "personal excuse";
-  const cycle = newIsSaturday ? payrollCycleStart(fromDate) : "";
+  const newTakesSaturday = newIsSaturday || isSaturdayVacation(fromDate, toDate, type);
+  const cycle = newTakesSaturday ? payrollCycleStart(fromDate) : "";
 
   let duplicate = false;
   let dayConflict = false;
@@ -216,7 +217,9 @@ function checkCreateConflicts(values, data) {
     const existingFrom = fromCol >= 0 ? normalizeDate(row[fromCol]) : "";
     const existingTo = toCol >= 0 ? normalizeDate(row[toCol]) : "";
 
-    if (newIsSaturday && cycle && isSaturdayWorkType(existingType) && payrollCycleStart(existingFrom) === cycle) {
+    const existingTakesSaturday = isSaturdayWorkType(existingType)
+      || isSaturdayVacation(existingFrom, existingTo, existingType);
+    if (newTakesSaturday && cycle && existingTakesSaturday && payrollCycleStart(existingFrom) === cycle) {
       return { ok: true, duplicate: true, saturday_month: true };
     }
 
@@ -386,10 +389,34 @@ function dateRangeList(startText, endText) {
   return days;
 }
 
+function isSaturdayDay(dayText) {
+  const parts = String(dayText || "").split("-");
+  if (parts.length < 3) {
+    return false;
+  }
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (!year || !month || !day) {
+    return false;
+  }
+  return new Date(year, month - 1, day).getDay() === 6;
+}
+
+// A single-day Annual Vacation on a Saturday replaces the monthly Saturday.
+function isSaturdayVacation(startText, endText, requestType) {
+  if (normalizeText(requestType) !== "annual vacation") {
+    return false;
+  }
+  const first = normalizeDate(startText || endText);
+  const last = normalizeDate(endText || startText);
+  return Boolean(first) && first === last && isSaturdayDay(first);
+}
+
 function requestDays(startText, endText, requestType) {
   const days = dateRangeList(startText, endText);
   const typeKey = normalizeText(requestType);
-  if (typeKey === "monthly saturday work") {
+  if (typeKey === "monthly saturday work" || isSaturdayVacation(startText, endText, typeKey)) {
     return days;
   }
   return days.filter(function (day) {
@@ -419,7 +446,7 @@ function appendMappedRow(sheet, valuesByHeader, headers) {
   const row = headers.map(function (header) {
     return Object.prototype.hasOwnProperty.call(valuesByHeader, header) ? valuesByHeader[header] : "";
   });
-  // Prefer appendRow — avoids getRange row/column overload confusion.
+  // Prefer appendRow â€” avoids getRange row/column overload confusion.
   while (row.length < headers.length) {
     row.push("");
   }
@@ -434,7 +461,7 @@ function recentSheetValues(sheet, headers, limit) {
   const lastCol = Math.max(sheet.getLastColumn(), headers.length);
   const count = Math.min(Math.max(limit || 800, 1), lastRow - 1);
   const startRow = lastRow - count + 1;
-  // getRange(row, column, numRows, numColumns) — 3rd/4th args are sizes, not end indices.
+  // getRange(row, column, numRows, numColumns) â€” 3rd/4th args are sizes, not end indices.
   return [headers].concat(sheet.getRange(startRow, 1, count, lastCol).getValues());
 }
 

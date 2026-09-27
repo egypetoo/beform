@@ -52,6 +52,7 @@ MISSING_PUNCH_TYPES = {
 }
 LATE_EXCUSE_TYPE = "personal excuse"
 SATURDAY_WORK_TYPE = "monthly saturday work"
+ANNUAL_VACATION_TYPE = "annual vacation"
 SALES_DEPARTMENTS = {"sales", "مبيعات"}
 
 
@@ -515,11 +516,21 @@ def is_weekend(day: str) -> bool:
     return is_friday(day) or is_saturday(day)
 
 
+def is_saturday_vacation(start: str, end: str, request_type: str = "") -> bool:
+    """A single-day Annual Vacation on a Saturday replaces the monthly Saturday."""
+    if (request_type or "").strip().lower() != ANNUAL_VACATION_TYPE:
+        return False
+    first = (start or end or "")[:10]
+    last = (end or start or "")[:10]
+    return bool(first) and first == last and is_saturday(first)
+
+
 def request_days(start: str, end: str, request_type: str = "") -> list:
-    """Expand a request date range, skipping Fri/Sat except Monthly Saturday Work."""
+    """Expand a request date range, skipping Fri/Sat except Monthly Saturday Work
+    and a single-day Saturday Annual Vacation."""
     days = date_range(start, end)
     type_key = (request_type or "").strip().lower()
-    if type_key == SATURDAY_WORK_TYPE:
+    if type_key == SATURDAY_WORK_TYPE or is_saturday_vacation(start, end, type_key):
         return days
     return [day for day in days if not is_weekend(day)]
 
@@ -882,7 +893,16 @@ def build_report(punches: list, requests: list, employees: list, holidays: dict 
         has_monthly_saturday = False
         for day in saturday_days:
             punch = punches_by_day.get(day) or {}
-            if punch.get("clock_in") or punch.get("clock_out") or covering_types(saturday_work, device, fingerprint, day):
+            vacation_saturday = any(
+                str(item).strip().lower() == ANNUAL_VACATION_TYPE
+                for item in covering_types(covered, device, fingerprint, day)
+            )
+            if (
+                punch.get("clock_in")
+                or punch.get("clock_out")
+                or covering_types(saturday_work, device, fingerprint, day)
+                or vacation_saturday
+            ):
                 has_monthly_saturday = True
                 break
         if saturday_days and not has_monthly_saturday and not skips_monthly_saturday(department, normal_rules):
