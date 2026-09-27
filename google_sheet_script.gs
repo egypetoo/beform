@@ -1,12 +1,12 @@
 /**
- * SHEET_SECRET lives in Script Properties (Project Settings â†’ Script properties),
+ * SHEET_SECRET lives in Script Properties (Project Settings → Script properties),
  * NOT in this source file (keeps the secret out of Git).
  *
  * One-time setup:
  * 1) Put your secret in NEW_SHEET_SECRET below
  * 2) Run setupSheetSecret() from the Apps Script editor
  * 3) Clear NEW_SHEET_SECRET back to ""
- * 4) Deploy â†’ Manage deployments â†’ Edit â†’ New version
+ * 4) Deploy → Manage deployments → Edit → New version
  * 5) Put the same secret in server .env as SHEET_SECRET=
  */
 var NEW_SHEET_SECRET = "";
@@ -446,7 +446,7 @@ function appendMappedRow(sheet, valuesByHeader, headers) {
   const row = headers.map(function (header) {
     return Object.prototype.hasOwnProperty.call(valuesByHeader, header) ? valuesByHeader[header] : "";
   });
-  // Prefer appendRow â€” avoids getRange row/column overload confusion.
+  // Prefer appendRow — avoids getRange row/column overload confusion.
   while (row.length < headers.length) {
     row.push("");
   }
@@ -461,7 +461,7 @@ function recentSheetValues(sheet, headers, limit) {
   const lastCol = Math.max(sheet.getLastColumn(), headers.length);
   const count = Math.min(Math.max(limit || 800, 1), lastRow - 1);
   const startRow = lastRow - count + 1;
-  // getRange(row, column, numRows, numColumns) â€” 3rd/4th args are sizes, not end indices.
+  // getRange(row, column, numRows, numColumns) — 3rd/4th args are sizes, not end indices.
   return [headers].concat(sheet.getRange(startRow, 1, count, lastCol).getValues());
 }
 

@@ -128,14 +128,14 @@ FORM_SUBMIT_LOCK = Lock()
 FORM_FP_DAY_ATTEMPTS = {}
 MAX_FORM_SUBMITS_PER_FP_DAY = 40
 FORM_FP_DAY_WINDOW_SECONDS = 86400
-# Days 20â€“25: end-of-cycle batching window (more open).
+# Days 20–25: end-of-cycle batching window (more open).
 BATCH_FORM_SUBMITS_PER_FP_DAY = 80
 FORM_BATCH_WINDOW_START_DAY = 20
 FORM_BATCH_WINDOW_END_DAY = 25
 LOOKUP_ATTEMPTS = {}
 LOOKUP_LOCK = Lock()
 LOOKUP_FP_ATTEMPTS = {}
-# Shared office Wiâ€‘Fi: many people type fingerprints in a short window.
+# Shared office Wi‑Fi: many people type fingerprints in a short window.
 MAX_LOOKUPS_PER_IP = 40
 LOOKUP_WINDOW_SECONDS = 300
 MAX_LOOKUPS_PER_FP = 100
@@ -199,7 +199,7 @@ def leave_groups_for_form() -> list:
     return [
         {
             "title": "Work",
-            "title_ar": "Ø§Ù„Ø¹Ù…Ù„",
+            "title_ar": "العمل",
             "options": saturday_options,
         }
     ]
@@ -231,7 +231,7 @@ def payroll_cycles(count: int = 8) -> list:
         end = cycle_end_for(start)
         cycles.append({
             "value": start.strftime("%Y-%m-%d"),
-            "label": f"{start.strftime('%d %b')} â€“ {end.strftime('%d %b %Y')}",
+            "label": f"{start.strftime('%d %b')} – {end.strftime('%d %b %Y')}",
             "start": start.strftime("%Y-%m-%d"),
             "end": end.strftime("%Y-%m-%d"),
         })
@@ -294,6 +294,84 @@ def parse_money_amount(value) -> float:
     return round(amount, 2)
 
 
+KPI_DEPARTMENTS = {"web"}
+KPI_CRITERIA = [
+    {"key": "attendance", "ar": "مواعيد الحضور", "en": "Attendance time"},
+    {"key": "work_hours", "ar": "الالتزام بساعات العمل", "en": "Working hours"},
+    {"key": "deadlines", "ar": "الالتزام بمواعيد التسليم", "en": "Delivery deadlines"},
+    {"key": "quality", "ar": "جودة التسليم", "en": "Delivery quality"},
+    {"key": "problem_solving", "ar": "سرعة التعامل مع المشاكل", "en": "Problem handling speed"},
+]
+KPI_WEIGHT_PERCENT = 20
+KPI_FULL_PAYOUT_AT = 90
+
+
+def kpi_enabled_for(department: str) -> bool:
+    return " ".join(str(department or "").strip().lower().split()) in KPI_DEPARTMENTS
+
+
+def can_manage_kpi(manager: dict | None) -> bool:
+    if not manager:
+        return False
+    return is_hr(manager) or kpi_enabled_for(manager.get("department") or "")
+
+
+def kpi_result(scores: dict, kpi_amount: float) -> dict:
+    total = round(
+        sum(float(scores.get(item["key"]) or 0) * KPI_WEIGHT_PERCENT / 100 for item in KPI_CRITERIA),
+        2,
+    )
+    payout_percent = 100.0 if total >= KPI_FULL_PAYOUT_AT else total
+    return {
+        "total": total,
+        "payout_percent": payout_percent,
+        "payout_amount": round(float(kpi_amount or 0) * payout_percent / 100, 2),
+    }
+
+
+def parse_kpi_score(value) -> float | None:
+    text = str(value or "").strip().replace(",", ".").rstrip("%")
+    if not text:
+        return None
+    try:
+        score = float(text)
+    except ValueError:
+        raise ValueError("KPI scores must be numbers from 0 to 100.")
+    if score < 0 or score > 100:
+        raise ValueError("KPI scores must be from 0 to 100.")
+    return round(score, 2)
+
+
+def cycle_label_for(cycle_start: str) -> str:
+    try:
+        start = datetime.strptime(str(cycle_start or "")[:10], "%Y-%m-%d")
+    except ValueError:
+        return str(cycle_start or "")
+    return f"{start.strftime('%d %b')} – {cycle_end_for(start).strftime('%d %b %Y')}"
+
+
+def kpi_history_for_employee(employee: dict | None) -> list:
+    if not employee or not kpi_enabled_for(employee.get("department") or ""):
+        return []
+    history = []
+    for item in user_store.kpi_evaluations_for_employee(
+        employee.get("device") or "",
+        employee.get("fingerprint") or "",
+        limit=3,
+    ):
+        result = kpi_result(item["scores"], item["kpi_amount"])
+        history.append({
+            "cycle_label": cycle_label_for(item["cycle_start"]),
+            "total": result["total"],
+            "payout_percent": result["payout_percent"],
+            "criteria": [
+                {"ar": criterion["ar"], "en": criterion["en"], "score": item["scores"].get(criterion["key"], 0)}
+                for criterion in KPI_CRITERIA
+            ],
+        })
+    return history
+
+
 def attach_payroll_adjustments(report: dict) -> dict:
     cycle_start = report_payroll_cycle_start(report)
     report["cycle_start"] = cycle_start
@@ -336,30 +414,30 @@ def load_attendance_report(token: str) -> dict | None:
 LEAVE_GROUPS = [
     {
         "title": "Work",
-        "title_ar": "Ø§Ù„Ø¹Ù…Ù„",
+        "title_ar": "العمل",
         "options": [
-            {"value": "work_remotely", "en": "Work Remotely", "ar": "Ø¹Ù…Ù„ Ø¹Ù† Ø¨Ø¹Ø¯"},
-            {"value": "monthly_saturday", "en": "Monthly Saturday Work", "ar": "Ø¹Ù…Ù„ Ø§Ù„Ø³Ø¨Øª Ø§Ù„Ø´Ù‡Ø±ÙŠ"},
+            {"value": "work_remotely", "en": "Work Remotely", "ar": "عمل عن بعد"},
+            {"value": "monthly_saturday", "en": "Monthly Saturday Work", "ar": "عمل السبت الشهري"},
         ],
     },
     {
         "title": "Leaves",
-        "title_ar": "Ø§Ù„Ø¥Ø¬Ø§Ø²Ø§Øª",
+        "title_ar": "الإجازات",
         "options": [
-            {"value": "business_mission", "en": "Business Mission", "ar": "Ù…Ù‡Ù…Ø© Ø¹Ù…Ù„"},
-            {"value": "sick_leave", "en": "Sick Leave", "ar": "Ø¥Ø¬Ø§Ø²Ø© Ù…Ø±Ø¶ÙŠØ©"},
-            {"value": "personal_excuse", "en": "Personal Excuse", "ar": "Ø¥Ø°Ù† ØªØ£Ø®ÙŠØ±"},
-            {"value": "unpaid_leave", "en": "Unpaid Leave", "ar": "Ø¥Ø¬Ø§Ø²Ø© Ø¨Ø¯ÙˆÙ† Ø±Ø§ØªØ¨"},
-            {"value": "missing_punch_in", "en": "Missing Punch In", "ar": "Ù†Ø³ÙŠØ§Ù† Ø¨ØµÙ…Ø© Ø­Ø¶ÙˆØ±"},
-            {"value": "missing_punch_out", "en": "Missing Punch Out", "ar": "Ù†Ø³ÙŠØ§Ù† Ø¨ØµÙ…Ø© Ø§Ù†ØµØ±Ø§Ù"},
+            {"value": "business_mission", "en": "Business Mission", "ar": "مهمة عمل"},
+            {"value": "sick_leave", "en": "Sick Leave", "ar": "إجازة مرضية"},
+            {"value": "personal_excuse", "en": "Personal Excuse", "ar": "إذن تأخير"},
+            {"value": "unpaid_leave", "en": "Unpaid Leave", "ar": "إجازة بدون راتب"},
+            {"value": "missing_punch_in", "en": "Missing Punch In", "ar": "نسيان بصمة حضور"},
+            {"value": "missing_punch_out", "en": "Missing Punch Out", "ar": "نسيان بصمة انصراف"},
         ],
     },
     {
         "title": "Vacations",
-        "title_ar": "Ø§Ù„Ø¥Ø¬Ø§Ø²Ø§Øª Ø§Ù„Ø³Ù†ÙˆÙŠØ© / Ø§Ù„Ù…Ø±Ø¶ÙŠØ©",
+        "title_ar": "الإجازات السنوية / المرضية",
         "options": [
-            {"value": "annual_vacation", "en": "Annual Vacation", "ar": "Ø¥Ø¬Ø§Ø²Ø© Ø³Ù†ÙˆÙŠØ©"},
-            {"value": "sickness_vacation", "en": "Sickness Vacation", "ar": "Ø¥Ø¬Ø§Ø²Ø© Ù…Ø±Ø¶ÙŠØ© Ø·ÙˆÙŠÙ„Ø©"},
+            {"value": "annual_vacation", "en": "Annual Vacation", "ar": "إجازة سنوية"},
+            {"value": "sickness_vacation", "en": "Sickness Vacation", "ar": "إجازة مرضية طويلة"},
         ],
     },
 ]
@@ -763,7 +841,7 @@ def turnstile_is_valid() -> tuple[bool, str]:
     if not token:
         return False, "missing_token"
     try:
-        # Do not send remoteip â€” wrong IP behind proxies often breaks verification.
+        # Do not send remoteip — wrong IP behind proxies often breaks verification.
         response = requests.post(
             TURNSTILE_VERIFY_URL,
             data={
@@ -940,6 +1018,7 @@ def inject_security():
         "csrf_token": get_csrf_token(),
         "lookup_ticket": ensure_lookup_ticket(),
         "is_hr": bool(manager and is_hr(manager)),
+        "can_manage_kpi": can_manage_kpi(manager),
         "payroll_adjustments_url": payroll_adjustments_url,
         "turnstile_site_key": turnstile_site_key() if configured else "",
         "turnstile_session_ok": turnstile_session_ok() if configured else True,
@@ -996,16 +1075,16 @@ def sheet_api(payload: dict) -> dict:
     if action == "ping":
         if not data.get("ping") or data.get("version") != SHEET_SCRIPT_VERSION:
             raise RuntimeError(
-                "Google Apps Script is outdated. Paste google_sheet_script.gs, then Deploy â†’ Manage deployments â†’ Edit â†’ New version â†’ Deploy."
+                "Google Apps Script is outdated. Paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version → Deploy."
             )
         return data
     if action == "list" and "rows" not in data:
         raise RuntimeError(
-            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy â†’ Manage deployments â†’ Edit â†’ New version."
+            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version."
         )
     if action == "create" and "duplicate" not in data and not data.get("conflict") and not data.get("saturday_month"):
         raise RuntimeError(
-            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy â†’ Manage deployments â†’ Edit â†’ New version."
+            "Google Apps Script is outdated. Open the sheet script editor, paste google_sheet_script.gs, then Deploy → Manage deployments → Edit → New version."
         )
     return data
 
@@ -1031,7 +1110,7 @@ def save_submission(row: dict) -> dict:
 
 
 def merge_local_requests(sheet_rows: list, department: str = "ALL") -> list:
-    """Build request list for the app. Sheet rows are ignored â€” DB is source of truth."""
+    """Build request list for the app. Sheet rows are ignored — DB is source of truth."""
     del sheet_rows  # kept for call-site compatibility; sheet is display-only
     local_rows = user_store.form_request_sheet_rows(department)
     merged = [row for row in local_rows if not is_spam_request_row(row)]
@@ -1280,7 +1359,7 @@ def conflict_type_label(request_type: str) -> str:
 
 
 def conflict_source_rows(fingerprint: str) -> list:
-    # Database only â€” Google Sheet is a display mirror, not a conflict source.
+    # Database only — Google Sheet is a display mirror, not a conflict source.
     return user_store.form_requests_as_sheet_rows(fingerprint)
 
 
@@ -1530,7 +1609,7 @@ def index():
         fingerprint_id = parse_fingerprint_id(fingerprint_id) or ""
         if not fingerprint_id:
             if request.form.get("fingerprint_id", "").strip():
-                errors.append("Fingerprint number must be 1â€“10 digits only")
+                errors.append("Fingerprint number must be 1–10 digits only")
             else:
                 errors.append("Fingerprint number is required")
         if not department:
@@ -1596,7 +1675,7 @@ def index():
         if request_type == "personal_excuse" and from_time and to_time:
             if not attendance.is_whole_hour_excuse(from_time, to_time):
                 errors.append(
-                    "Late excuse must be whole hours only (1â€“4 hours). Fractions are not allowed."
+                    "Late excuse must be whole hours only (1–4 hours). Fractions are not allowed."
                 )
             else:
                 duration = attendance.excuse_duration_minutes(from_time, to_time) or 0
@@ -1613,7 +1692,7 @@ def index():
                     )
                     if exceed:
                         errors.append(
-                            "Personal Excuse allowance is 4 hours per payroll cycle (26thâ€“25th). "
+                            "Personal Excuse allowance is 4 hours per payroll cycle (26th–25th). "
                             f"Used {attendance.format_hours(exceed['used'])}, "
                             f"remaining {attendance.format_hours(exceed['remaining'])}, "
                             f"this request needs {attendance.format_hours(exceed['duration'])}."
@@ -1851,6 +1930,7 @@ def track():
     request_types = []
     leave_balance = None
     excuse_balance = None
+    kpi_history = []
     track_context = {
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
@@ -1908,7 +1988,7 @@ def track():
         else:
             parsed_fp = parse_fingerprint_id(fingerprint_id)
             if not parsed_fp:
-                flash("Fingerprint number must be 1â€“10 digits only.", "error")
+                flash("Fingerprint number must be 1–10 digits only.", "error")
                 fingerprint_id = ""
             else:
                 fingerprint_id = parsed_fp
@@ -1956,8 +2036,9 @@ def track():
                     all_rows = lookup_by_fingerprint(fingerprint_id, track_name)
                     leave_balance = leave_balance_summary(track_name, fingerprint_id, all_rows)
                     excuse_balance = personal_excuse_balance_summary(track_name, fingerprint_id, all_rows)
+                    kpi_history = kpi_history_for_employee(matched)
                     if not all_rows:
-                        if leave_balance or excuse_balance:
+                        if leave_balance or excuse_balance or kpi_history:
                             rows = []
                         else:
                             flash("No requests found for this name and fingerprint.", "error")
@@ -1979,6 +2060,7 @@ def track():
                     rows = None
                     leave_balance = None
                     excuse_balance = None
+                    kpi_history = []
 
     return render_template(
         "track.html",
@@ -1993,6 +2075,7 @@ def track():
         request_types=request_types,
         leave_balance=leave_balance,
         excuse_balance=excuse_balance,
+        kpi_history=kpi_history,
         **track_context,
     )
 
@@ -2517,7 +2600,7 @@ def update_status():
                 other = conflict_type_label(conflict.get("conflict_with") or "")
                 who = str(row.get("Name") or request_id_value)
                 this_type = str(row.get("Request Type") or "request")
-                this_dates = f"{row.get('From Date') or ''}â†’{row.get('To Date') or ''}"
+                this_dates = f"{row.get('From Date') or ''}→{row.get('To Date') or ''}"
                 if conflict.get("conflict_with"):
                     blocked_conflict.append(
                         f"{who}: {this_type} ({this_dates}) overlaps {other}"
@@ -3197,7 +3280,7 @@ def personal_excuse_would_exceed(
             "used": used,
             "remaining": remaining,
             "entitlement": entitlement,
-            "cycle_label": f"{cycle_start.strftime('%d %b')} â€“ {cycle_end.strftime('%d %b %Y')}",
+            "cycle_label": f"{cycle_start.strftime('%d %b')} – {cycle_end.strftime('%d %b %Y')}",
         }
     return None
 
@@ -3221,7 +3304,7 @@ def personal_excuse_balance_summary(name: str, fingerprint: str, request_rows: l
     used = count_personal_excuse_used_minutes(rows or [], cycle_start_str, cycle_end_str)
     remaining = max(0, entitlement - used)
     return {
-        "cycle_label": f"{cycle_start.strftime('%d %b')} â€“ {cycle_end.strftime('%d %b %Y')}",
+        "cycle_label": f"{cycle_start.strftime('%d %b')} – {cycle_end.strftime('%d %b %Y')}",
         "entitlement": attendance.format_hours(entitlement),
         "used": attendance.format_hours(used),
         "remaining": attendance.format_hours(remaining),
@@ -3670,7 +3753,7 @@ def attendance_report():
         if unknown_device:
             flash("Some rows have no device. Name the files with F8, F9, or Maadi, or use the machine export.", "error")
         try:
-            # Closing uses database requests only â€” Google Sheet is a display mirror.
+            # Closing uses database requests only — Google Sheet is a display mirror.
             requests_rows = merge_local_requests([], "ALL")
         except Exception as exc:
             (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
@@ -3701,7 +3784,7 @@ def attendance_report():
             ]
             if skipped:
                 flash(
-                    f"Skipped {skipped} fingerprint(s) not in the employee list. Uncheck â€œRegistered onlyâ€ to include them.",
+                    f"Skipped {skipped} fingerprint(s) not in the employee list. Uncheck “Registered only” to include them.",
                     "success",
                 )
         if request.form.get("department"):
@@ -3862,6 +3945,122 @@ def payroll_adjustments_admin():
         departments=all_departments(active_only=False),
         department_filter=department_filter,
         search_query=search_query,
+    )
+
+
+def kpi_employees_for(manager: dict, cycle_start: str) -> list:
+    evaluations = user_store.kpi_evaluations_map(cycle_start)
+    rows = []
+    for employee in user_store.list_employees():
+        if not employee.get("active", True):
+            continue
+        department = employee.get("department") or ""
+        team = employee.get("team") or ""
+        if not kpi_enabled_for(department):
+            continue
+        if not can_review_row(manager, {"Department": department, "Team": team}):
+            continue
+        device = user_store.normalize_device(employee.get("device") or "")
+        fingerprint = user_store.normalize_fingerprint_id(employee.get("fingerprint"))
+        if not fingerprint:
+            continue
+        evaluation = evaluations.get((device, fingerprint))
+        kpi_amount = evaluation["kpi_amount"] if evaluation else float(employee.get("kpi_amount") or 0)
+        rows.append({
+            "name": employee.get("name") or "",
+            "department": department,
+            "team": team,
+            "device": device,
+            "fingerprint": fingerprint,
+            "kpi_amount": kpi_amount,
+            "scores": evaluation["scores"] if evaluation else {},
+            "evaluated": bool(evaluation),
+            "result": kpi_result(evaluation["scores"], kpi_amount) if evaluation else None,
+            "updated_by": evaluation["updated_by"] if evaluation else "",
+        })
+    rows.sort(key=lambda item: (item["department"].lower(), item["team"].lower(), item["name"].lower()))
+    return rows
+
+
+@app.route("/kpi", methods=["GET", "POST"])
+@login_required
+def kpi_admin():
+    manager = session.get("manager") or {}
+    if not can_manage_kpi(manager):
+        flash("KPI evaluation is not enabled for your department yet.", "error")
+        return redirect(url_for("dashboard"))
+    cycles = payroll_cycles()
+    cycle_starts = {item["start"] for item in cycles}
+    cycle_start = (request.form.get("cycle_start") or request.args.get("cycle") or current_cycle_value())[:10]
+    if cycle_start not in cycle_starts:
+        cycle_start = current_cycle_value()
+    employees = kpi_employees_for(manager, cycle_start)
+
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return redirect(url_for("kpi_admin", cycle=cycle_start))
+        allowed = {f"{item['device']}|{item['fingerprint']}": item for item in employees}
+        items = []
+        errors = []
+        count = max(0, int(request.form.get("employee_count") or 0))
+        for index in range(count):
+            device = request.form.get(f"device__{index}", "").strip()
+            fingerprint = request.form.get(f"fingerprint__{index}", "").strip()
+            person = allowed.get(f"{device}|{fingerprint}")
+            if not person:
+                continue
+            label = person["name"] or fingerprint
+            try:
+                kpi_amount = parse_money_amount(request.form.get(f"kpi_amount__{index}", ""))
+                scores = {
+                    item["key"]: parse_kpi_score(request.form.get(f"{item['key']}__{index}", ""))
+                    for item in KPI_CRITERIA
+                }
+            except ValueError as exc:
+                errors.append(f"{label}: {exc}")
+                continue
+            filled = [value for value in scores.values() if value is not None]
+            if filled and len(filled) != len(KPI_CRITERIA):
+                errors.append(f"{label}: fill all {len(KPI_CRITERIA)} KPI scores or leave them all empty.")
+                continue
+            items.append({
+                "device": person["device"],
+                "fingerprint": person["fingerprint"],
+                "name": person["name"],
+                "department": person["department"],
+                "team": person["team"],
+                "kpi_amount": kpi_amount,
+                "scores": scores if filled else None,
+            })
+        if errors:
+            for error in errors[:8]:
+                flash(error, "error")
+        else:
+            saved = user_store.save_kpi_evaluations(
+                cycle_start,
+                items,
+                manager.get("name") or manager.get("username") or "",
+            )
+            flash(f"Saved KPI for {saved} employee{'s' if saved != 1 else ''}.", "success")
+        return redirect(url_for("kpi_admin", cycle=cycle_start))
+
+    totals = {
+        "kpi_amount": round(sum(item["kpi_amount"] for item in employees), 2),
+        "payout_amount": round(sum(item["result"]["payout_amount"] for item in employees if item["result"]), 2),
+        "evaluated": sum(1 for item in employees if item["evaluated"]),
+    }
+    return render_template(
+        "kpi.html",
+        manager=manager,
+        employees=employees,
+        criteria=KPI_CRITERIA,
+        weight=KPI_WEIGHT_PERCENT,
+        full_payout_at=KPI_FULL_PAYOUT_AT,
+        cycle_start=cycle_start,
+        cycle_label=cycle_label_for(cycle_start),
+        cycles=cycles,
+        totals=totals,
     )
 
 

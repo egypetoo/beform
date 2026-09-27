@@ -143,6 +143,35 @@
             </section>
         {% endif %}
 
+        {% if kpi_history %}
+            {% for kpi in kpi_history %}
+                <section class="form-shell leave-balance-card">
+                    <h2 class="section-title">KPI {{ kpi.cycle_label }}</h2>
+                    <div class="leave-balance-grid">
+                        <div>
+                            <span>Your KPI</span>
+                            <strong>{{ '%g'|format(kpi.payout_percent) }}%</strong>
+                        </div>
+                        <div>
+                            <span>Evaluation total</span>
+                            <strong>{{ '%g'|format(kpi.total) }}%</strong>
+                        </div>
+                    </div>
+                    <div class="leave-balance-grid">
+                        {% for criterion in kpi.criteria %}
+                            <div>
+                                <span>{{ criterion.ar }}</span>
+                                <strong>{{ '%g'|format(criterion.score) }}%</strong>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    {% if loop.first %}
+                        <p class="muted">Each point is 20% of the total. 90% or more earns the full KPI (100%); below 90% you earn the same percentage as your total.</p>
+                    {% endif %}
+                </section>
+            {% endfor %}
+        {% endif %}
+
         {% if rows %}
             <p class="track-count">{{ rows|length }} request{{ 's' if rows|length != 1 else '' }}</p>
             <section class="track-list">

@@ -128,6 +128,8 @@ def init_db() -> None:
         _ensure_employee_leave_days_column(conn)
         _ensure_employee_normal_rules_column(conn)
         _ensure_payroll_adjustments_table(conn)
+        _ensure_employee_kpi_amount_column(conn)
+        _ensure_kpi_evaluations_table(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS app_settings (
@@ -223,6 +225,43 @@ def _ensure_payroll_adjustments_table(conn) -> None:
         )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_payroll_adjustments_cycle ON payroll_adjustments(cycle_start)"
+    )
+
+
+KPI_CRITERIA_KEYS = ("attendance", "work_hours", "deadlines", "quality", "problem_solving")
+
+
+def _ensure_employee_kpi_amount_column(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)")}
+    if "kpi_amount" not in columns:
+        conn.execute("ALTER TABLE employees ADD COLUMN kpi_amount REAL NOT NULL DEFAULT 0")
+
+
+def _ensure_kpi_evaluations_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS kpi_evaluations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cycle_start TEXT NOT NULL,
+            device TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            department TEXT NOT NULL DEFAULT '',
+            team TEXT NOT NULL DEFAULT '',
+            attendance REAL NOT NULL DEFAULT 0,
+            work_hours REAL NOT NULL DEFAULT 0,
+            deadlines REAL NOT NULL DEFAULT 0,
+            quality REAL NOT NULL DEFAULT 0,
+            problem_solving REAL NOT NULL DEFAULT 0,
+            kpi_amount REAL NOT NULL DEFAULT 0,
+            updated_by TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(cycle_start, device, fingerprint)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_kpi_evaluations_person ON kpi_evaluations(fingerprint, device)"
     )
 
 
@@ -826,6 +865,7 @@ def normalize_employee_team(department: str, team: str) -> str:
 def _row_to_employee(row) -> dict:
     leave_days = row["leave_days"] if "leave_days" in row.keys() else DEFAULT_LEAVE_DAYS
     normal_rules = row["normal_rules"] if "normal_rules" in row.keys() else 0
+    kpi_amount = row["kpi_amount"] if "kpi_amount" in row.keys() else 0
     return {
         "id": row["id"],
         "name": row["name"],
@@ -835,6 +875,7 @@ def _row_to_employee(row) -> dict:
         "team": row["team"] if "team" in row.keys() else "",
         "leave_days": normalize_leave_days(leave_days),
         "normal_rules": bool(int(normal_rules or 0)),
+        "kpi_amount": float(kpi_amount or 0),
         "active": bool(row["active"]),
         "created_at": row["created_at"],
     }
@@ -1784,3 +1825,122 @@ def employees_for_payroll_adjustments(cycle_start: str) -> list:
         )
     )
     return rows
+
+
+def _kpi_row_to_dict(row) -> dict:
+    return {
+        "cycle_start": row["cycle_start"],
+        "device": normalize_device(row["device"] or ""),
+        "fingerprint": normalize_fingerprint_id(row["fingerprint"]),
+        "name": row["name"] or "",
+        "department": row["department"] or "",
+        "team": row["team"] or "",
+        "scores": {key: float(row[key] or 0) for key in KPI_CRITERIA_KEYS},
+        "kpi_amount": float(row["kpi_amount"] or 0),
+        "updated_by": row["updated_by"] or "",
+        "updated_at": row["updated_at"] or "",
+    }
+
+
+def kpi_evaluations_map(cycle_start: str) -> dict:
+    cycle = str(cycle_start or "").strip()[:10]
+    if not cycle:
+        return {}
+    init_db()
+    conn = db()
+    rows = conn.execute("SELECT * FROM kpi_evaluations WHERE cycle_start = ?", (cycle,)).fetchall()
+    conn.close()
+    result = {}
+    for row in rows:
+        item = _kpi_row_to_dict(row)
+        if item["fingerprint"]:
+            result[(item["device"], item["fingerprint"])] = item
+    return result
+
+
+def kpi_evaluations_for_employee(device: str, fingerprint: str, limit: int = 6) -> list:
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint:
+        return []
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        """
+        SELECT * FROM kpi_evaluations
+        WHERE fingerprint = ? AND device = ?
+        ORDER BY cycle_start DESC
+        LIMIT ?
+        """,
+        (fingerprint, normalize_device(device or ""), max(1, int(limit))),
+    ).fetchall()
+    conn.close()
+    return [_kpi_row_to_dict(row) for row in rows]
+
+
+def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") -> int:
+    """Upsert KPI scores per employee for a cycle.
+
+    Items with ``scores`` set to None delete that cycle's evaluation. ``kpi_amount``
+    is also stored on the employee as the default for later cycles.
+    """
+    cycle = str(cycle_start or "").strip()[:10]
+    if not cycle:
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    saved = 0
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            for item in items:
+                device = normalize_device(item.get("device") or "")
+                fingerprint = normalize_fingerprint_id(item.get("fingerprint"))
+                if not fingerprint:
+                    continue
+                kpi_amount = max(0.0, float(item.get("kpi_amount") or 0))
+                conn.execute(
+                    "UPDATE employees SET kpi_amount = ? WHERE device = ? AND fingerprint = ?",
+                    (kpi_amount, device, fingerprint),
+                )
+                scores = item.get("scores")
+                if scores is None:
+                    conn.execute(
+                        "DELETE FROM kpi_evaluations WHERE cycle_start = ? AND device = ? AND fingerprint = ?",
+                        (cycle, device, fingerprint),
+                    )
+                    continue
+                values = [min(100.0, max(0.0, float(scores.get(key) or 0))) for key in KPI_CRITERIA_KEYS]
+                conn.execute(
+                    f"""
+                    INSERT INTO kpi_evaluations (
+                        cycle_start, device, fingerprint, name, department, team,
+                        {", ".join(KPI_CRITERIA_KEYS)},
+                        kpi_amount, updated_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, {", ".join("?" for _ in KPI_CRITERIA_KEYS)}, ?, ?, ?)
+                    ON CONFLICT(cycle_start, device, fingerprint) DO UPDATE SET
+                        name = excluded.name,
+                        department = excluded.department,
+                        team = excluded.team,
+                        {", ".join(f"{key} = excluded.{key}" for key in KPI_CRITERIA_KEYS)},
+                        kpi_amount = excluded.kpi_amount,
+                        updated_by = excluded.updated_by,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        cycle,
+                        device,
+                        fingerprint,
+                        str(item.get("name") or "").strip(),
+                        str(item.get("department") or "").strip(),
+                        str(item.get("team") or "").strip(),
+                        *values,
+                        kpi_amount,
+                        (updated_by or "").strip(),
+                        now,
+                    ),
+                )
+                saved += 1
+            conn.commit()
+        finally:
+            conn.close()
+    return saved

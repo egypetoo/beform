@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>BE GROUP | KPI</title>
+    {% include "_pwa_head.html" %}
+    <style>
+        .kpi-table input[type="number"] { min-width: 70px; }
+        .kpi-total { font-weight: 700; white-space: nowrap; }
+        .kpi-full { color: #1f9d55; }
+    </style>
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page page-wide">
+        <header class="hero dash-hero">
+            {% include "_logo.html" %}
+            <p class="eyebrow">{% if manager.role == 'team' %}{{ manager.department }} · {{ manager.team }}{% elif manager.department != 'ALL' %}{{ manager.department }}{% else %}All KPI departments{% endif %}</p>
+            <h1>تقييم KPI الشهري</h1>
+            <p class="subtitle">Rate each employee from 0 to 100 on each point. Each point is {{ weight }}% of the total. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
+            <div class="form-links">
+                <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+                <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
+                        <p>{{ message }}</p>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form class="form-shell" method="get">
+            <h2 class="section-title">Choose payroll cycle</h2>
+            <section class="field">
+                <label for="cycle">Payroll cycle (26th to 25th)</label>
+                <select id="cycle" name="cycle" onchange="this.form.submit()">
+                    {% for cycle in cycles %}
+                        <option value="{{ cycle.start }}" {{ 'selected' if cycle.start == cycle_start else '' }}>
+                            {{ cycle.label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </section>
+        </form>
+
+        <form class="form-shell users-shell" method="post" id="kpi-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="cycle_start" value="{{ cycle_start }}">
+            <input type="hidden" name="employee_count" value="{{ employees|length }}">
+            <h2 class="section-title">Employees · {{ cycle_label }}</h2>
+            <p class="muted">
+                Evaluated {{ totals.evaluated }} of {{ employees|length }} ·
+                Total KPI amount {{ '{:,.2f}'.format(totals.kpi_amount) }} ·
+                Total payout {{ '{:,.2f}'.format(totals.payout_amount) }}
+            </p>
+            <p class="muted">The KPI amount is saved per employee and reused next month until you change it. Leave all five scores empty to remove an evaluation.</p>
+            {% if employees %}
+                <div class="table-wrap">
+                    <table class="kpi-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                {% if manager.role != 'team' %}<th>Team</th>{% endif %}
+                                <th>KPI amount</th>
+                                {% for criterion in criteria %}
+                                    <th title="{{ criterion.en }}">{{ criterion.ar }} ({{ weight }}%)</th>
+                                {% endfor %}
+                                <th>Total</th>
+                                <th>KPI %</th>
+                                <th>Payout</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for person in employees %}
+                                {% set i = loop.index0 %}
+                                <tr data-kpi-row>
+                                    <td data-label="Name">
+                                        {{ person.name }}
+                                        <input type="hidden" name="device__{{ i }}" value="{{ person.device }}">
+                                        <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
+                                    </td>
+                                    {% if manager.role != 'team' %}<td data-label="Team">{{ person.team or '-' }}</td>{% endif %}
+                                    <td data-label="KPI amount">
+                                        <input name="kpi_amount__{{ i }}" type="number" min="0" max="1000000" step="0.01"
+                                               value="{{ person.kpi_amount if person.kpi_amount else '' }}" placeholder="0" data-kpi-amount>
+                                    </td>
+                                    {% for criterion in criteria %}
+                                        <td data-label="{{ criterion.ar }}">
+                                            <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="100" step="1"
+                                                   value="{{ '%g'|format(person.scores[criterion.key]) if person.evaluated else '' }}"
+                                                   placeholder="0–100" data-kpi-score>
+                                        </td>
+                                    {% endfor %}
+                                    <td data-label="Total" class="kpi-total" data-kpi-total>{{ '%g'|format(person.result.total) ~ '%' if person.result else '—' }}</td>
+                                    <td data-label="KPI %" class="kpi-total" data-kpi-percent>{{ '%g'|format(person.result.payout_percent) ~ '%' if person.result else '—' }}</td>
+                                    <td data-label="Payout" class="kpi-total" data-kpi-payout>{{ '{:,.2f}'.format(person.result.payout_amount) if person.result else '—' }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <button type="submit">Save KPI</button>
+            {% else %}
+                <p class="empty-state">No active employees in a KPI department for your account.</p>
+            {% endif %}
+        </form>
+    </main>
+    <script>
+        (function () {
+            const weight = {{ weight }};
+            const fullAt = {{ full_payout_at }};
+            const format = (value) => Number(value.toFixed(2)).toString();
+            document.querySelectorAll('[data-kpi-row]').forEach((row) => {
+                const scores = Array.from(row.querySelectorAll('[data-kpi-score]'));
+                const amountInput = row.querySelector('[data-kpi-amount]');
+                const totalCell = row.querySelector('[data-kpi-total]');
+                const percentCell = row.querySelector('[data-kpi-percent]');
+                const payoutCell = row.querySelector('[data-kpi-payout]');
+                const update = () => {
+                    const filled = scores.filter((input) => input.value.trim() !== '');
+                    if (filled.length !== scores.length) {
+                        totalCell.textContent = '—';
+                        percentCell.textContent = '—';
+                        payoutCell.textContent = '—';
+                        return;
+                    }
+                    const total = scores.reduce(
+                        (sum, input) => sum + Math.min(100, Math.max(0, parseFloat(input.value) || 0)) * weight / 100,
+                        0
+                    );
+                    const percent = total >= fullAt ? 100 : total;
+                    const amount = parseFloat(amountInput.value) || 0;
+                    totalCell.textContent = format(total) + '%';
+                    percentCell.textContent = format(percent) + '%';
+                    percentCell.classList.toggle('kpi-full', percent === 100);
+                    payoutCell.textContent = (amount * percent / 100).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                    });
+                };
+                scores.concat([amountInput]).forEach((input) => input.addEventListener('input', update));
+            });
+        })();
+    </script>
+    {% include "_pwa_foot.html" %}
+</body>
+</html>
