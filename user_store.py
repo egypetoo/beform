@@ -6,7 +6,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
 
-from werkzeug.security import generate_password_hash
+import time
+
+from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "users.db"
@@ -130,6 +132,7 @@ def init_db() -> None:
         _ensure_payroll_adjustments_table(conn)
         _ensure_employee_kpi_amount_column(conn)
         _ensure_kpi_evaluations_table(conn)
+        _ensure_employee_pin_columns(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS app_settings (
@@ -288,6 +291,244 @@ def set_setting(key: str, value: str) -> None:
         )
         conn.commit()
         conn.close()
+
+
+EMPLOYEE_PIN_LENGTH = 4
+# Employees without their own PIN sign in once with this and must replace it before using anything.
+DEFAULT_EMPLOYEE_PIN = "1234"
+EMPLOYEE_PIN_MAX_FAILURES = 5
+EMPLOYEE_PIN_LOCK_SECONDS = 15 * 60
+# A 4-digit PIN cannot resist offline guessing anyway; the hash only keeps PINs unreadable.
+EMPLOYEE_PIN_HASH_METHOD = "pbkdf2:sha256:20000"
+
+
+def _ensure_employee_pin_columns(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)")}
+    if "pin_hash" not in columns:
+        conn.execute("ALTER TABLE employees ADD COLUMN pin_hash TEXT NOT NULL DEFAULT ''")
+    if "pin_version" not in columns:
+        conn.execute("ALTER TABLE employees ADD COLUMN pin_version INTEGER NOT NULL DEFAULT 0")
+    if "pin_set_at" not in columns:
+        conn.execute("ALTER TABLE employees ADD COLUMN pin_set_at TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS employee_pin_attempts (
+            fingerprint TEXT PRIMARY KEY,
+            failures INTEGER NOT NULL DEFAULT 0,
+            locked_until REAL NOT NULL DEFAULT 0
+        )
+        """
+    )
+
+
+def employee_pin_required() -> bool:
+    return get_setting("employee_pin_required", "0") == "1"
+
+
+def set_employee_pin_required(required: bool) -> None:
+    set_setting("employee_pin_required", "1" if required else "0")
+
+
+def pin_is_valid_format(pin: str) -> bool:
+    text = str(pin or "")
+    return len(text) == EMPLOYEE_PIN_LENGTH and text.isdigit()
+
+
+def pin_is_too_simple(pin: str) -> bool:
+    text = str(pin or "")
+    if len(set(text)) == 1:
+        return True
+    digits = [int(ch) for ch in text]
+    steps = {b - a for a, b in zip(digits, digits[1:])}
+    return steps in ({1}, {-1})
+
+
+def find_employee_by_id(employee_id) -> dict | None:
+    try:
+        employee_id = int(employee_id)
+    except (TypeError, ValueError):
+        return None
+    init_db()
+    conn = db()
+    row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    conn.close()
+    return _row_to_employee(row) if row else None
+
+
+def _store_pin(conn, employee_id: int, pin: str) -> None:
+    conn.execute(
+        """
+        UPDATE employees
+        SET pin_hash = ?, pin_version = pin_version + 1, pin_set_at = ?
+        WHERE id = ?
+        """,
+        (
+            generate_password_hash(pin, method=EMPLOYEE_PIN_HASH_METHOD),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            int(employee_id),
+        ),
+    )
+
+
+def set_employee_pin(employee_id: int, pin: str) -> bool:
+    if not pin_is_valid_format(pin):
+        return False
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            _store_pin(conn, employee_id, pin)
+            conn.commit()
+            changed = conn.total_changes > 0
+        finally:
+            conn.close()
+    return changed
+
+
+def reset_employee_pin(employee_id: int) -> bool:
+    """Drop the employee's own PIN so they sign in with the default PIN and pick a new one."""
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            conn.execute(
+                "UPDATE employees SET pin_hash = '', pin_version = pin_version + 1, pin_set_at = '' WHERE id = ?",
+                (int(employee_id),),
+            )
+            conn.commit()
+            changed = conn.total_changes > 0
+        finally:
+            conn.close()
+    return changed
+
+
+def employee_pin_counts() -> dict:
+    init_db()
+    conn = db()
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN pin_hash != '' THEN 1 ELSE 0 END) AS with_pin "
+        "FROM employees WHERE active = 1"
+    ).fetchone()
+    conn.close()
+    total = int(row["total"] or 0)
+    with_pin = int(row["with_pin"] or 0)
+    return {"total": total, "with_pin": with_pin, "without_pin": total - with_pin}
+
+
+def employee_pin_locked_seconds(fingerprint: str) -> int:
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint:
+        return 0
+    init_db()
+    conn = db()
+    row = conn.execute(
+        "SELECT locked_until FROM employee_pin_attempts WHERE fingerprint = ?", (fingerprint,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return 0
+    return max(0, int(float(row["locked_until"] or 0) - time.time()))
+
+
+def record_employee_pin_failure(fingerprint: str) -> int:
+    """Count a failed PIN attempt; return lock seconds when the fingerprint just got locked."""
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint:
+        return 0
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            row = conn.execute(
+                "SELECT failures, locked_until FROM employee_pin_attempts WHERE fingerprint = ?",
+                (fingerprint,),
+            ).fetchone()
+            failures = int(row["failures"] or 0) if row else 0
+            if row and float(row["locked_until"] or 0) and float(row["locked_until"]) <= time.time():
+                failures = 0
+            failures += 1
+            locked_until = 0.0
+            if failures >= EMPLOYEE_PIN_MAX_FAILURES:
+                locked_until = time.time() + EMPLOYEE_PIN_LOCK_SECONDS
+            conn.execute(
+                """
+                INSERT INTO employee_pin_attempts (fingerprint, failures, locked_until) VALUES (?, ?, ?)
+                ON CONFLICT(fingerprint) DO UPDATE SET
+                    failures = excluded.failures,
+                    locked_until = excluded.locked_until
+                """,
+                (fingerprint, failures, locked_until),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return EMPLOYEE_PIN_LOCK_SECONDS if locked_until else 0
+
+
+def clear_employee_pin_failures(fingerprint: str) -> None:
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint:
+        return
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        conn.execute("DELETE FROM employee_pin_attempts WHERE fingerprint = ?", (fingerprint,))
+        conn.commit()
+        conn.close()
+
+
+def authenticate_employee(fingerprint: str, department: str, team: str, pin: str) -> dict:
+    """Check fingerprint + department (+ team) + PIN.
+
+    Returns {"employee": ...} on success, otherwise {"error": "invalid" | "locked" | "ambiguous",
+    "locked_seconds": int}. Wrong PIN, unknown fingerprint and missing PIN all look the same.
+    """
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not fingerprint or not pin_is_valid_format(pin):
+        return {"error": "invalid"}
+    locked = employee_pin_locked_seconds(fingerprint)
+    if locked:
+        return {"error": "locked", "locked_seconds": locked}
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM employees WHERE fingerprint = ? AND active = 1", (fingerprint,)
+    ).fetchall()
+    conn.close()
+    department_key = (department or "").strip().lower()
+    team_key = (team or "").strip().lower()
+    candidates = [
+        row for row in rows
+        if (row["department"] or "").strip().lower() == department_key
+        and (not team_key or (row["team"] or "").strip().lower() == team_key)
+    ]
+    verified = [
+        row for row in candidates
+        if (check_password_hash(row["pin_hash"], pin) if row["pin_hash"] else pin == DEFAULT_EMPLOYEE_PIN)
+    ]
+    if len(verified) == 1:
+        clear_employee_pin_failures(fingerprint)
+        return {"employee": _row_to_employee(verified[0])}
+    if len(verified) > 1:
+        return {"error": "ambiguous"}
+    lock_seconds = record_employee_pin_failure(fingerprint)
+    if lock_seconds:
+        return {"error": "locked", "locked_seconds": lock_seconds}
+    return {"error": "invalid"}
+
+
+def verify_employee_pin(employee_id: int, pin: str) -> bool:
+    if not pin_is_valid_format(pin):
+        return False
+    init_db()
+    conn = db()
+    row = conn.execute("SELECT pin_hash FROM employees WHERE id = ?", (int(employee_id),)).fetchone()
+    conn.close()
+    if not row:
+        return False
+    if not row["pin_hash"]:
+        return pin == DEFAULT_EMPLOYEE_PIN
+    return check_password_hash(row["pin_hash"], pin)
 
 
 def leave_balance_visible() -> bool:
@@ -866,6 +1107,7 @@ def _row_to_employee(row) -> dict:
     leave_days = row["leave_days"] if "leave_days" in row.keys() else DEFAULT_LEAVE_DAYS
     normal_rules = row["normal_rules"] if "normal_rules" in row.keys() else 0
     kpi_amount = row["kpi_amount"] if "kpi_amount" in row.keys() else 0
+    keys = row.keys()
     return {
         "id": row["id"],
         "name": row["name"],
@@ -876,6 +1118,8 @@ def _row_to_employee(row) -> dict:
         "leave_days": normalize_leave_days(leave_days),
         "normal_rules": bool(int(normal_rules or 0)),
         "kpi_amount": float(kpi_amount or 0),
+        "pin_version": int(row["pin_version"] or 0) if "pin_version" in keys else 0,
+        "has_pin": bool(row["pin_hash"]) if "pin_hash" in keys else False,
         "active": bool(row["active"]),
         "created_at": row["created_at"],
     }

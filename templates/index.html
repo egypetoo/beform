@@ -24,16 +24,20 @@
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <div class="card errors">
-                    {% for category, message in messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
                         <p>{{ message }}</p>
-                    {% endfor %}
-                </div>
+                    </div>
+                {% endfor %}
             {% endif %}
         {% endwith %}
 
         <form id="hr-form" class="form-shell" method="post" novalidate>
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            {% if employee_identity %}
+                {% include "_employee_badge.html" %}
+            {% endif %}
+            <div id="identity-fields" class="{{ 'hidden' if employee_identity else '' }}">
             <section class="field">
                 <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
                 <input id="fingerprint_id" name="fingerprint_id" type="text" required
@@ -79,6 +83,7 @@
                        value="{{ form.get('name', '') }}" placeholder="Name appears after fingerprint, department, and team">
                 <p class="field-hint" id="name-hint">Enter fingerprint and department first. Your name will appear automatically.</p>
             </section>
+            </div>
 
             <section class="field">
                 <label for="request_type">Request Type <span>*</span></label>
@@ -157,6 +162,9 @@
 
             <button type="submit" id="submit-btn">Submit Request</button>
             <a class="excel-link" href="{{ url_for('track') }}">Track your request</a>
+            {% if not employee_identity %}
+                <a class="excel-link" href="{{ url_for('employee_login', next='index') }}">Sign in with your PIN</a>
+            {% endif %}
             {% include "_pwa_install.html" %}
         </form>
     </main>
@@ -277,11 +285,16 @@
         const lookupTicket = {{ lookup_ticket | tojson }};
         const selectedTeam = {{ form.get('team', '') | tojson }};
         const selectedDevice = {{ form.get('device', '') | tojson }};
+        const lockedEmployee = {{ employee_identity | tojson }};
         let sending = false;
         let lookupTimer = null;
         let lookupSeq = 0;
 
         async function loadEmployeesForFingerprint(fp) {
+            if (lockedEmployee) {
+                employeeDirectory = [lockedEmployee];
+                return employeeDirectory;
+            }
             const seq = ++lookupSeq;
             if (!fp) {
                 employeeDirectory = [];

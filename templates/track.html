@@ -27,6 +27,33 @@
             {% endif %}
         {% endwith %}
 
+        {% if employee_identity %}
+            <form class="form-shell" method="get" id="track-filter-form">
+                {% include "_employee_badge.html" %}
+                <div class="track-toolbar">
+                    <div class="filters">
+                        {% for status in statuses %}
+                            <a class="filter-chip {% if status_filter == status %}active{% endif %}"
+                               href="{{ url_for('track', status=status, type=type_filter or None) }}">{{ status }}</a>
+                        {% endfor %}
+                    </div>
+                    <div class="filter-bar track-filter-bar">
+                        <label class="filter-date filter-span">
+                            <span>Type</span>
+                            <select name="type" onchange="this.form.submit()">
+                                <option value="">All types</option>
+                                {% for request_type in request_types %}
+                                    <option value="{{ request_type }}" {% if type_filter == request_type %}selected{% endif %}>{{ request_type }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <input type="hidden" name="status" value="{{ status_filter }}">
+                    </div>
+                </div>
+                <a class="excel-link" href="{{ url_for('index') }}">Submit a request</a>
+                {% include "_pwa_install.html" %}
+            </form>
+        {% else %}
         <form class="form-shell" method="post" id="track-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <section class="field">
@@ -98,8 +125,10 @@
             {% endif %}
 
             <a class="excel-link" href="{{ url_for('index') }}">Submit a request</a>
+            <a class="excel-link" href="{{ url_for('employee_login', next='track') }}">Sign in with your PIN</a>
             {% include "_pwa_install.html" %}
         </form>
+        {% endif %}
 
         {% if leave_balance %}
             <section class="form-shell leave-balance-card">
@@ -267,6 +296,7 @@
             <p class="empty-state">No requests match this filter.</p>
         {% endif %}
     </main>
+    {% if not employee_identity %}
     <script>
         const fingerprint = document.getElementById('fingerprint_id');
         const nameInput = document.getElementById('name');
@@ -530,6 +560,7 @@
             nameInput.readOnly = false;
         });
     </script>
+    {% endif %}
     {% include "_turnstile_js.html" %}
     {% include "_pwa_foot.html" %}
 </body>

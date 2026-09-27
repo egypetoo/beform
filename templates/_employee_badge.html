@@ -1,0 +1,14 @@
+<section class="employee-badge">
+    <div>
+        <span class="employee-badge-label">Signed in as</span>
+        <strong>{{ employee_identity.name }}</strong>
+        <span class="employee-badge-meta">
+            {{ employee_identity.department_label }}{% if employee_identity.team %} · {{ employee_identity.team }}{% endif %}
+            · Fingerprint {{ employee_identity.fingerprint }}
+        </span>
+    </div>
+    <div class="employee-badge-links">
+        <a href="{{ url_for('employee_change_pin') }}">Change PIN</a>
+        <a href="{{ url_for('employee_logout') }}">Sign out</a>
+    </div>
+</section>

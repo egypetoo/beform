@@ -710,6 +710,47 @@ button.filter-chip.active {
     line-height: 1;
 }
 
+.employee-badge {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 14px 16px;
+    margin-bottom: 18px;
+    border: 1px solid rgba(245, 130, 32, 0.28);
+    border-radius: 14px;
+    background: rgba(245, 130, 32, 0.07);
+}
+
+.employee-badge strong {
+    display: block;
+    font-size: 17px;
+    color: var(--text);
+}
+
+.employee-badge-label,
+.employee-badge-meta {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.employee-badge-links {
+    display: flex;
+    gap: 14px;
+    font-size: 13px;
+}
+
+.employee-badge-links a {
+    color: var(--orange);
+    text-decoration: none;
+}
+
+td.card-actions form + form {
+    margin-top: 6px;
+}
+
 .kpi-card-head {
     display: flex;
     align-items: baseline;

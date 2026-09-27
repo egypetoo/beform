@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>BE GROUP | {{ 'Choose your PIN' if setup else 'Change PIN' }}</title>
+    {% include "_pwa_head.html" %}
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page">
+        <header class="hero">
+            {% include "_logo.html" %}
+            <p class="eyebrow">{{ employee.name }}</p>
+            {% if setup %}
+                <h1>Choose your PIN</h1>
+                <p class="subtitle">You signed in with the first-time PIN. Pick your own 4-digit PIN that only you know before you continue.</p>
+            {% else %}
+                <h1>Change your PIN</h1>
+                <p class="subtitle">Pick a 4-digit PIN that only you know. Other devices will be signed out.</p>
+            {% endif %}
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
+                        <p>{{ message }}</p>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form class="form-shell" method="post" autocomplete="off">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="{{ next_endpoint }}">
+            {% if not setup %}
+                <section class="field">
+                    <label for="current_pin">Current PIN</label>
+                    <input id="current_pin" name="current_pin" type="password" required inputmode="numeric"
+                           pattern="[0-9]{4}" maxlength="4" autocomplete="current-password">
+                </section>
+            {% endif %}
+            <section class="field">
+                <label for="new_pin">New PIN</label>
+                <input id="new_pin" name="new_pin" type="password" required inputmode="numeric"
+                       pattern="[0-9]{4}" maxlength="4" autocomplete="new-password">
+                <p class="field-hint">Avoid easy PINs like 1111 or 1234.</p>
+            </section>
+            <section class="field">
+                <label for="confirm_pin">Confirm new PIN</label>
+                <input id="confirm_pin" name="confirm_pin" type="password" required inputmode="numeric"
+                       pattern="[0-9]{4}" maxlength="4" autocomplete="new-password">
+            </section>
+            <button type="submit">{{ 'Save my PIN' if setup else 'Save new PIN' }}</button>
+            {% if setup %}
+                <a class="excel-link" href="{{ url_for('employee_logout') }}">Not you? Sign out</a>
+            {% else %}
+                <a class="excel-link" href="{{ url_for('index') }}">Back to the form</a>
+            {% endif %}
+        </form>
+    </main>
+    {% include "_pwa_foot.html" %}
+</body>
+</html>

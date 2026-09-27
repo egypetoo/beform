@@ -18,7 +18,8 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
 from dotenv import load_dotenv
-from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 import requests
@@ -998,7 +999,18 @@ def employees_for_fingerprint_lookup(fingerprint: str) -> list:
 
 def index_context(form) -> dict:
     mark_form_opened()
+    identity = employee_identity(current_employee())
+    if identity:
+        form = {
+            **(dict(form.items()) if form else {}),
+            "fingerprint_id": identity["fingerprint"],
+            "department": identity["department"],
+            "team": identity["team"],
+            "device": identity["device"],
+            "name": identity["name"],
+        }
     return {
+        "employee_identity": identity,
         "leave_groups": leave_groups_for_form(),
         "departments": all_departments(),
         "teams_by_department": teams_for_form(),
@@ -1545,6 +1557,90 @@ def login_required(view):
     return wrapped
 
 
+EMPLOYEE_COOKIE = "be_employee"
+EMPLOYEE_SESSION_DAYS = 30
+EMPLOYEE_COOKIE_SALT = "employee-auth-v1"
+
+
+def employee_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(app.secret_key, salt=EMPLOYEE_COOKIE_SALT)
+
+
+def current_employee() -> dict | None:
+    if "employee" in g:
+        return g.employee
+    employee = None
+    token = request.cookies.get(EMPLOYEE_COOKIE, "")
+    if token:
+        try:
+            data = employee_serializer().loads(token, max_age=EMPLOYEE_SESSION_DAYS * 86400)
+        except (BadSignature, SignatureExpired):
+            data = None
+        if isinstance(data, dict):
+            found = user_store.find_employee_by_id(data.get("id"))
+            if (
+                found
+                and found.get("active")
+                and int(found.get("pin_version") or 0) == int(data.get("v", -1))
+            ):
+                employee = found
+    g.employee = employee
+    return employee
+
+
+def set_employee_cookie(response, employee: dict):
+    token = employee_serializer().dumps({"id": employee["id"], "v": int(employee.get("pin_version") or 0)})
+    response.set_cookie(
+        EMPLOYEE_COOKIE,
+        token,
+        max_age=EMPLOYEE_SESSION_DAYS * 86400,
+        httponly=True,
+        secure=bool(app.config.get("SESSION_COOKIE_SECURE")),
+        samesite="Lax",
+    )
+    return response
+
+
+def clear_employee_cookie(response):
+    response.delete_cookie(EMPLOYEE_COOKIE, httponly=True, samesite="Lax",
+                           secure=bool(app.config.get("SESSION_COOKIE_SECURE")))
+    return response
+
+
+def employee_department_value(employee: dict) -> str:
+    label = (employee.get("department") or "").strip().lower()
+    for item in all_departments(active_only=True):
+        if item["label"].strip().lower() == label:
+            return item["value"]
+    return ""
+
+
+def employee_identity(employee: dict | None) -> dict | None:
+    """Identity fields the form/Track JS expects, for a logged-in employee."""
+    if not employee:
+        return None
+    return {
+        "fingerprint": employee["fingerprint"],
+        "name": employee["name"],
+        "department": employee_department_value(employee),
+        "department_label": employee.get("department") or "",
+        "team": employee.get("team") or "",
+        "device": employee.get("device") or "",
+        "normal_rules": bool(employee.get("normal_rules")),
+    }
+
+
+EMPLOYEE_LOGIN_NEXT = {"index", "track"}
+
+
+def employee_login_redirect(next_endpoint: str):
+    return redirect(url_for("employee_login", next=next_endpoint))
+
+
+def employee_pin_setup_redirect(next_endpoint: str):
+    return redirect(url_for("employee_change_pin", next=next_endpoint))
+
+
 def hr_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -1577,6 +1673,11 @@ def pwa_service_worker():
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    employee = current_employee()
+    if not employee and user_store.employee_pin_required():
+        return employee_login_redirect("index")
+    if employee and not employee.get("has_pin"):
+        return employee_pin_setup_redirect("index")
     schedule_sheet_sync()
     options = option_lookup()
 
@@ -1605,6 +1706,12 @@ def index():
         start_date = request.form.get("start_date", "").strip()
         end_date = request.form.get("end_date", "").strip()
         notes = request.form.get("notes", "").strip()
+        identity = employee_identity(employee)
+        if identity:
+            fingerprint_id = identity["fingerprint"]
+            name = identity["name"]
+            department = identity["department"]
+            team = identity["team"]
         if len(notes) > MAX_NOTES_CHARS:
             notes = notes[:MAX_NOTES_CHARS]
         if is_spam_request_row({"Notes": notes}):
@@ -1622,7 +1729,7 @@ def index():
             errors.append("Department is required")
         elif department not in department_maps()["values"]:
             errors.append("Please select a valid department")
-        device = request.form.get("device", "").strip()
+        device = identity["device"] if identity else request.form.get("device", "").strip()
         if device:
             device = user_store.normalize_device(device)
         matched_department = ""
@@ -1889,6 +1996,9 @@ def employee_lookup():
     if not csrf_is_valid():
         return _finish({"ok": False, "error": "csrf", "employees": []}, 403)
 
+    if user_store.employee_pin_required():
+        return _finish(empty)
+
     if not lookup_session_is_ready():
         return _finish({"ok": False, "error": "session", "employees": []}, 403)
 
@@ -1921,9 +2031,64 @@ def success():
     return render_template("success.html")
 
 
+def track_for_employee(employee: dict):
+    identity = employee_identity(employee)
+    status_filter = (request.args.get("status") or "All").strip()
+    if status_filter not in {"Pending", "Approved", "Rejected", "All"}:
+        status_filter = "All"
+    type_filter = (request.args.get("type") or "").strip()
+    rows = []
+    request_types = []
+    leave_balance = None
+    excuse_balance = None
+    kpi_history = []
+    try:
+        all_rows = lookup_by_fingerprint(employee["fingerprint"], employee["name"])
+        leave_balance = leave_balance_summary(employee["name"], employee["fingerprint"], all_rows)
+        excuse_balance = personal_excuse_balance_summary(employee["name"], employee["fingerprint"], all_rows)
+        kpi_history = kpi_history_for_employee(employee)
+        request_types = sorted({
+            str(row.get("Request Type") or "").strip() for row in all_rows if row.get("Request Type")
+        })
+        rows = all_rows
+        if status_filter != "All":
+            rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
+        if type_filter:
+            rows = [row for row in rows if (row.get("Request Type") or "") == type_filter]
+    except Exception as exc:
+        (BASE_DIR / "sheet_error.log").write_text(str(exc), encoding="utf-8")
+        flash("Could not load requests. Please try again.", "error")
+    return render_template(
+        "track.html",
+        employee_identity=identity,
+        rows=rows,
+        fingerprint_id=identity["fingerprint"],
+        track_name=identity["name"],
+        track_department=identity["department"],
+        track_team=identity["team"],
+        track_device=identity["device"],
+        status_filter=status_filter,
+        type_filter=type_filter,
+        request_types=request_types,
+        leave_balance=leave_balance,
+        excuse_balance=excuse_balance,
+        kpi_history=kpi_history,
+        departments=all_departments(),
+        teams_by_department=teams_for_form(),
+        statuses=["Pending", "Approved", "Rejected", "All"],
+    )
+
+
 @app.route("/track", methods=["GET", "POST"])
 @limit_route("8 per 5 minutes")
 def track():
+    employee = current_employee()
+    if employee and not employee.get("has_pin"):
+        return employee_pin_setup_redirect("track")
+    if employee:
+        return track_for_employee(employee)
+    if user_store.employee_pin_required():
+        return employee_login_redirect("track")
     mark_form_opened()
     rows = None
     fingerprint_id = ""
@@ -2145,6 +2310,109 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+def employee_login_context(form=None) -> dict:
+    return {
+        "departments": all_departments(),
+        "teams_by_department": teams_for_form(),
+        "form": form or {},
+        "next_endpoint": (request.values.get("next") or "index"),
+        "default_employee_pin": user_store.DEFAULT_EMPLOYEE_PIN,
+    }
+
+
+@app.route("/employee/login", methods=["GET", "POST"])
+@limit_route("10 per 5 minutes")
+def employee_login():
+    next_endpoint = request.values.get("next") or "index"
+    if next_endpoint not in EMPLOYEE_LOGIN_NEXT:
+        next_endpoint = "index"
+    if request.method == "GET" and current_employee():
+        return redirect(url_for(next_endpoint))
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return render_template("employee_login.html", **employee_login_context(request.form))
+        if enforce_turnstile(allow_session=True):
+            return render_template("employee_login.html", **employee_login_context(request.form))
+        department_value = request.form.get("department", "").strip()
+        department_label = department_maps()["labels"].get(department_value, "")
+        pin = request.form.get("pin", "").strip()
+        if not department_label:
+            flash("Please select your department.", "error")
+            return render_template("employee_login.html", **employee_login_context(request.form))
+        if not user_store.pin_is_valid_format(pin):
+            flash(f"PIN must be {user_store.EMPLOYEE_PIN_LENGTH} digits.", "error")
+            return render_template("employee_login.html", **employee_login_context(request.form))
+        result = user_store.authenticate_employee(
+            parse_fingerprint_id(request.form.get("fingerprint_id", "")) or "",
+            department_label,
+            request.form.get("team", "").strip(),
+            pin,
+        )
+        employee = result.get("employee")
+        if not employee:
+            if result.get("error") == "locked":
+                minutes = max(1, (int(result.get("locked_seconds") or 0) + 59) // 60)
+                flash(f"Too many wrong attempts. Try again in {minutes} minutes or ask HR to reset your PIN.", "error")
+            elif result.get("error") == "ambiguous":
+                flash("Please choose your team, then try again.", "error")
+            else:
+                flash("Fingerprint, department, team, or PIN is incorrect.", "error")
+            return render_template("employee_login.html", **employee_login_context(request.form))
+        target = employee_pin_setup_redirect(next_endpoint) if not employee.get("has_pin") else redirect(url_for(next_endpoint))
+        return set_employee_cookie(target, employee)
+    return render_template("employee_login.html", **employee_login_context())
+
+
+@app.route("/employee/logout")
+def employee_logout():
+    return clear_employee_cookie(redirect(url_for("employee_login")))
+
+
+@app.route("/employee/pin", methods=["GET", "POST"])
+@limit_route("10 per 5 minutes")
+def employee_change_pin():
+    next_endpoint = request.values.get("next") or "index"
+    if next_endpoint not in EMPLOYEE_LOGIN_NEXT:
+        next_endpoint = "index"
+    employee = current_employee()
+    if not employee:
+        return employee_login_redirect(next_endpoint)
+    setup = not employee.get("has_pin")
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return redirect(url_for("employee_change_pin", next=next_endpoint))
+        current_pin = user_store.DEFAULT_EMPLOYEE_PIN if setup else request.form.get("current_pin", "").strip()
+        new_pin = request.form.get("new_pin", "").strip()
+        confirm_pin = request.form.get("confirm_pin", "").strip()
+        locked = 0 if setup else user_store.employee_pin_locked_seconds(employee["fingerprint"])
+        if locked:
+            flash(f"Too many wrong attempts. Try again in {max(1, (locked + 59) // 60)} minutes.", "error")
+        elif not setup and not user_store.verify_employee_pin(employee["id"], current_pin):
+            user_store.record_employee_pin_failure(employee["fingerprint"])
+            flash("Current PIN is incorrect.", "error")
+        elif not user_store.pin_is_valid_format(new_pin):
+            flash(f"New PIN must be {user_store.EMPLOYEE_PIN_LENGTH} digits.", "error")
+        elif new_pin != confirm_pin:
+            flash("New PIN and confirmation do not match.", "error")
+        elif new_pin == current_pin:
+            flash("Choose a PIN different from the current one.", "error")
+        elif user_store.pin_is_too_simple(new_pin):
+            flash("This PIN is too easy to guess (like 1111 or 1234). Choose another one.", "error")
+        else:
+            user_store.set_employee_pin(employee["id"], new_pin)
+            user_store.clear_employee_pin_failures(employee["fingerprint"])
+            refreshed = user_store.find_employee_by_id(employee["id"])
+            if setup:
+                flash("Your PIN is saved. Use it next time you sign in.", "success")
+            else:
+                flash("Your PIN was changed. Other devices will need to sign in again.", "success")
+            return set_employee_cookie(redirect(url_for(next_endpoint)), refreshed)
+        return redirect(url_for("employee_change_pin", next=next_endpoint))
+    return render_template("employee_pin.html", employee=employee, setup=setup, next_endpoint=next_endpoint)
 
 
 def remote_work_days_summary(rows: list, date_from: str = "", date_to: str = "") -> dict:
@@ -3169,6 +3437,9 @@ def employees_admin_context() -> dict:
         "leave_balance_visible": user_store.leave_balance_visible(),
         "default_leave_days": user_store.DEFAULT_LEAVE_DAYS,
         "sales_department_values": sales_department_values(),
+        "employee_pin_required": user_store.employee_pin_required(),
+        "employee_pin_counts": user_store.employee_pin_counts(),
+        "default_employee_pin": user_store.DEFAULT_EMPLOYEE_PIN,
     }
 
 
@@ -3521,6 +3792,45 @@ def employees_leave_settings():
         "Leave balance is now visible on the Track page."
         if visible
         else "Leave balance is now hidden on the Track page.",
+        "success",
+    )
+    return redirect(url_for("employees_admin"))
+
+
+@app.route("/employees/pins/settings", methods=["POST"])
+@hr_required
+def employees_pin_settings():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    required = request.form.get("employee_pin_required") == "1"
+    user_store.set_employee_pin_required(required)
+    if required:
+        flash(
+            "Employees must now sign in to submit requests and open Track. "
+            f"Anyone without their own PIN signs in with {user_store.DEFAULT_EMPLOYEE_PIN} and must choose a new PIN first.",
+            "success",
+        )
+    else:
+        flash("PIN sign-in is now optional. Employees can use the form and Track without signing in.", "success")
+    return redirect(url_for("employees_admin"))
+
+
+@app.route("/employees/pins/reset", methods=["POST"])
+@hr_required
+def employees_pin_reset():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    employee = user_store.find_employee_by_id(request.form.get("employee_id"))
+    if not employee or not employee.get("active"):
+        flash("Choose an active employee.", "error")
+        return redirect(url_for("employees_admin"))
+    user_store.reset_employee_pin(employee["id"])
+    user_store.clear_employee_pin_failures(employee["fingerprint"])
+    flash(
+        f"PIN reset for {employee['name']} ({employee['department']}, fingerprint {employee['fingerprint']}). "
+        f"They sign in with {user_store.DEFAULT_EMPLOYEE_PIN} and choose a new PIN. Their old sign-ins are ended.",
         "success",
     )
     return redirect(url_for("employees_admin"))

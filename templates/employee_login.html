@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>BE GROUP | Employee Sign in</title>
+    {% include "_pwa_head.html" %}
+    {% include "_turnstile_head.html" %}
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page">
+        <header class="hero">
+            {% include "_logo.html" %}
+            <p class="eyebrow">Human Resources</p>
+            <h1>Employee sign in</h1>
+            <p class="subtitle">Sign in with your fingerprint number and your 4-digit PIN. You stay signed in on this device for 30 days.</p>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
+                        <p>{{ message }}</p>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form class="form-shell" method="post" id="employee-login-form" autocomplete="off">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="{{ next_endpoint }}">
+            <section class="field">
+                <label for="fingerprint_id">Fingerprint Number <span>*</span></label>
+                <input id="fingerprint_id" name="fingerprint_id" type="text" required
+                       inputmode="numeric" pattern="[0-9]+" maxlength="10"
+                       value="{{ form.get('fingerprint_id', '') }}" placeholder="Enter fingerprint number">
+            </section>
+            <section class="field">
+                <label for="department">Department <span>*</span></label>
+                <select id="department" name="department" required>
+                    <option value="" disabled {% if not form.get('department') %}selected{% endif %}>Select department</option>
+                    {% for dept in departments %}
+                        <option value="{{ dept.value }}" {% if form.get('department') == dept.value %}selected{% endif %}>{{ dept.label }}</option>
+                    {% endfor %}
+                </select>
+            </section>
+            <section class="field hidden" id="team-card">
+                <label for="team">Team</label>
+                <select id="team" name="team">
+                    <option value="">No team / department only</option>
+                </select>
+                <p class="field-hint">Choose your team leader if you have one.</p>
+            </section>
+            <section class="field">
+                <label for="pin">PIN <span>*</span></label>
+                <input id="pin" name="pin" type="password" required inputmode="numeric"
+                       pattern="[0-9]{4}" maxlength="4" autocomplete="current-password" placeholder="4 digits">
+                <p class="field-hint">First time? Use {{ default_employee_pin }}, then choose your own PIN. Forgot it? Ask HR to reset it.</p>
+            </section>
+            {% include "_turnstile_widget.html" %}
+            <button type="submit">Sign in</button>
+        </form>
+    </main>
+    {% include "_turnstile_js.html" %}
+    <script>
+        (function () {
+            const teamsByDepartment = {{ teams_by_department | tojson }};
+            const selectedTeam = {{ form.get('team', '') | tojson }};
+            const department = document.getElementById('department');
+            const team = document.getElementById('team');
+            const teamCard = document.getElementById('team-card');
+            const fingerprint = document.getElementById('fingerprint_id');
+            const pin = document.getElementById('pin');
+            const syncTeams = () => {
+                const teams = teamsByDepartment[department.value] || [];
+                team.innerHTML = '';
+                team.appendChild(new Option('No team / department only', ''));
+                teams.forEach((item) => team.appendChild(new Option(item.label, item.value)));
+                if (selectedTeam && teams.some((item) => item.value === selectedTeam)) team.value = selectedTeam;
+                teamCard.classList.toggle('hidden', !teams.length);
+            };
+            department.addEventListener('change', syncTeams);
+            syncTeams();
+            fingerprint.addEventListener('input', () => { fingerprint.value = fingerprint.value.replace(/\D/g, ''); });
+            pin.addEventListener('input', () => { pin.value = pin.value.replace(/\D/g, '').slice(0, 4); });
+            document.getElementById('employee-login-form').addEventListener('submit', (event) => {
+                if (!window.ensureTurnstileToken()) event.preventDefault();
+            });
+        })();
+    </script>
+    {% include "_pwa_foot.html" %}
+</body>
+</html>

@@ -46,6 +46,25 @@
             <button type="submit">Save leave visibility</button>
         </form>
 
+        <section class="form-shell">
+            <h2 class="section-title">Employee PINs</h2>
+            <p class="muted">Each employee signs in once with fingerprint, department, team and a 4-digit PIN and stays signed in on that device for 30 days. Signed-in employees can only submit requests and open Track for themselves.</p>
+            <p class="muted">The first sign-in uses <strong>{{ default_employee_pin }}</strong>; the employee must choose their own PIN before doing anything else. <strong>Reset PIN</strong> sends an employee back to {{ default_employee_pin }}.</p>
+            <p class="muted">
+                <strong>{{ employee_pin_counts.with_pin }}</strong> of <strong>{{ employee_pin_counts.total }}</strong> active employees chose their own PIN.
+                {% if employee_pin_counts.without_pin %}<strong>{{ employee_pin_counts.without_pin }}</strong> still use {{ default_employee_pin }}.{% endif %}
+            </p>
+            <form method="post" action="{{ url_for('employees_pin_settings') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label class="select-all-label leave-toggle">
+                    <input type="checkbox" name="employee_pin_required" value="1"
+                           {% if employee_pin_required %}checked{% endif %}>
+                    Require PIN sign-in for the request form and Track
+                </label>
+                <button type="submit">Save PIN setting</button>
+            </form>
+        </section>
+
         <form class="form-shell" method="post" action="{{ url_for('employees_import') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Upload employees</h2>
@@ -221,6 +240,14 @@
                                         </select>
                                     </td>
                                     <td class="card-actions" data-label="Account">
+                                        {% if employee.has_pin %}
+                                            <form method="post" action="{{ url_for('employees_pin_reset') }}"
+                                                  onsubmit="return confirm('Reset this employee\'s PIN to {{ default_employee_pin }}? They will choose a new one at next sign-in.');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                <input type="hidden" name="employee_id" value="{{ employee.id }}">
+                                                <button class="btn-sm" type="submit">Reset PIN</button>
+                                            </form>
+                                        {% endif %}
                                         <form method="post" action="{{ url_for('employees_delete') }}"
                                               onsubmit="return confirm('Delete this employee?');">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
