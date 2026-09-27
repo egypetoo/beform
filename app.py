@@ -2764,6 +2764,14 @@ def resync_sheet_requests():
         f"Queued {queued} request(s). Synced {synced} to Google Sheet now.",
         "success",
     )
+    unsynced = user_store.unsynced_form_requests(21, 10)
+    if unsynced["total"]:
+        details = "; ".join(
+            f"{row.get('name')} – {row.get('request_type')} {row.get('start_date') or row.get('request_date')} "
+            f"({row.get('sync_status')}: {row.get('sync_error') or 'waiting'})"
+            for row in unsynced["rows"]
+        )
+        flash(f"{unsynced['total']} request(s) are NOT in the sheet: {details}", "error")
     return redirect(url_for("dashboard"))
 
 

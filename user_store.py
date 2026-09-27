@@ -1722,6 +1722,28 @@ def has_pending_form_requests() -> bool:
     return bool(row)
 
 
+def unsynced_form_requests(days: int = 21, limit: int = 10) -> dict:
+    """Recent requests that are not in the Google Sheet (still pending or blocked by the sheet)."""
+    cutoff = (datetime.now() - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d %H:%M:%S")
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        """
+        SELECT * FROM form_requests
+        WHERE sync_status IN ('pending', 'blocked') AND submitted_at >= ?
+        ORDER BY submitted_at DESC
+        LIMIT ?
+        """,
+        (cutoff, max(1, int(limit))),
+    ).fetchall()
+    total = conn.execute(
+        "SELECT COUNT(*) FROM form_requests WHERE sync_status IN ('pending', 'blocked') AND submitted_at >= ?",
+        (cutoff,),
+    ).fetchone()[0]
+    conn.close()
+    return {"total": int(total or 0), "rows": [_form_request_dict(row) for row in rows]}
+
+
 def pending_form_requests(limit: int = 8) -> list:
     init_db()
     conn = db()
