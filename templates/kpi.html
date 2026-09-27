@@ -18,7 +18,7 @@
             {% include "_logo.html" %}
             <p class="eyebrow">{% if manager.role == 'team' %}{{ manager.department }} · {{ manager.team }}{% elif manager.department != 'ALL' %}{{ manager.department }}{% else %}All KPI departments{% endif %}</p>
             <h1>تقييم KPI الشهري</h1>
-            <p class="subtitle">Rate each employee from 0 to 100 on each point. Each point is {{ weight }}% of the total. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
+            <p class="subtitle">Rate each point out of {{ weight }} (five points = 100%). The total is the sum of the five scores. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
@@ -69,7 +69,7 @@
                                 {% if manager.role != 'team' %}<th>Team</th>{% endif %}
                                 <th>KPI amount</th>
                                 {% for criterion in criteria %}
-                                    <th title="{{ criterion.en }}">{{ criterion.ar }} ({{ weight }}%)</th>
+                                    <th title="{{ criterion.en }}">{{ criterion.ar }} (من {{ weight }})</th>
                                 {% endfor %}
                                 <th>Total</th>
                                 <th>KPI %</th>
@@ -92,9 +92,9 @@
                                     </td>
                                     {% for criterion in criteria %}
                                         <td data-label="{{ criterion.ar }}">
-                                            <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="100" step="1"
+                                            <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="{{ weight }}" step="0.5"
                                                    value="{{ '%g'|format(person.scores[criterion.key]) if person.evaluated else '' }}"
-                                                   placeholder="0–100" data-kpi-score>
+                                                   placeholder="0–{{ weight }}" data-kpi-score>
                                         </td>
                                     {% endfor %}
                                     <td data-label="Total" class="kpi-total" data-kpi-total>{{ '%g'|format(person.result.total) ~ '%' if person.result else '—' }}</td>
@@ -131,7 +131,7 @@
                         return;
                     }
                     const total = scores.reduce(
-                        (sum, input) => sum + Math.min(100, Math.max(0, parseFloat(input.value) || 0)) * weight / 100,
+                        (sum, input) => sum + Math.min(weight, Math.max(0, parseFloat(input.value) || 0)),
                         0
                     );
                     const percent = total >= fullAt ? 100 : total;

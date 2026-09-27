@@ -317,8 +317,12 @@ def can_manage_kpi(manager: dict | None) -> bool:
 
 
 def kpi_result(scores: dict, kpi_amount: float) -> dict:
+    """Each criterion is scored out of KPI_WEIGHT_PERCENT; the total is their sum (out of 100)."""
     total = round(
-        sum(float(scores.get(item["key"]) or 0) * KPI_WEIGHT_PERCENT / 100 for item in KPI_CRITERIA),
+        sum(
+            min(float(KPI_WEIGHT_PERCENT), max(0.0, float(scores.get(item["key"]) or 0)))
+            for item in KPI_CRITERIA
+        ),
         2,
     )
     payout_percent = 100.0 if total >= KPI_FULL_PAYOUT_AT else total
@@ -336,9 +340,9 @@ def parse_kpi_score(value) -> float | None:
     try:
         score = float(text)
     except ValueError:
-        raise ValueError("KPI scores must be numbers from 0 to 100.")
-    if score < 0 or score > 100:
-        raise ValueError("KPI scores must be from 0 to 100.")
+        raise ValueError(f"KPI scores must be numbers from 0 to {KPI_WEIGHT_PERCENT}.")
+    if score < 0 or score > KPI_WEIGHT_PERCENT:
+        raise ValueError(f"Each KPI score must be from 0 to {KPI_WEIGHT_PERCENT}.")
     return round(score, 2)
 
 
@@ -368,6 +372,7 @@ def kpi_history_for_employee(employee: dict | None) -> list:
                 {"ar": criterion["ar"], "en": criterion["en"], "score": item["scores"].get(criterion["key"], 0)}
                 for criterion in KPI_CRITERIA
             ],
+            "max_score": KPI_WEIGHT_PERCENT,
         })
     return history
 

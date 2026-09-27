@@ -161,12 +161,12 @@
                         {% for criterion in kpi.criteria %}
                             <div>
                                 <span>{{ criterion.ar }}</span>
-                                <strong>{{ '%g'|format(criterion.score) }}%</strong>
+                                <strong>{{ '%g'|format(criterion.score) }} / {{ kpi.max_score }}</strong>
                             </div>
                         {% endfor %}
                     </div>
                     {% if loop.first %}
-                        <p class="muted">Each point is 20% of the total. 90% or more earns the full KPI (100%); below 90% you earn the same percentage as your total.</p>
+                        <p class="muted">Each point is scored out of 20 and the total is their sum. 90% or more earns the full KPI (100%); below 90% you earn the same percentage as your total.</p>
                     {% endif %}
                 </section>
             {% endfor %}
