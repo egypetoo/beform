@@ -131,13 +131,16 @@ def late_penalty(clock_in: str) -> str:
     return DEDUCTION_HALF
 
 
-def clock_out_penalty(shift: dict) -> tuple[str, str]:
+def early_out_after_grace(shift: dict) -> int:
     early = int(shift.get("early_out") or 0)
     if early <= 0:
-        return "", ""
+        return 0
     late = int(shift.get("late_minutes") or 0)
-    remaining_early = max(0, early - max(0, DAILY_GRACE_MINUTES - late))
-    if remaining_early <= 0:
+    return max(0, early - max(0, DAILY_GRACE_MINUTES - late))
+
+
+def clock_out_penalty(shift: dict) -> tuple[str, str]:
+    if early_out_after_grace(shift) <= 0:
         return "", ""
     worked = shift.get("credited_minutes")
     if worked is None:
@@ -716,8 +719,7 @@ def classify_day(
     if not skip_out:
         evening, evening_reason = clock_out_penalty(shift)
         if evening:
-            early = int(shift.get("early_out") or 0)
-            needed = ceil_hours_minutes(early)
+            needed = ceil_hours_minutes(early_out_after_grace(shift))
             if needed and day_budget >= needed:
                 evening = ""
                 evening_reason = ""
