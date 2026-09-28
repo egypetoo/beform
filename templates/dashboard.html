@@ -213,7 +213,10 @@
                                         <td data-label="Team">{{ row.get('Team', '') }}</td>
                                         <td data-label="Type">{{ row.get('Request Type', '') }}</td>
                                         <td data-label="Dates">{{ row.get('From Date', '') }} → {{ row.get('To Date', '') }}</td>
-                                        <td data-label="Time">{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') or '-' }}</td>
+                                        <td data-label="Time">
+                                            {% if row.get('From Time') %}{{ row.get('From Time') }}{% if row.get('To Time') %} → {{ row.get('To Time') }}{% endif %}
+                                            {% else %}{{ row.get('Punch In Time') or row.get('Punch Out Time') or '-' }}{% endif %}
+                                        </td>
                                         <td class="wrap-cell" data-label="Notes">{{ row.get('Notes', '') }}</td>
                                         <td data-label="Status">
                                             <span class="badge badge-{{ current_status|lower }}">{{ current_status }}</span>

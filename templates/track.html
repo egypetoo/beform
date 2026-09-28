@@ -273,7 +273,10 @@
                             {% if row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') %}
                                 <div>
                                     <span>Time</span>
-                                    <strong>{{ row.get('From Time') or row.get('Punch In Time') or row.get('Punch Out Time') }}</strong>
+                                    <strong>
+                                        {% if row.get('From Time') %}{{ row.get('From Time') }}{% if row.get('To Time') %} → {{ row.get('To Time') }}{% endif %}
+                                        {% else %}{{ row.get('Punch In Time') or row.get('Punch Out Time') }}{% endif %}
+                                    </strong>
                                 </div>
                             {% endif %}
                             {% if row.get('Notes') %}
