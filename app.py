@@ -3495,6 +3495,11 @@ def employees_admin_context() -> dict:
         "branch_manager_departments": [
             item["label"] for item in departments if attendance.is_sales_department(item["label"])
         ],
+        "job_roles_by_department": {
+            item["label"]: user_store.job_roles_for(item["label"])
+            for item in departments
+            if user_store.job_roles_for(item["label"])
+        },
     }
 
 
@@ -3914,6 +3919,26 @@ def employees_branch_manager():
         )
     else:
         flash(f"{employee['name']} is no longer a branch manager.", "success")
+    return redirect(url_for("employees_admin"))
+
+
+@app.route("/employees/job-role", methods=["POST"])
+@hr_required
+def employees_job_role():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    employee = user_store.find_employee_by_id(request.form.get("employee_id"))
+    if not employee or not employee.get("active"):
+        flash("Choose an active employee.", "error")
+        return redirect(url_for("employees_admin"))
+    allowed = user_store.job_roles_for(employee.get("department") or "")
+    job_role = request.form.get("job_role", "").strip()
+    if not allowed or (job_role and job_role not in allowed):
+        flash("Choose a valid job role for this department.", "error")
+        return redirect(url_for("employees_admin"))
+    user_store.set_employee_job_role(employee["id"], job_role)
+    flash(f"{employee['name']}: job role set to {job_role or 'none'}.", "success")
     return redirect(url_for("employees_admin"))
 
 
@@ -4379,6 +4404,7 @@ def kpi_employees_for(manager: dict, cycle_start: str) -> list:
             "name": employee.get("name") or "",
             "department": department,
             "team": team,
+            "job_role": employee.get("job_role") or "",
             "device": device,
             "fingerprint": fingerprint,
             "kpi_amount": kpi_amount,
@@ -4524,6 +4550,7 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True)
         "الجهاز",
         "القسم",
         "التيم",
+        "الوظيفة",
         "قيمة الـ KPI",
         *[f"{item['ar']} (من {KPI_WEIGHT_PERCENT})" for item in KPI_CRITERIA],
         "إجمالي التقييم %",
@@ -4532,7 +4559,7 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True)
         "الحالة",
         "قيّمه",
     ]
-    money_columns = {5, 5 + len(KPI_CRITERIA) + 3}
+    money_columns = {6, 6 + len(KPI_CRITERIA) + 3}
     rows = []
     total_amount = 0.0
     total_payout = 0.0
@@ -4547,6 +4574,7 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True)
             person["device"],
             person["department"],
             person["team"],
+            person["job_role"],
             person["kpi_amount"],
             *[person["scores"].get(item["key"], "") if result else "" for item in KPI_CRITERIA],
             result["total"] if result else "",
@@ -4557,8 +4585,8 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True)
         ])
     blank_scores = [""] * len(KPI_CRITERIA)
     if show_money:
-        rows.append(["الإجمالي", "", "", "", "", round(total_amount, 2), *blank_scores, "", "", round(total_payout, 2), "", ""])
-    numeric_columns = set(range(5, 5 + len(KPI_CRITERIA) + 4))
+        rows.append(["الإجمالي", "", "", "", "", "", round(total_amount, 2), *blank_scores, "", "", round(total_payout, 2), "", ""])
+    numeric_columns = set(range(6, 6 + len(KPI_CRITERIA) + 4))
     if not show_money:
         keep = [index for index in range(len(headers)) if index not in money_columns]
         numeric_columns = {keep.index(index) for index in numeric_columns if index in keep}

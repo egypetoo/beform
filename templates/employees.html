@@ -240,6 +240,18 @@
                                         </select>
                                     </td>
                                     <td class="card-actions" data-label="Account">
+                                        {% if employee.department in job_roles_by_department %}
+                                            <form method="post" action="{{ url_for('employees_job_role') }}">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                <input type="hidden" name="employee_id" value="{{ employee.id }}">
+                                                <select name="job_role" aria-label="Job role" onchange="this.form.submit()">
+                                                    <option value="">Job role…</option>
+                                                    {% for role in job_roles_by_department[employee.department] %}
+                                                        <option value="{{ role }}" {% if employee.job_role == role %}selected{% endif %}>{{ role }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </form>
+                                        {% endif %}
                                         {% if employee.team and employee.department in branch_manager_departments %}
                                             <form method="post" action="{{ url_for('employees_branch_manager') }}"
                                                   onsubmit='return confirm({{ (("Remove " ~ employee.name ~ " as branch manager of " ~ employee.team ~ "?") if employee.branch_manager else ("Make " ~ employee.name ~ " the branch manager of " ~ employee.team ~ "? Their requests will go to the Sales manager only.")) | tojson }});'>

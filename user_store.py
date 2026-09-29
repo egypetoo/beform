@@ -134,6 +134,7 @@ def init_db() -> None:
         _ensure_kpi_evaluations_table(conn)
         _ensure_employee_pin_columns(conn)
         _ensure_employee_branch_manager_column(conn)
+        _ensure_employee_job_role_column(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS app_settings (
@@ -197,6 +198,37 @@ def set_employee_branch_manager(employee_id: int, branch_manager: bool) -> bool:
             conn.execute(
                 "UPDATE employees SET branch_manager = ? WHERE id = ?",
                 (1 if branch_manager else 0, int(employee_id)),
+            )
+            conn.commit()
+            changed = conn.total_changes > 0
+        finally:
+            conn.close()
+    return changed
+
+
+JOB_ROLES_BY_DEPARTMENT = {
+    "web": ["Front End", "Back End", "Account Manager"],
+}
+
+
+def job_roles_for(department: str) -> list:
+    return list(JOB_ROLES_BY_DEPARTMENT.get((department or "").strip().lower(), []))
+
+
+def _ensure_employee_job_role_column(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)")}
+    if "job_role" not in columns:
+        conn.execute("ALTER TABLE employees ADD COLUMN job_role TEXT NOT NULL DEFAULT ''")
+
+
+def set_employee_job_role(employee_id: int, job_role: str) -> bool:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            conn.execute(
+                "UPDATE employees SET job_role = ? WHERE id = ?",
+                ((job_role or "").strip(), int(employee_id)),
             )
             conn.commit()
             changed = conn.total_changes > 0
@@ -1146,6 +1178,7 @@ def _row_to_employee(row) -> dict:
         "pin_version": int(row["pin_version"] or 0) if "pin_version" in keys else 0,
         "has_pin": bool(row["pin_hash"]) if "pin_hash" in keys else False,
         "branch_manager": bool(int(row["branch_manager"] or 0)) if "branch_manager" in keys else False,
+        "job_role": (row["job_role"] or "") if "job_role" in keys else "",
         "active": bool(row["active"]),
         "created_at": row["created_at"],
     }

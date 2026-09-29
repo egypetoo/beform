@@ -751,6 +751,16 @@ td.card-actions form + form {
     margin-top: 6px;
 }
 
+td.card-actions select[name="job_role"] {
+    min-width: 150px;
+}
+
+.kpi-job-role {
+    display: block;
+    font-size: 12px;
+    margin-top: 2px;
+}
+
 .kpi-card-head {
     display: flex;
     align-items: baseline;

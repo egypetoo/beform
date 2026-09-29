@@ -114,6 +114,7 @@
                                 <tr data-kpi-row>
                                     <td data-label="Name">
                                         {{ person.name }}
+                                        {% if person.job_role %}<span class="muted kpi-job-role">{{ person.job_role }}</span>{% endif %}
                                         <input type="hidden" name="device__{{ i }}" value="{{ person.device }}">
                                         <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
                                     </td>
