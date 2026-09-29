@@ -97,8 +97,15 @@
             </div>
 
             {% if remote_summary %}
-                <section class="leave-balance-card" style="margin: 1rem 0 1.25rem;">
-                    <h2 class="section-title">Remote & vacation summary</h2>
+                <details class="leave-balance-card summary-toggle" style="margin: 1rem 0 1.25rem;">
+                    <summary>
+                        <span class="section-title">Remote & vacation summary</span>
+                        <span class="muted">
+                            {{ remote_summary.total_people }} employee{{ 's' if remote_summary.total_people != 1 else '' }}
+                            · {{ remote_summary.total_days }} remote day{{ 's' if remote_summary.total_days != 1 else '' }}
+                            · {{ remote_summary.total_vacation_days }} vacation day{{ 's' if remote_summary.total_vacation_days != 1 else '' }}
+                        </span>
+                    </summary>
                     <p class="muted">
                         Unique approved Work Remotely and Annual Vacation days
                         ({{ remote_summary.date_from }} → {{ remote_summary.date_to }}).
@@ -108,11 +115,6 @@
                         {% endif %}
                     </p>
                     {% if remote_summary.people %}
-                        <p class="muted">
-                            {{ remote_summary.total_people }} employee{{ 's' if remote_summary.total_people != 1 else '' }}
-                            · {{ remote_summary.total_days }} remote day{{ 's' if remote_summary.total_days != 1 else '' }}
-                            · {{ remote_summary.total_vacation_days }} vacation day{{ 's' if remote_summary.total_vacation_days != 1 else '' }}
-                        </p>
                         <div class="table-wrap">
                             <table>
                                 <thead>
@@ -144,7 +146,7 @@
                     {% else %}
                         <p class="empty-state">No approved remote or vacation days in this range.</p>
                     {% endif %}
-                </section>
+                </details>
             {% endif %}
 
             {% if rows %}

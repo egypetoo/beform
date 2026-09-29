@@ -1303,6 +1303,40 @@ th {
     font-size: 18px;
 }
 
+.summary-toggle > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.summary-toggle > summary::-webkit-details-marker {
+    display: none;
+}
+
+.summary-toggle > summary .section-title {
+    margin: 0;
+    font-weight: 700;
+}
+
+.summary-toggle > summary .section-title::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: 8px;
+    color: var(--muted);
+    transition: transform .15s ease;
+}
+
+.summary-toggle[open] > summary .section-title::before {
+    transform: rotate(90deg);
+}
+
+.summary-toggle[open] > summary {
+    margin-bottom: 12px;
+}
+
 .users-shell {
     margin-top: 18px;
 }
