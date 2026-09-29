@@ -146,6 +146,7 @@ def init_db() -> None:
         conn.execute(
             "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('leave_balance_visible', '0')"
         )
+        _clear_general_kpi_since_role_criteria(conn)
         conn.commit()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for value, label in SEED_DEPARTMENTS:
@@ -289,6 +290,24 @@ def _ensure_payroll_adjustments_table(conn) -> None:
 
 
 KPI_CRITERIA_KEYS = ("attendance", "work_hours", "deadlines", "quality", "problem_solving")
+
+
+KPI_ROLE_CRITERIA_FROM_CYCLE = "2026-09-26"
+
+
+def _clear_general_kpi_since_role_criteria(conn) -> None:
+    """One-time: drop evaluations scored with the general criteria from the cycle
+    where per-role criteria started, so they get re-scored with the role's criteria.
+    Employee KPI amounts are kept."""
+    marked = conn.execute(
+        "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('kpi_role_criteria_cleared', ?)",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+    )
+    if marked.rowcount:
+        conn.execute(
+            "DELETE FROM kpi_evaluations WHERE criteria_set = '' AND cycle_start >= ?",
+            (KPI_ROLE_CRITERIA_FROM_CYCLE,),
+        )
 
 
 def _ensure_employee_kpi_amount_column(conn) -> None:
