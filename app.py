@@ -307,6 +307,49 @@ KPI_WEIGHT_PERCENT = 20
 KPI_FULL_PAYOUT_AT = 90
 
 
+def _kpi_criteria_list(labels: list) -> list:
+    """Map (en, ar) labels onto the five stored score columns, in order."""
+    return [
+        {"key": key, "en": en, "ar": ar}
+        for key, (en, ar) in zip(user_store.KPI_CRITERIA_KEYS, labels)
+    ]
+
+
+# Keyed by job role; "" is the original general set that older evaluations were scored with.
+KPI_CRITERIA_SETS = {
+    "Front End": _kpi_criteria_list([
+        ("Code Quality", "جودة الكود"),
+        ("Page Delivery Speed", "سرعة تسليم الصفحات"),
+        ("Front-End Performance", "أداء الواجهة"),
+        ("Responsive & Cross-Browser", "التوافق مع الشاشات والمتصفحات"),
+        ("Bug-Free Delivery", "تسليم بدون أخطاء"),
+    ]),
+    "Back End": _kpi_criteria_list([
+        ("Code Quality", "جودة الكود"),
+        ("Feature Delivery Speed", "سرعة تسليم الخصائص"),
+        ("System Performance", "أداء النظام"),
+        ("DB Structure & Efficiency", "هيكلة قاعدة البيانات وكفاءتها"),
+        ("Security Practices", "ممارسات الأمان"),
+    ]),
+    "Account Manager": _kpi_criteria_list([
+        ("Requirement Accuracy", "دقة المتطلبات"),
+        ("Task Clarity for Dev Team", "وضوح المهام لفريق التطوير"),
+        ("Change Management", "إدارة التغييرات"),
+        ("Milestone Delivery Control", "متابعة تسليم المراحل"),
+        ("Communication Efficiency", "كفاءة التواصل"),
+    ]),
+    "": KPI_CRITERIA,
+}
+
+
+def kpi_criteria_for(criteria_set: str) -> list:
+    return KPI_CRITERIA_SETS.get(criteria_set or "", KPI_CRITERIA)
+
+
+def kpi_criteria_set_label(criteria_set: str) -> str:
+    return criteria_set or "General criteria"
+
+
 def kpi_enabled_for(department: str) -> bool:
     return " ".join(str(department or "").strip().lower().split()) in KPI_DEPARTMENTS
 
@@ -321,8 +364,8 @@ def kpi_result(scores: dict, kpi_amount: float) -> dict:
     """Each criterion is scored out of KPI_WEIGHT_PERCENT; the total is their sum (out of 100)."""
     total = round(
         sum(
-            min(float(KPI_WEIGHT_PERCENT), max(0.0, float(scores.get(item["key"]) or 0)))
-            for item in KPI_CRITERIA
+            min(float(KPI_WEIGHT_PERCENT), max(0.0, float(scores.get(key) or 0)))
+            for key in user_store.KPI_CRITERIA_KEYS
         ),
         2,
     )
@@ -369,9 +412,10 @@ def kpi_history_for_employee(employee: dict | None) -> list:
             "cycle_label": cycle_label_for(item["cycle_start"]),
             "total": result["total"],
             "payout_percent": result["payout_percent"],
+            "criteria_set": item["criteria_set"],
             "criteria": [
                 {"ar": criterion["ar"], "en": criterion["en"], "score": item["scores"].get(criterion["key"], 0)}
-                for criterion in KPI_CRITERIA
+                for criterion in kpi_criteria_for(item["criteria_set"])
             ],
             "max_score": KPI_WEIGHT_PERCENT,
             "full_payout_at": KPI_FULL_PAYOUT_AT,
@@ -4400,11 +4444,19 @@ def kpi_employees_for(manager: dict, cycle_start: str) -> list:
             continue
         evaluation = evaluations.get((device, fingerprint))
         kpi_amount = evaluation["kpi_amount"] if evaluation else float(employee.get("kpi_amount") or 0)
+        job_role = employee.get("job_role") or ""
+        role_set = job_role if job_role in KPI_CRITERIA_SETS else ""
+        needs_role = bool(user_store.job_roles_for(department)) and not role_set
+        # A saved evaluation keeps the criteria it was scored with, even if the role changed since.
+        criteria_set = evaluation["criteria_set"] if evaluation else role_set
         rows.append({
             "name": employee.get("name") or "",
             "department": department,
             "team": team,
-            "job_role": employee.get("job_role") or "",
+            "job_role": job_role,
+            "criteria_set": criteria_set,
+            "needs_role": needs_role and not evaluation,
+            "role_changed": bool(evaluation) and bool(role_set) and criteria_set != role_set,
             "device": device,
             "fingerprint": fingerprint,
             "kpi_amount": kpi_amount,
@@ -4437,6 +4489,24 @@ def kpi_filtered(employees: list, department: str, team: str) -> list:
     ]
 
 
+def kpi_groups(employees: list) -> list:
+    """One group per criteria set, in KPI_CRITERIA_SETS order; employees still missing a role are left out."""
+    groups = []
+    for criteria_set in KPI_CRITERIA_SETS:
+        members = [
+            person for person in employees
+            if not person["needs_role"] and person["criteria_set"] == criteria_set
+        ]
+        if members:
+            groups.append({
+                "criteria_set": criteria_set,
+                "label": kpi_criteria_set_label(criteria_set),
+                "criteria": kpi_criteria_for(criteria_set),
+                "employees": members,
+            })
+    return groups
+
+
 def kpi_request_filters(manager: dict) -> tuple[str, str]:
     if not is_hr(manager):
         return "", ""
@@ -4458,7 +4528,10 @@ def kpi_admin():
     all_employees = kpi_employees_for(manager, cycle_start)
     show_money = is_hr(manager)
     dept_filter, team_filter = kpi_request_filters(manager)
-    employees = kpi_filtered(all_employees, dept_filter, team_filter)
+    filtered = kpi_filtered(all_employees, dept_filter, team_filter)
+    groups = kpi_groups(filtered)
+    employees = [person for group in groups for person in group["employees"]]
+    missing_role = [person for person in filtered if person["needs_role"]]
     redirect_args = {"cycle": cycle_start}
     if dept_filter:
         redirect_args["dept"] = dept_filter
@@ -4469,7 +4542,11 @@ def kpi_admin():
         if not csrf_is_valid():
             flash("The form expired. Please refresh and try again.", "error")
             return redirect(url_for("kpi_admin", **redirect_args))
-        allowed = {f"{item['device']}|{item['fingerprint']}": item for item in all_employees}
+        allowed = {
+            f"{item['device']}|{item['fingerprint']}": item
+            for item in all_employees
+            if not item["needs_role"]
+        }
         items = []
         errors = []
         count = max(0, int(request.form.get("employee_count") or 0))
@@ -4487,15 +4564,15 @@ def kpi_admin():
                     else None
                 )
                 scores = {
-                    item["key"]: parse_kpi_score(request.form.get(f"{item['key']}__{index}", ""))
-                    for item in KPI_CRITERIA
+                    key: parse_kpi_score(request.form.get(f"{key}__{index}", ""))
+                    for key in user_store.KPI_CRITERIA_KEYS
                 }
             except ValueError as exc:
                 errors.append(f"{label}: {exc}")
                 continue
             filled = [value for value in scores.values() if value is not None]
-            if filled and len(filled) != len(KPI_CRITERIA):
-                errors.append(f"{label}: fill all {len(KPI_CRITERIA)} KPI scores or leave them all empty.")
+            if filled and len(filled) != len(scores):
+                errors.append(f"{label}: fill all {len(scores)} KPI scores or leave them all empty.")
                 continue
             items.append({
                 "device": person["device"],
@@ -4503,6 +4580,7 @@ def kpi_admin():
                 "name": person["name"],
                 "department": person["department"],
                 "team": person["team"],
+                "criteria_set": person["criteria_set"],
                 "kpi_amount": kpi_amount,
                 "scores": scores if filled else None,
             })
@@ -4527,7 +4605,8 @@ def kpi_admin():
         "kpi.html",
         manager=manager,
         employees=employees,
-        criteria=KPI_CRITERIA,
+        groups=groups,
+        missing_role=missing_role,
         weight=KPI_WEIGHT_PERCENT,
         full_payout_at=KPI_FULL_PAYOUT_AT,
         cycle_start=cycle_start,
@@ -4543,7 +4622,8 @@ def kpi_admin():
     )
 
 
-def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True) -> dict:
+def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True, criteria_set: str = "") -> dict:
+    criteria = kpi_criteria_for(criteria_set)
     headers = [
         "الاسم",
         "رقم البصمه",
@@ -4552,14 +4632,14 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True)
         "التيم",
         "الوظيفة",
         "قيمة الـ KPI",
-        *[f"{item['ar']} (من {KPI_WEIGHT_PERCENT})" for item in KPI_CRITERIA],
+        *[f"{item['ar']} / {item['en']} (من {KPI_WEIGHT_PERCENT})" for item in criteria],
         "إجمالي التقييم %",
         "نسبة الـ KPI المستحقة %",
         "المبلغ المستحق",
         "الحالة",
         "قيّمه",
     ]
-    money_columns = {6, 6 + len(KPI_CRITERIA) + 3}
+    money_columns = {6, 6 + len(criteria) + 3}
     rows = []
     total_amount = 0.0
     total_payout = 0.0
@@ -4576,24 +4656,24 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True)
             person["team"],
             person["job_role"],
             person["kpi_amount"],
-            *[person["scores"].get(item["key"], "") if result else "" for item in KPI_CRITERIA],
+            *[person["scores"].get(item["key"], "") if result else "" for item in criteria],
             result["total"] if result else "",
             result["payout_percent"] if result else "",
             result["payout_amount"] if result else "",
             "تم التقييم" if result else "لم يتم التقييم",
             person["updated_by"],
         ])
-    blank_scores = [""] * len(KPI_CRITERIA)
+    blank_scores = [""] * len(criteria)
     if show_money:
         rows.append(["الإجمالي", "", "", "", "", "", round(total_amount, 2), *blank_scores, "", "", round(total_payout, 2), "", ""])
-    numeric_columns = set(range(6, 6 + len(KPI_CRITERIA) + 4))
+    numeric_columns = set(range(6, 6 + len(criteria) + 4))
     if not show_money:
         keep = [index for index in range(len(headers)) if index not in money_columns]
         numeric_columns = {keep.index(index) for index in numeric_columns if index in keep}
         headers = [headers[index] for index in keep]
         rows = [[row[index] for index in keep] for row in rows]
     return {
-        "name": f"KPI {cycle_label_for(cycle_start)}",
+        "name": kpi_criteria_set_label(criteria_set) if criteria_set or employees else f"KPI {cycle_label_for(cycle_start)}",
         "headers": headers,
         "rows": rows,
         "numeric_columns": numeric_columns,
@@ -4611,7 +4691,11 @@ def kpi_export():
     if cycle_start not in {item["start"] for item in payroll_cycles()}:
         cycle_start = current_cycle_value()
     dept_filter, team_filter = kpi_request_filters(manager)
-    employees = kpi_filtered(kpi_employees_for(manager, cycle_start), dept_filter, team_filter)
+    groups = kpi_groups(kpi_filtered(kpi_employees_for(manager, cycle_start), dept_filter, team_filter))
+    sheets = [
+        kpi_export_sheet(group["employees"], cycle_start, show_money=is_hr(manager), criteria_set=group["criteria_set"])
+        for group in groups
+    ] or [kpi_export_sheet([], cycle_start, show_money=is_hr(manager))]
     if is_hr(manager):
         scope = "-".join(
             part for part in (
@@ -4624,7 +4708,7 @@ def kpi_export():
     if manager_role(manager) == "team" and manager.get("team"):
         scope = f"{scope}-{user_store.slug_from_label(manager['team'])}"
     return Response(
-        build_xlsx_workbook([kpi_export_sheet(employees, cycle_start, show_money=is_hr(manager))]),
+        build_xlsx_workbook(sheets),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=kpi-{scope}-{cycle_start}.xlsx"},
     )

@@ -323,6 +323,11 @@ def _ensure_kpi_evaluations_table(conn) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_kpi_evaluations_person ON kpi_evaluations(fingerprint, device)"
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(kpi_evaluations)")}
+    if "criteria_set" not in columns:
+        # Empty = the original general criteria; otherwise the job role whose criteria
+        # the five score columns hold, in order.
+        conn.execute("ALTER TABLE kpi_evaluations ADD COLUMN criteria_set TEXT NOT NULL DEFAULT ''")
 
 
 def get_setting(key: str, default: str = "") -> str:
@@ -2159,6 +2164,7 @@ def _kpi_row_to_dict(row) -> dict:
         "department": row["department"] or "",
         "team": row["team"] or "",
         "scores": {key: float(row[key] or 0) for key in KPI_CRITERIA_KEYS},
+        "criteria_set": row["criteria_set"] or "",
         "kpi_amount": float(row["kpi_amount"] or 0),
         "updated_by": row["updated_by"] or "",
         "updated_at": row["updated_at"] or "",
@@ -2248,22 +2254,28 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
                     )
                     continue
                 values = [min(100.0, max(0.0, float(scores.get(key) or 0))) for key in KPI_CRITERIA_KEYS]
+                criteria_set = str(item.get("criteria_set") or "").strip()
                 evaluator = (updated_by or "").strip()
                 evaluated_at = now
-                if existing is not None and [float(existing[key] or 0) for key in KPI_CRITERIA_KEYS] == values:
+                if (
+                    existing is not None
+                    and [float(existing[key] or 0) for key in KPI_CRITERIA_KEYS] == values
+                    and (existing["criteria_set"] or "") == criteria_set
+                ):
                     evaluator = existing["updated_by"] or evaluator
                     evaluated_at = existing["updated_at"] or now
                 conn.execute(
                     f"""
                     INSERT INTO kpi_evaluations (
-                        cycle_start, device, fingerprint, name, department, team,
+                        cycle_start, device, fingerprint, name, department, team, criteria_set,
                         {", ".join(KPI_CRITERIA_KEYS)},
                         kpi_amount, updated_by, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, {", ".join("?" for _ in KPI_CRITERIA_KEYS)}, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, {", ".join("?" for _ in KPI_CRITERIA_KEYS)}, ?, ?, ?)
                     ON CONFLICT(cycle_start, device, fingerprint) DO UPDATE SET
                         name = excluded.name,
                         department = excluded.department,
                         team = excluded.team,
+                        criteria_set = excluded.criteria_set,
                         {", ".join(f"{key} = excluded.{key}" for key in KPI_CRITERIA_KEYS)},
                         kpi_amount = excluded.kpi_amount,
                         updated_by = excluded.updated_by,
@@ -2276,6 +2288,7 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
                         str(item.get("name") or "").strip(),
                         str(item.get("department") or "").strip(),
                         str(item.get("team") or "").strip(),
+                        criteria_set,
                         *values,
                         kpi_amount,
                         evaluator,

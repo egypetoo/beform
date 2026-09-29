@@ -9,6 +9,9 @@
         .kpi-table input[type="number"] { min-width: 70px; }
         .kpi-total { font-weight: 700; white-space: nowrap; }
         .kpi-full { color: #1f9d55; }
+        .kpi-criterion-en { display: block; font-size: 11px; font-weight: 400; opacity: .75; }
+        .kpi-group-title { margin: 22px 0 8px; }
+        .kpi-missing-role p + p { margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -18,7 +21,7 @@
             {% include "_logo.html" %}
             <p class="eyebrow">{% if manager.role == 'team' %}{{ manager.department }} · {{ manager.team }}{% elif manager.department != 'ALL' %}{{ manager.department }}{% else %}All KPI departments{% endif %}</p>
             <h1>تقييم KPI الشهري</h1>
-            <p class="subtitle">Rate each point out of {{ weight }} (five points = 100%). The total is the sum of the five scores. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
+            <p class="subtitle">Each job role has its own five criteria. Rate each point out of {{ weight }} (five points = 100%). The total is the sum of the five scores. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
@@ -92,62 +95,88 @@
             {% else %}
                 <p class="muted">HR sets the KPI amount for each employee. Leave all five scores empty to remove an evaluation.</p>
             {% endif %}
-            {% if employees %}
-                <div class="table-wrap">
-                    <table class="kpi-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                {% if manager.role != 'team' %}<th>Team</th>{% endif %}
-                                {% if show_money %}<th>KPI amount</th>{% endif %}
-                                {% for criterion in criteria %}
-                                    <th title="{{ criterion.en }}">{{ criterion.ar }} (من {{ weight }})</th>
-                                {% endfor %}
-                                <th>Total</th>
-                                <th>KPI %</th>
-                                {% if show_money %}<th>Payout</th>{% endif %}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for person in employees %}
-                                {% set i = loop.index0 %}
-                                <tr data-kpi-row>
-                                    <td data-label="Name">
-                                        {{ person.name }}
-                                        {% if person.job_role %}<span class="muted kpi-job-role">{{ person.job_role }}</span>{% endif %}
-                                        <input type="hidden" name="device__{{ i }}" value="{{ person.device }}">
-                                        <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
-                                    </td>
-                                    {% if manager.role != 'team' %}<td data-label="Team">{{ person.team or '-' }}</td>{% endif %}
-                                    {% if show_money %}
-                                        <td data-label="KPI amount">
-                                            <input name="kpi_amount__{{ i }}" type="number" min="0" max="1000000" step="0.01"
-                                                   value="{{ person.kpi_amount if person.kpi_amount else '' }}" placeholder="0" data-kpi-amount>
-                                        </td>
-                                    {% endif %}
-                                    {% for criterion in criteria %}
-                                        <td data-label="{{ criterion.ar }}">
-                                            <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="{{ weight }}" step="0.5"
-                                                   value="{{ '%g'|format(person.scores[criterion.key]) if person.evaluated else '' }}"
-                                                   placeholder="0–{{ weight }}" data-kpi-score>
-                                        </td>
-                                    {% endfor %}
-                                    <td data-label="Total" class="kpi-total" data-kpi-total>{{ '%g'|format(person.result.total) ~ '%' if person.result else '—' }}</td>
-                                    <td data-label="KPI %" class="kpi-total" data-kpi-percent>{{ '%g'|format(person.result.payout_percent) ~ '%' if person.result else '—' }}</td>
-                                    {% if show_money %}
-                                        <td data-label="Payout" class="kpi-total" data-kpi-payout>{{ '{:,.2f}'.format(person.result.payout_amount) if person.result else '—' }}</td>
-                                    {% endif %}
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+            {% if missing_role %}
+                <div class="card errors kpi-missing-role">
+                    <p>
+                        <strong>{{ missing_role|length }} employee{{ 's' if missing_role|length != 1 else '' }} can't be evaluated until a job role is set:</strong>
+                        {% for person in missing_role %}{{ person.name or person.fingerprint }}{{ ', ' if not loop.last else '' }}{% endfor %}.
+                    </p>
+                    <p>
+                        {% if show_filters %}
+                            Set it from <a href="{{ url_for('employees_admin') }}">Employees</a> (Job role).
+                        {% else %}
+                            Ask HR to set their job role on the Employees page.
+                        {% endif %}
+                    </p>
                 </div>
+            {% endif %}
+            {% if employees %}
+                {% set counter = namespace(i=0) %}
+                {% for group in groups %}
+                    <h3 class="kpi-group-title">{{ group.label }} <span class="muted">({{ group.employees|length }})</span></h3>
+                    <div class="table-wrap">
+                        <table class="kpi-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    {% if manager.role != 'team' %}<th>Team</th>{% endif %}
+                                    {% if show_money %}<th>KPI amount</th>{% endif %}
+                                    {% for criterion in group.criteria %}
+                                        <th>
+                                            {{ criterion.ar }} (من {{ weight }})
+                                            <span class="kpi-criterion-en">{{ criterion.en }}</span>
+                                        </th>
+                                    {% endfor %}
+                                    <th>Total</th>
+                                    <th>KPI %</th>
+                                    {% if show_money %}<th>Payout</th>{% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for person in group.employees %}
+                                    {% set i = counter.i %}
+                                    {% set counter.i = counter.i + 1 %}
+                                    <tr data-kpi-row>
+                                        <td data-label="Name">
+                                            {{ person.name }}
+                                            {% if person.job_role %}<span class="muted kpi-job-role">{{ person.job_role }}</span>{% endif %}
+                                            {% if person.role_changed %}
+                                                <span class="muted kpi-job-role">Scored with {{ group.label }} criteria. Clear the scores and save to re-evaluate as {{ person.job_role }}.</span>
+                                            {% endif %}
+                                            <input type="hidden" name="device__{{ i }}" value="{{ person.device }}">
+                                            <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
+                                        </td>
+                                        {% if manager.role != 'team' %}<td data-label="Team">{{ person.team or '-' }}</td>{% endif %}
+                                        {% if show_money %}
+                                            <td data-label="KPI amount">
+                                                <input name="kpi_amount__{{ i }}" type="number" min="0" max="1000000" step="0.01"
+                                                       value="{{ person.kpi_amount if person.kpi_amount else '' }}" placeholder="0" data-kpi-amount>
+                                            </td>
+                                        {% endif %}
+                                        {% for criterion in group.criteria %}
+                                            <td data-label="{{ criterion.ar }} · {{ criterion.en }}">
+                                                <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="{{ weight }}" step="0.5"
+                                                       value="{{ '%g'|format(person.scores[criterion.key]) if person.evaluated else '' }}"
+                                                       placeholder="0–{{ weight }}" data-kpi-score>
+                                            </td>
+                                        {% endfor %}
+                                        <td data-label="Total" class="kpi-total" data-kpi-total>{{ '%g'|format(person.result.total) ~ '%' if person.result else '—' }}</td>
+                                        <td data-label="KPI %" class="kpi-total" data-kpi-percent>{{ '%g'|format(person.result.payout_percent) ~ '%' if person.result else '—' }}</td>
+                                        {% if show_money %}
+                                            <td data-label="Payout" class="kpi-total" data-kpi-payout>{{ '{:,.2f}'.format(person.result.payout_amount) if person.result else '—' }}</td>
+                                        {% endif %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endfor %}
                 <button type="submit">Save KPI</button>
                 <p class="muted">
                     <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
                     — the file uses the saved values, so save your changes first.
                 </p>
-            {% else %}
+            {% elif not missing_role %}
                 <p class="empty-state">No active employees in a KPI department for your account.</p>
             {% endif %}
         </form>
