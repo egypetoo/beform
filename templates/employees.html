@@ -240,6 +240,17 @@
                                         </select>
                                     </td>
                                     <td class="card-actions" data-label="Account">
+                                        {% if employee.team and employee.department in branch_manager_departments %}
+                                            <form method="post" action="{{ url_for('employees_branch_manager') }}"
+                                                  onsubmit='return confirm({{ (("Remove " ~ employee.name ~ " as branch manager of " ~ employee.team ~ "?") if employee.branch_manager else ("Make " ~ employee.name ~ " the branch manager of " ~ employee.team ~ "? Their requests will go to the Sales manager only.")) | tojson }});'>
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                <input type="hidden" name="employee_id" value="{{ employee.id }}">
+                                                <input type="hidden" name="branch_manager" value="{{ '0' if employee.branch_manager else '1' }}">
+                                                <button class="btn-sm {{ 'btn-approve' if employee.branch_manager }}" type="submit">
+                                                    {{ 'Branch manager ✓' if employee.branch_manager else 'Make branch manager' }}
+                                                </button>
+                                            </form>
+                                        {% endif %}
                                         {% if employee.has_pin %}
                                             <form method="post" action="{{ url_for('employees_pin_reset') }}"
                                                   onsubmit="return confirm('Reset this employee\'s PIN to {{ default_employee_pin }}? They will choose a new one at next sign-in.');">

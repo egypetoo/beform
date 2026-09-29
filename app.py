@@ -719,13 +719,57 @@ def manager_role(manager: dict) -> str:
     return "hr" if manager.get("department") == "ALL" else "department"
 
 
+def branch_manager_index() -> dict:
+    """Sales branch managers flagged by HR, cached for the current request."""
+    if "branch_managers" in g:
+        return g.branch_managers
+    by_device = set()
+    by_department = set()
+    teams = set()
+    for employee in user_store.list_employees():
+        if not employee.get("active", True) or not employee.get("branch_manager"):
+            continue
+        department = (employee.get("department") or "").strip().lower()
+        fingerprint = user_store.normalize_fingerprint_id(employee.get("fingerprint"))
+        by_device.add((user_store.normalize_device(employee.get("device") or ""), fingerprint))
+        by_department.add((department, fingerprint))
+        if employee.get("team"):
+            teams.add((department, employee["team"].strip().lower()))
+    g.branch_managers = {"by_device": by_device, "by_department": by_department, "teams": teams}
+    return g.branch_managers
+
+
+def is_branch_manager_row(row: dict) -> bool:
+    index = branch_manager_index()
+    fingerprint = user_store.normalize_fingerprint_id(row.get("Fingerprint Number"))
+    if not fingerprint:
+        return False
+    device = user_store.normalize_device(row.get("Device") or "")
+    if device:
+        return (device, fingerprint) in index["by_device"]
+    department = str(row.get("Department") or "").strip().lower()
+    return (department, fingerprint) in index["by_department"]
+
+
 def can_review_row(manager: dict, row: dict) -> bool:
     department = str(row.get("Department") or "").strip()
     if not can_review_department(manager, department):
         return False
-    if manager_role(manager) != "team":
+    role = manager_role(manager)
+    if role == "hr":
         return True
-    return str(row.get("Team") or "").strip().lower() == str(manager.get("team") or "").strip().lower()
+    team = str(row.get("Team") or "").strip().lower()
+    sales = attendance.is_sales_department(department)
+    if role != "team":
+        # Sales manager reviews branch managers only, once HR has flagged at least one.
+        if not sales or not team:
+            return True
+        if not branch_manager_index()["teams"]:
+            return True
+        return is_branch_manager_row(row)
+    if team != str(manager.get("team") or "").strip().lower():
+        return False
+    return not (sales and is_branch_manager_row(row))
 
 
 def filter_visible_rows(manager: dict, rows: list) -> list:
@@ -3448,6 +3492,9 @@ def employees_admin_context() -> dict:
         "employee_pin_required": user_store.employee_pin_required(),
         "employee_pin_counts": user_store.employee_pin_counts(),
         "default_employee_pin": user_store.DEFAULT_EMPLOYEE_PIN,
+        "branch_manager_departments": [
+            item["label"] for item in departments if attendance.is_sales_department(item["label"])
+        ],
     }
 
 
@@ -3841,6 +3888,32 @@ def employees_pin_reset():
         f"They sign in with {user_store.DEFAULT_EMPLOYEE_PIN} and choose a new PIN. Their old sign-ins are ended.",
         "success",
     )
+    return redirect(url_for("employees_admin"))
+
+
+@app.route("/employees/branch-manager", methods=["POST"])
+@hr_required
+def employees_branch_manager():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    employee = user_store.find_employee_by_id(request.form.get("employee_id"))
+    if not employee or not employee.get("active"):
+        flash("Choose an active employee.", "error")
+        return redirect(url_for("employees_admin"))
+    if not attendance.is_sales_department(employee.get("department") or "") or not employee.get("team"):
+        flash("Branch managers must be Sales employees linked to a branch team.", "error")
+        return redirect(url_for("employees_admin"))
+    make = request.form.get("branch_manager") == "1"
+    user_store.set_employee_branch_manager(employee["id"], make)
+    if make:
+        flash(
+            f"{employee['name']} is now the branch manager of {employee['team']}. "
+            "The Sales manager sees their requests; the branch account no longer does.",
+            "success",
+        )
+    else:
+        flash(f"{employee['name']} is no longer a branch manager.", "success")
     return redirect(url_for("employees_admin"))
 
 

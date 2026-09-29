@@ -133,6 +133,7 @@ def init_db() -> None:
         _ensure_employee_kpi_amount_column(conn)
         _ensure_kpi_evaluations_table(conn)
         _ensure_employee_pin_columns(conn)
+        _ensure_employee_branch_manager_column(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS app_settings (
@@ -178,6 +179,30 @@ def _ensure_employee_normal_rules_column(conn) -> None:
         conn.execute(
             "ALTER TABLE employees ADD COLUMN normal_rules INTEGER NOT NULL DEFAULT 0"
         )
+
+
+def _ensure_employee_branch_manager_column(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)")}
+    if "branch_manager" not in columns:
+        conn.execute(
+            "ALTER TABLE employees ADD COLUMN branch_manager INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def set_employee_branch_manager(employee_id: int, branch_manager: bool) -> bool:
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            conn.execute(
+                "UPDATE employees SET branch_manager = ? WHERE id = ?",
+                (1 if branch_manager else 0, int(employee_id)),
+            )
+            conn.commit()
+            changed = conn.total_changes > 0
+        finally:
+            conn.close()
+    return changed
 
 
 def normalize_normal_rules(value) -> bool:
@@ -1120,6 +1145,7 @@ def _row_to_employee(row) -> dict:
         "kpi_amount": float(kpi_amount or 0),
         "pin_version": int(row["pin_version"] or 0) if "pin_version" in keys else 0,
         "has_pin": bool(row["pin_hash"]) if "pin_hash" in keys else False,
+        "branch_manager": bool(int(row["branch_manager"] or 0)) if "branch_manager" in keys else False,
         "active": bool(row["active"]),
         "created_at": row["created_at"],
     }
