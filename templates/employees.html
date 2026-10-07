@@ -244,7 +244,7 @@
                                             <form method="post" action="{{ url_for('employees_job_role') }}">
                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                                 <input type="hidden" name="employee_id" value="{{ employee.id }}">
-                                                <select name="job_role" aria-label="Job role" onchange="this.form.submit()">
+                                                <select name="job_role" aria-label="Job role" onchange="this.form.submit()" style="min-width:200px">
                                                     <option value="">Job role…</option>
                                                     {% for role in job_roles_by_department[employee.department] %}
                                                         <option value="{{ role }}" {% if employee.job_role == role %}selected{% endif %}>{{ role }}</option>

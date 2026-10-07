@@ -234,7 +234,7 @@
                     </div>
                 {% endfor %}
 
-                <p class="muted kpi-note">Your KPI is the sum of the five points (each out of {{ kpi_history[0].max_score }}).</p>
+                <p class="muted kpi-note">Your KPI uses weighted scores from 1 to {{ kpi_history[0].max_score }}. {{ kpi_history[0].full_payout_at }}% or more earns the full KPI.</p>
             </section>
             {% if kpi_history|length > 1 %}
                 <script>

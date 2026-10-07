@@ -295,48 +295,135 @@ def parse_money_amount(value) -> float:
     return round(amount, 2)
 
 
-KPI_DEPARTMENTS = {"web"}
-KPI_CRITERIA = [
-    {"key": "attendance", "ar": "مواعيد الحضور", "en": "Attendance time"},
-    {"key": "work_hours", "ar": "الالتزام بساعات العمل", "en": "Working hours"},
-    {"key": "deadlines", "ar": "الالتزام بمواعيد التسليم", "en": "Delivery deadlines"},
-    {"key": "quality", "ar": "جودة التسليم", "en": "Delivery quality"},
-    {"key": "problem_solving", "ar": "سرعة التعامل مع المشاكل", "en": "Problem handling speed"},
-]
-KPI_WEIGHT_PERCENT = 20
+KPI_DEPARTMENTS = {"web", "social", "social media"}
+KPI_SCORE_MAX = 5
 KPI_FULL_PAYOUT_AT = 90
 
 
-def _kpi_criteria_list(labels: list) -> list:
-    """Map (en, ar) labels onto the five stored score columns, in order."""
-    return [
-        {"key": key, "en": en, "ar": ar}
-        for key, (en, ar) in zip(user_store.KPI_CRITERIA_KEYS, labels)
-    ]
+def _kpi_criteria_list(items: list) -> list:
+    """Map (en, ar, weight) onto stored score columns, in order. Weights must sum to 1."""
+    criteria = []
+    for key, (en, ar, weight) in zip(user_store.KPI_CRITERIA_KEYS, items):
+        criteria.append({
+            "key": key,
+            "en": en,
+            "ar": ar,
+            "weight": float(weight),
+        })
+    return criteria
 
 
-# Keyed by job role; "" is the original general set that older evaluations were scored with.
+def _equal_weight_web(labels: list) -> list:
+    weight = round(1 / len(labels), 4)
+    # Keep sum exactly 1 by adjusting the last weight.
+    items = [(en, ar, weight) for en, ar in labels[:-1]]
+    used = weight * (len(labels) - 1)
+    items.append((labels[-1][0], labels[-1][1], round(1 - used, 4)))
+    return _kpi_criteria_list(items)
+
+
+# Keyed by job role; "" is the original general set (legacy equal-weight web criteria).
+KPI_CRITERIA = _equal_weight_web([
+    ("Attendance time", "مواعيد الحضور"),
+    ("Working hours", "الالتزام بساعات العمل"),
+    ("Delivery deadlines", "الالتزام بمواعيد التسليم"),
+    ("Delivery quality", "جودة التسليم"),
+    ("Problem handling speed", "سرعة التعامل مع المشاكل"),
+])
 KPI_CRITERIA_SETS = {
-    "Front End": _kpi_criteria_list([
+    "Front End": _equal_weight_web([
         ("Code Quality", "جودة الكود"),
         ("Page Delivery Speed", "سرعة تسليم الصفحات"),
         ("Front-End Performance", "أداء الواجهة"),
         ("Responsive & Cross-Browser", "التوافق مع الشاشات والمتصفحات"),
         ("Bug-Free Delivery", "تسليم بدون أخطاء"),
     ]),
-    "Back End": _kpi_criteria_list([
+    "Back End": _equal_weight_web([
         ("Code Quality", "جودة الكود"),
         ("Feature Delivery Speed", "سرعة تسليم الخصائص"),
         ("System Performance", "أداء النظام"),
         ("DB Structure & Efficiency", "هيكلة قاعدة البيانات وكفاءتها"),
         ("Security Practices", "ممارسات الأمان"),
     ]),
-    "Account Manager": _kpi_criteria_list([
+    "Account Manager": _equal_weight_web([
         ("Requirement Accuracy", "دقة المتطلبات"),
         ("Task Clarity for Dev Team", "وضوح المهام لفريق التطوير"),
         ("Change Management", "إدارة التغييرات"),
         ("Milestone Delivery Control", "متابعة تسليم المراحل"),
         ("Communication Efficiency", "كفاءة التواصل"),
+    ]),
+    "Performance · Team Leader": _kpi_criteria_list([
+        ("Leadership, Team Management & Development", "قيادة الفريق وإدارته وتطويره", 0.25),
+        ("Strategic Campaign Planning", "التخطيط الاستراتيجي للحملات", 0.20),
+        ("Achieving Overall KPIs (ROI)", "تحقيق مؤشرات الأداء الكلية (ROI)", 0.20),
+        ("Team-wide Renewal Rate for the Period", "معدل التجديد على مستوى الفريق", 0.25),
+        ("Commitment & Discipline", "الالتزام والانضباط", 0.10),
+    ]),
+    "Performance · Senior": _kpi_criteria_list([
+        ("Campaign Execution & Management", "تنفيذ وإدارة الحملات", 0.20),
+        ("Campaign KPI Achievement (CPA / CTR / CPC / ROAS)", "تحقيق مؤشرات الحملة", 0.25),
+        ("Data Analysis & Data-Driven Decision Making", "تحليل البيانات واتخاذ القرار", 0.10),
+        ("Technical Platform Knowledge (Meta, TikTok, Snapchat, LinkedIn, X)", "المعرفة التقنية بالمنصات", 0.15),
+        ("Renewal Rate for the Period", "معدل التجديد للفترة", 0.25),
+        ("Communication & Commitment", "التواصل والالتزام", 0.05),
+    ]),
+    "Performance · Mid-Level": _kpi_criteria_list([
+        ("Independent Campaign Execution", "تنفيذ الحملات باستقلالية", 0.20),
+        ("Achieving Assigned KPIs", "تحقيق المؤشرات المطلوبة", 0.20),
+        ("Basic Data Analysis", "تحليل البيانات الأساسي", 0.15),
+        ("Platform & Tool Knowledge", "معرفة المنصات والأدوات", 0.15),
+        ("Renewal Rate for the Period", "معدل التجديد للفترة", 0.25),
+        ("Team Communication", "التواصل مع الفريق", 0.05),
+    ]),
+    "Performance · Junior": _kpi_criteria_list([
+        ("Execution of Assigned Tasks", "تنفيذ المهام المطلوبة", 0.30),
+        ("Learning Curve & Growth", "منحنى التعلم والنمو", 0.15),
+        ("Adherence to Core KPIs", "الالتزام بالمؤشرات الأساسية", 0.15),
+        ("Platform Knowledge (Basics)", "معرفة أساسيات المنصات", 0.15),
+        ("Renewal Rate for the Period", "معدل التجديد للفترة", 0.25),
+    ]),
+    "Creative AI · Team Leader": _kpi_criteria_list([
+        ("Team Leadership & Management", "قيادة وإدارة الفريق", 0.25),
+        ("Creative Direction & Brand Consistency Across the Team", "التوجيه الإبداعي واتساق الهوية", 0.20),
+        ("Overall Project Deadline Adherence", "الالتزام بمواعيد المشاريع", 0.20),
+        ("Team Member Development & Training", "تطوير وتدريب أعضاء الفريق", 0.15),
+        ("Reporting & Communication with Management/Clients", "التقارير والتواصل مع الإدارة/العملاء", 0.10),
+        ("Improving Creative Processes", "تحسين العمليات الإبداعية", 0.10),
+    ]),
+    "Creative AI · Member": _kpi_criteria_list([
+        ("Design & Video Quality and Creativity", "جودة وإبداع التصميم والفيديو", 0.30),
+        ("Brand Consistency", "اتساق الهوية البصرية", 0.20),
+        ("On-Time Delivery & Turnaround Speed", "السرعة والالتزام بمواعيد التسليم", 0.20),
+        ("Technical Skill (AI Tools + Prompting)", "المهارة التقنية (أدوات AI والـ Prompting)", 0.15),
+        ("Communication", "التواصل", 0.15),
+    ]),
+    "Growth · Team Leader": _kpi_criteria_list([
+        ("Relationship Leadership & Issue Management", "قيادة العلاقات وإدارة المشكلات", 0.25),
+        ("Team Management & Development", "إدارة الفريق وتطويره", 0.20),
+        ("Retention & Renewal KPIs", "مؤشرات الاحتفاظ والتجديد", 0.25),
+        ("Reporting & Management Communication", "التقارير والتواصل مع الإدارة", 0.15),
+        ("Commitment & Discipline", "الالتزام والانضباط", 0.15),
+    ]),
+    "Growth · Senior": _kpi_criteria_list([
+        ("Daily Task Execution (Follow-ups, Reports)", "تنفيذ المهام اليومية", 0.25),
+        ("Retention & Renewal KPIs", "مؤشرات الاحتفاظ والتجديد", 0.25),
+        ("Client & Management Communication and Reporting", "التواصل والتقارير مع العميل/الإدارة", 0.20),
+        ("Problem Solving & Issue Management", "حل المشكلات وإدارتها", 0.15),
+        ("Commitment & Discipline", "الالتزام والانضباط", 0.15),
+    ]),
+    "Growth · Mid-Level": _kpi_criteria_list([
+        ("Daily Task Execution (Follow-ups, Reports)", "تنفيذ المهام اليومية", 0.25),
+        ("Retention & Renewal KPIs", "مؤشرات الاحتفاظ والتجديد", 0.25),
+        ("Client & Management Communication and Reporting", "التواصل والتقارير مع العميل/الإدارة", 0.20),
+        ("Problem Solving & Issue Management", "حل المشكلات وإدارتها", 0.15),
+        ("Commitment & Discipline", "الالتزام والانضباط", 0.15),
+    ]),
+    "Growth · Junior": _kpi_criteria_list([
+        ("Daily Task Execution (Follow-ups, Reports)", "تنفيذ المهام اليومية", 0.25),
+        ("Learning Curve & Growth", "منحنى التعلم والنمو", 0.20),
+        ("Retention & Renewal KPIs", "مؤشرات الاحتفاظ والتجديد", 0.25),
+        ("Commitment & Discipline", "الالتزام والانضباط", 0.15),
+        ("Knowledge of Work Tools (CRM / Reporting)", "معرفة أدوات العمل", 0.15),
     ]),
     "": KPI_CRITERIA,
 }
@@ -360,20 +447,37 @@ def can_manage_kpi(manager: dict | None) -> bool:
     return is_hr(manager) or kpi_enabled_for(manager.get("department") or "")
 
 
-def kpi_result(scores: dict, kpi_amount: float) -> dict:
-    """Each criterion is scored out of KPI_WEIGHT_PERCENT; the total is their sum (out of 100)."""
-    total = round(
-        sum(
-            min(float(KPI_WEIGHT_PERCENT), max(0.0, float(scores.get(key) or 0)))
-            for key in user_store.KPI_CRITERIA_KEYS
-        ),
-        2,
-    )
+def can_approve_kpi(manager: dict | None) -> bool:
+    """Department managers and HR approve team-leader submissions."""
+    if not manager or not can_manage_kpi(manager):
+        return False
+    return manager_role(manager) != "team"
+
+
+def can_score_kpi_person(manager: dict, person: dict) -> bool:
+    """Team leaders score their team except Team Leader roles; managers/HR score everyone they can see."""
+    if not can_manage_kpi(manager):
+        return False
+    if manager_role(manager) != "team":
+        return True
+    role = (person.get("job_role") or person.get("criteria_set") or "").strip()
+    return not role.endswith("Team Leader")
+
+
+def kpi_result(scores: dict, kpi_amount: float, criteria: list | None = None) -> dict:
+    """Sheet formula: overall% = sum(score × weight) / 5 × 100. Scores are 1–5; weights sum to 1."""
+    criteria = criteria or KPI_CRITERIA
+    weighted = 0.0
+    for item in criteria:
+        score = min(float(KPI_SCORE_MAX), max(0.0, float(scores.get(item["key"]) or 0)))
+        weighted += score * float(item.get("weight") or 0)
+    total = round(weighted / float(KPI_SCORE_MAX) * 100, 2)
     payout_percent = 100.0 if total >= KPI_FULL_PAYOUT_AT else total
     return {
         "total": total,
         "payout_percent": payout_percent,
         "payout_amount": round(float(kpi_amount or 0) * payout_percent / 100, 2),
+        "weighted_sum": round(weighted, 4),
     }
 
 
@@ -384,9 +488,9 @@ def parse_kpi_score(value) -> float | None:
     try:
         score = float(text)
     except ValueError:
-        raise ValueError(f"KPI scores must be numbers from 0 to {KPI_WEIGHT_PERCENT}.")
-    if score < 0 or score > KPI_WEIGHT_PERCENT:
-        raise ValueError(f"Each KPI score must be from 0 to {KPI_WEIGHT_PERCENT}.")
+        raise ValueError(f"KPI scores must be numbers from 1 to {KPI_SCORE_MAX}.")
+    if score < 0 or score > KPI_SCORE_MAX:
+        raise ValueError(f"Each KPI score must be from 0 to {KPI_SCORE_MAX}.")
     return round(score, 2)
 
 
@@ -407,17 +511,25 @@ def kpi_history_for_employee(employee: dict | None) -> list:
         employee.get("fingerprint") or "",
         limit=12,
     ):
-        result = kpi_result(item["scores"], item["kpi_amount"])
+        if item.get("status") != user_store.KPI_STATUS_APPROVED:
+            continue
+        criteria = kpi_criteria_for(item["criteria_set"])
+        result = kpi_result(item["scores"], item["kpi_amount"], criteria)
         history.append({
             "cycle_label": cycle_label_for(item["cycle_start"]),
             "total": result["total"],
             "payout_percent": result["payout_percent"],
             "criteria_set": item["criteria_set"],
             "criteria": [
-                {"ar": criterion["ar"], "en": criterion["en"], "score": item["scores"].get(criterion["key"], 0)}
-                for criterion in kpi_criteria_for(item["criteria_set"])
+                {
+                    "ar": criterion["ar"],
+                    "en": criterion["en"],
+                    "score": item["scores"].get(criterion["key"], 0),
+                    "weight": criterion.get("weight") or 0,
+                }
+                for criterion in criteria
             ],
-            "max_score": KPI_WEIGHT_PERCENT,
+            "max_score": KPI_SCORE_MAX,
             "full_payout_at": KPI_FULL_PAYOUT_AT,
         })
     return history
@@ -4449,7 +4561,11 @@ def kpi_employees_for(manager: dict, cycle_start: str) -> list:
         needs_role = bool(user_store.job_roles_for(department)) and not role_set
         # A saved evaluation keeps the criteria it was scored with, even if the role changed since.
         criteria_set = evaluation["criteria_set"] if evaluation else role_set
-        rows.append({
+        criteria = kpi_criteria_for(criteria_set)
+        status = evaluation["status"] if evaluation else ""
+        approved = status == user_store.KPI_STATUS_APPROVED
+        result = kpi_result(evaluation["scores"], kpi_amount, criteria) if evaluation else None
+        row = {
             "name": employee.get("name") or "",
             "department": department,
             "team": team,
@@ -4462,9 +4578,16 @@ def kpi_employees_for(manager: dict, cycle_start: str) -> list:
             "kpi_amount": kpi_amount,
             "scores": evaluation["scores"] if evaluation else {},
             "evaluated": bool(evaluation),
-            "result": kpi_result(evaluation["scores"], kpi_amount) if evaluation else None,
+            "status": status,
+            "approved": approved,
+            "pending": status == user_store.KPI_STATUS_PENDING,
+            "result": result,
+            "payout_result": result if approved else None,
             "updated_by": evaluation["updated_by"] if evaluation else "",
-        })
+            "approved_by": evaluation["approved_by"] if evaluation else "",
+        }
+        row["can_score"] = can_score_kpi_person(manager, row)
+        rows.append(row)
     rows.sort(key=lambda item: (item["department"].lower(), item["team"].lower(), item["name"].lower()))
     return rows
 
@@ -4538,10 +4661,14 @@ def kpi_admin():
     if team_filter:
         redirect_args["team"] = team_filter
 
+    can_approve = can_approve_kpi(manager)
+    actor = manager.get("name") or manager.get("username") or ""
+
     if request.method == "POST":
         if not csrf_is_valid():
             flash("The form expired. Please refresh and try again.", "error")
             return redirect(url_for("kpi_admin", **redirect_args))
+        action = (request.form.get("kpi_action") or "save").strip().lower()
         allowed = {
             f"{item['device']}|{item['fingerprint']}": item
             for item in all_employees
@@ -4550,13 +4677,48 @@ def kpi_admin():
         items = []
         errors = []
         count = max(0, int(request.form.get("employee_count") or 0))
+
+        if action == "approve":
+            if not can_approve:
+                flash("Only the department manager or HR can approve KPI evaluations.", "error")
+                return redirect(url_for("kpi_admin", **redirect_args))
+            selected = set(request.form.getlist("approve_selected"))
+            for person in all_employees:
+                key = f"{person['device']}|{person['fingerprint']}"
+                if key not in selected or not person["evaluated"] or person["needs_role"]:
+                    continue
+                if not person["scores"]:
+                    continue
+                items.append({
+                    "device": person["device"],
+                    "fingerprint": person["fingerprint"],
+                    "name": person["name"],
+                    "department": person["department"],
+                    "team": person["team"],
+                    "criteria_set": person["criteria_set"],
+                    "kpi_amount": None,
+                    "scores": {
+                        key: person["scores"].get(key, 0)
+                        for key in user_store.KPI_CRITERIA_KEYS
+                    },
+                    "status": user_store.KPI_STATUS_APPROVED,
+                    "approved_by": actor,
+                })
+            if not items:
+                flash("Select at least one submitted evaluation to approve.", "error")
+            else:
+                saved = user_store.save_kpi_evaluations(cycle_start, items, actor)
+                flash(f"Approved KPI for {saved} employee{'s' if saved != 1 else ''}.", "success")
+            return redirect(url_for("kpi_admin", **redirect_args))
+
         for index in range(count):
             device = request.form.get(f"device__{index}", "").strip()
             fingerprint = request.form.get(f"fingerprint__{index}", "").strip()
             person = allowed.get(f"{device}|{fingerprint}")
-            if not person:
+            if not person or not person.get("can_score"):
                 continue
             label = person["name"] or fingerprint
+            criteria = kpi_criteria_for(person["criteria_set"])
             try:
                 kpi_amount = (
                     parse_money_amount(request.form.get(f"kpi_amount__{index}", ""))
@@ -4564,16 +4726,59 @@ def kpi_admin():
                     else None
                 )
                 scores = {
-                    key: parse_kpi_score(request.form.get(f"{key}__{index}", ""))
-                    for key in user_store.KPI_CRITERIA_KEYS
+                    item["key"]: parse_kpi_score(request.form.get(f"{item['key']}__{index}", ""))
+                    for item in criteria
                 }
             except ValueError as exc:
                 errors.append(f"{label}: {exc}")
                 continue
             filled = [value for value in scores.values() if value is not None]
+            clear = request.form.get(f"clear__{index}") == "1"
             if filled and len(filled) != len(scores):
                 errors.append(f"{label}: fill all {len(scores)} KPI scores or leave them all empty.")
                 continue
+            if not filled and not clear:
+                # Empty row: leave evaluation untouched (other groups share this form).
+                if show_money and kpi_amount is not None and person["evaluated"]:
+                    items.append({
+                        "device": person["device"],
+                        "fingerprint": person["fingerprint"],
+                        "name": person["name"],
+                        "department": person["department"],
+                        "team": person["team"],
+                        "criteria_set": person["criteria_set"],
+                        "kpi_amount": kpi_amount,
+                        "scores": {
+                            key: person["scores"].get(key, 0)
+                            for key in user_store.KPI_CRITERIA_KEYS
+                        },
+                        "status": person["status"] or user_store.KPI_STATUS_PENDING,
+                        "approved_by": person.get("approved_by") or "",
+                        "approved_at": person.get("approved_at") or "",
+                    })
+                continue
+            if clear and not filled:
+                items.append({
+                    "device": person["device"],
+                    "fingerprint": person["fingerprint"],
+                    "name": person["name"],
+                    "department": person["department"],
+                    "team": person["team"],
+                    "criteria_set": person["criteria_set"],
+                    "kpi_amount": kpi_amount,
+                    "scores": None,
+                })
+                continue
+            # Unused score columns stay 0.
+            full_scores = {key: 0.0 for key in user_store.KPI_CRITERIA_KEYS}
+            for key, value in scores.items():
+                full_scores[key] = value
+            # Team leaders always submit as pending; managers/HR can save as pending
+            # (approve is a separate action) unless they use save_approve.
+            if action == "save_approve" and can_approve:
+                status = user_store.KPI_STATUS_APPROVED
+            else:
+                status = user_store.KPI_STATUS_PENDING
             items.append({
                 "device": person["device"],
                 "fingerprint": person["fingerprint"],
@@ -4582,24 +4787,36 @@ def kpi_admin():
                 "team": person["team"],
                 "criteria_set": person["criteria_set"],
                 "kpi_amount": kpi_amount,
-                "scores": scores if filled else None,
+                "scores": full_scores,
+                "status": status,
+                "approved_by": actor if status == user_store.KPI_STATUS_APPROVED else "",
             })
         if errors:
             for error in errors[:8]:
                 flash(error, "error")
         else:
-            saved = user_store.save_kpi_evaluations(
-                cycle_start,
-                items,
-                manager.get("name") or manager.get("username") or "",
-            )
-            flash(f"Saved KPI for {saved} employee{'s' if saved != 1 else ''}.", "success")
+            saved = user_store.save_kpi_evaluations(cycle_start, items, actor)
+            if action == "save_approve" and can_approve:
+                flash(f"Saved and approved KPI for {saved} employee{'s' if saved != 1 else ''}.", "success")
+            else:
+                flash(
+                    f"Submitted KPI for {saved} employee{'s' if saved != 1 else ''}. "
+                    "Waiting for manager approval."
+                    if not can_approve
+                    else f"Saved KPI for {saved} employee{'s' if saved != 1 else ''} (pending approval).",
+                    "success",
+                )
         return redirect(url_for("kpi_admin", **redirect_args))
 
     totals = {
         "kpi_amount": round(sum(item["kpi_amount"] for item in employees), 2),
-        "payout_amount": round(sum(item["result"]["payout_amount"] for item in employees if item["result"]), 2),
+        "payout_amount": round(
+            sum(item["payout_result"]["payout_amount"] for item in employees if item["payout_result"]),
+            2,
+        ),
         "evaluated": sum(1 for item in employees if item["evaluated"]),
+        "approved": sum(1 for item in employees if item["approved"]),
+        "pending": sum(1 for item in employees if item["pending"]),
     }
     return render_template(
         "kpi.html",
@@ -4607,13 +4824,14 @@ def kpi_admin():
         employees=employees,
         groups=groups,
         missing_role=missing_role,
-        weight=KPI_WEIGHT_PERCENT,
+        score_max=KPI_SCORE_MAX,
         full_payout_at=KPI_FULL_PAYOUT_AT,
         cycle_start=cycle_start,
         cycle_label=cycle_label_for(cycle_start),
         cycles=cycles,
         totals=totals,
         show_money=show_money,
+        can_approve=can_approve,
         show_filters=is_hr(manager),
         filter_options=kpi_filter_options(all_employees),
         dept_filter=dept_filter,
@@ -4632,12 +4850,16 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True,
         "التيم",
         "الوظيفة",
         "قيمة الـ KPI",
-        *[f"{item['ar']} / {item['en']} (من {KPI_WEIGHT_PERCENT})" for item in criteria],
+        *[
+            f"{item['ar']} / {item['en']} (من {KPI_SCORE_MAX} · {int(round(item['weight'] * 100))}%)"
+            for item in criteria
+        ],
         "إجمالي التقييم %",
         "نسبة الـ KPI المستحقة %",
         "المبلغ المستحق",
-        "الحالة",
+        "حالة الاعتماد",
         "قيّمه",
+        "اعتمده",
     ]
     money_columns = {6, 6 + len(criteria) + 3}
     rows = []
@@ -4645,9 +4867,16 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True,
     total_payout = 0.0
     for person in employees:
         result = person["result"]
+        payout = person.get("payout_result")
         total_amount += person["kpi_amount"]
-        if result:
-            total_payout += result["payout_amount"]
+        if payout:
+            total_payout += payout["payout_amount"]
+        if person.get("approved"):
+            status_label = "معتمد"
+        elif person.get("pending"):
+            status_label = "بانتظار الاعتماد"
+        else:
+            status_label = "لم يتم التقييم"
         rows.append([
             person["name"],
             person["fingerprint"],
@@ -4658,14 +4887,18 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True,
             person["kpi_amount"],
             *[person["scores"].get(item["key"], "") if result else "" for item in criteria],
             result["total"] if result else "",
-            result["payout_percent"] if result else "",
-            result["payout_amount"] if result else "",
-            "تم التقييم" if result else "لم يتم التقييم",
+            payout["payout_percent"] if payout else "",
+            payout["payout_amount"] if payout else "",
+            status_label,
             person["updated_by"],
+            person.get("approved_by") or "",
         ])
     blank_scores = [""] * len(criteria)
     if show_money:
-        rows.append(["الإجمالي", "", "", "", "", "", round(total_amount, 2), *blank_scores, "", "", round(total_payout, 2), "", ""])
+        rows.append([
+            "الإجمالي", "", "", "", "", "", round(total_amount, 2), *blank_scores,
+            "", "", round(total_payout, 2), "", "", "",
+        ])
     numeric_columns = set(range(6, 6 + len(criteria) + 4))
     if not show_money:
         keep = [index for index in range(len(headers)) if index not in money_columns]

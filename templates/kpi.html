@@ -6,12 +6,18 @@
     <title>BE GROUP | KPI</title>
     {% include "_pwa_head.html" %}
     <style>
-        .kpi-table input[type="number"] { min-width: 70px; }
+        .kpi-table input[type="number"] { min-width: 64px; }
         .kpi-total { font-weight: 700; white-space: nowrap; }
         .kpi-full { color: #1f9d55; }
         .kpi-criterion-en { display: block; font-size: 11px; font-weight: 400; opacity: .75; }
+        .kpi-criterion-weight { display: block; font-size: 11px; font-weight: 600; opacity: .85; margin-top: 2px; }
         .kpi-group-title { margin: 22px 0 8px; }
         .kpi-missing-role p + p { margin-top: 6px; }
+        .kpi-status { display: inline-block; font-size: 11px; margin-top: 4px; }
+        .kpi-status-pending { color: #d4a017; }
+        .kpi-status-approved { color: #1f9d55; }
+        .kpi-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .kpi-readonly { opacity: .85; }
     </style>
 </head>
 <body>
@@ -21,7 +27,11 @@
             {% include "_logo.html" %}
             <p class="eyebrow">{% if manager.role == 'team' %}{{ manager.department }} · {{ manager.team }}{% elif manager.department != 'ALL' %}{{ manager.department }}{% else %}All KPI departments{% endif %}</p>
             <h1>تقييم KPI الشهري</h1>
-            <p class="subtitle">Each job role has its own five criteria. Rate each point out of {{ weight }} (five points = 100%). The total is the sum of the five scores. {{ full_payout_at }}% or more earns the full KPI; below that the employee earns the same percentage of their KPI amount.</p>
+            <p class="subtitle">
+                Score each criterion from 1 to {{ score_max }}. Each criterion has a weight; overall % = sum(score × weight) ÷ {{ score_max }} × 100.
+                {{ full_payout_at }}% or more earns the full KPI.
+                Team leaders submit scores; the department manager must approve before the evaluation counts.
+            </p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
@@ -82,18 +92,19 @@
             <input type="hidden" name="dept" value="{{ dept_filter }}">
             <input type="hidden" name="team" value="{{ team_filter }}">
             <input type="hidden" name="employee_count" value="{{ employees|length }}">
+            <input type="hidden" name="kpi_action" id="kpi-action" value="save">
             <h2 class="section-title">Employees · {{ cycle_label }}</h2>
             <p class="muted">
-                Evaluated {{ totals.evaluated }} of {{ employees|length }}
+                Submitted {{ totals.evaluated }} · Approved {{ totals.approved }} · Pending {{ totals.pending }} · {{ employees|length }} listed
                 {% if show_money %}
                     · Total KPI amount {{ '{:,.2f}'.format(totals.kpi_amount) }}
-                    · Total payout {{ '{:,.2f}'.format(totals.payout_amount) }}
+                    · Approved payout {{ '{:,.2f}'.format(totals.payout_amount) }}
                 {% endif %}
             </p>
             {% if show_money %}
-                <p class="muted">The KPI amount is visible to HR only. It is saved per employee and reused next month until you change it. Leave all five scores empty to remove an evaluation.</p>
+                <p class="muted">KPI amount is HR-only. Payout uses approved evaluations only. Use Clear evaluation to remove a submission.</p>
             {% else %}
-                <p class="muted">HR sets the KPI amount for each employee. Leave all five scores empty to remove an evaluation.</p>
+                <p class="muted">HR sets the KPI amount. Your save waits for manager approval. Use Clear evaluation to remove a submission.</p>
             {% endif %}
             {% if missing_role %}
                 <div class="card errors kpi-missing-role">
@@ -103,7 +114,7 @@
                     </p>
                     <p>
                         {% if show_filters %}
-                            Set it from <a href="{{ url_for('employees_admin') }}">Employees</a> (Job role).
+                            Set it from <a href="{{ url_for('employees_admin') }}">Employees</a> (Job role = Team · Level).
                         {% else %}
                             Ask HR to set their job role on the Employees page.
                         {% endif %}
@@ -118,13 +129,15 @@
                         <table class="kpi-table">
                             <thead>
                                 <tr>
+                                    {% if can_approve %}<th></th>{% endif %}
                                     <th>Name</th>
                                     {% if manager.role != 'team' %}<th>Team</th>{% endif %}
                                     {% if show_money %}<th>KPI amount</th>{% endif %}
                                     {% for criterion in group.criteria %}
                                         <th>
-                                            {{ criterion.ar }} (من {{ weight }})
+                                            {{ criterion.ar }}
                                             <span class="kpi-criterion-en">{{ criterion.en }}</span>
+                                            <span class="kpi-criterion-weight">{{ '%g'|format(criterion.weight * 100) }}% · 1–{{ score_max }}</span>
                                         </th>
                                     {% endfor %}
                                     <th>Total</th>
@@ -136,12 +149,32 @@
                                 {% for person in group.employees %}
                                     {% set i = counter.i %}
                                     {% set counter.i = counter.i + 1 %}
-                                    <tr data-kpi-row>
+                                    <tr data-kpi-row class="{{ '' if person.can_score else 'kpi-readonly' }}">
+                                        {% if can_approve %}
+                                            <td data-label="Approve">
+                                                {% if person.pending %}
+                                                    <input type="checkbox" name="approve_selected" value="{{ person.device }}|{{ person.fingerprint }}" checked>
+                                                {% elif person.approved %}
+                                                    <span class="muted">✓</span>
+                                                {% endif %}
+                                            </td>
+                                        {% endif %}
                                         <td data-label="Name">
                                             {{ person.name }}
                                             {% if person.job_role %}<span class="muted kpi-job-role">{{ person.job_role }}</span>{% endif %}
+                                            {% if person.approved %}
+                                                <span class="kpi-status kpi-status-approved">Approved{% if person.approved_by %} · {{ person.approved_by }}{% endif %}</span>
+                                            {% elif person.pending %}
+                                                <span class="kpi-status kpi-status-pending">Pending approval · {{ person.updated_by }}</span>
+                                            {% endif %}
                                             {% if person.role_changed %}
-                                                <span class="muted kpi-job-role">Scored with {{ group.label }} criteria. Clear the scores and save to re-evaluate as {{ person.job_role }}.</span>
+                                                <span class="muted kpi-job-role">Scored with {{ group.label }} criteria. Clear scores and save to re-evaluate as {{ person.job_role }}.</span>
+                                            {% endif %}
+                                            {% if not person.can_score %}
+                                                <span class="muted kpi-job-role">Team Leader roles are scored by the department manager.</span>
+                                            {% endif %}
+                                            {% if person.can_score and person.evaluated %}
+                                                <label class="muted kpi-job-role"><input type="checkbox" name="clear__{{ i }}" value="1"> Clear evaluation</label>
                                             {% endif %}
                                             <input type="hidden" name="device__{{ i }}" value="{{ person.device }}">
                                             <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
@@ -150,20 +183,26 @@
                                         {% if show_money %}
                                             <td data-label="KPI amount">
                                                 <input name="kpi_amount__{{ i }}" type="number" min="0" max="1000000" step="0.01"
-                                                       value="{{ person.kpi_amount if person.kpi_amount else '' }}" placeholder="0" data-kpi-amount>
+                                                       value="{{ person.kpi_amount if person.kpi_amount else '' }}" placeholder="0" data-kpi-amount
+                                                       {{ '' if person.can_score else 'readonly' }}>
                                             </td>
                                         {% endif %}
                                         {% for criterion in group.criteria %}
                                             <td data-label="{{ criterion.ar }} · {{ criterion.en }}">
-                                                <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="{{ weight }}" step="0.5"
+                                                <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="{{ score_max }}" step="0.5"
                                                        value="{{ '%g'|format(person.scores[criterion.key]) if person.evaluated else '' }}"
-                                                       placeholder="0–{{ weight }}" data-kpi-score>
+                                                       placeholder="1–{{ score_max }}" data-kpi-score data-weight="{{ criterion.weight }}"
+                                                       {{ '' if person.can_score else 'readonly' }}>
                                             </td>
                                         {% endfor %}
                                         <td data-label="Total" class="kpi-total" data-kpi-total>{{ '%g'|format(person.result.total) ~ '%' if person.result else '—' }}</td>
-                                        <td data-label="KPI %" class="kpi-total" data-kpi-percent>{{ '%g'|format(person.result.payout_percent) ~ '%' if person.result else '—' }}</td>
+                                        <td data-label="KPI %" class="kpi-total" data-kpi-percent>
+                                            {% if person.payout_result %}{{ '%g'|format(person.payout_result.payout_percent) }}%
+                                            {% elif person.result %}{{ '%g'|format(person.result.payout_percent) }}%*
+                                            {% else %}—{% endif %}
+                                        </td>
                                         {% if show_money %}
-                                            <td data-label="Payout" class="kpi-total" data-kpi-payout>{{ '{:,.2f}'.format(person.result.payout_amount) if person.result else '—' }}</td>
+                                            <td data-label="Payout" class="kpi-total" data-kpi-payout>{{ '{:,.2f}'.format(person.payout_result.payout_amount) if person.payout_result else '—' }}</td>
                                         {% endif %}
                                     </tr>
                                 {% endfor %}
@@ -171,10 +210,18 @@
                         </table>
                     </div>
                 {% endfor %}
-                <button type="submit">Save KPI</button>
+                <div class="kpi-actions">
+                    <button type="submit" onclick="document.getElementById('kpi-action').value='save'">
+                        {{ 'Save scores (pending approval)' if not can_approve else 'Save scores' }}
+                    </button>
+                    {% if can_approve %}
+                        <button type="submit" class="btn-approve" onclick="document.getElementById('kpi-action').value='save_approve'">Save &amp; approve</button>
+                        <button type="submit" class="btn-sm btn-approve" onclick="document.getElementById('kpi-action').value='approve'">Approve selected</button>
+                    {% endif %}
+                </div>
                 <p class="muted">
                     <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
-                    — the file uses the saved values, so save your changes first.
+                    — save first. Accounting payout uses approved rows only.
                 </p>
             {% elif not missing_role %}
                 <p class="empty-state">No active employees in a KPI department for your account.</p>
@@ -199,7 +246,7 @@
             syncTeams();
         })();
         (function () {
-            const weight = {{ weight }};
+            const scoreMax = {{ score_max }};
             const fullAt = {{ full_payout_at }};
             const format = (value) => Number(value.toFixed(2)).toString();
             document.querySelectorAll('[data-kpi-row]').forEach((row) => {
@@ -216,10 +263,12 @@
                         if (payoutCell) payoutCell.textContent = '—';
                         return;
                     }
-                    const total = scores.reduce(
-                        (sum, input) => sum + Math.min(weight, Math.max(0, parseFloat(input.value) || 0)),
-                        0
-                    );
+                    const weighted = scores.reduce((sum, input) => {
+                        const score = Math.min(scoreMax, Math.max(0, parseFloat(input.value) || 0));
+                        const weight = parseFloat(input.dataset.weight) || 0;
+                        return sum + score * weight;
+                    }, 0);
+                    const total = weighted / scoreMax * 100;
                     const percent = total >= fullAt ? 100 : total;
                     totalCell.textContent = format(total) + '%';
                     percentCell.textContent = format(percent) + '%';
@@ -232,7 +281,9 @@
                         });
                     }
                 };
-                scores.concat(amountInput ? [amountInput] : []).forEach((input) => input.addEventListener('input', update));
+                scores.concat(amountInput ? [amountInput] : []).forEach((input) => {
+                    if (input && !input.readOnly) input.addEventListener('input', update);
+                });
             });
         })();
     </script>

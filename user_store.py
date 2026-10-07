@@ -147,6 +147,7 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('leave_balance_visible', '0')"
         )
         _clear_general_kpi_since_role_criteria(conn)
+        _migrate_kpi_scores_to_five_point(conn)
         conn.commit()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for value, label in SEED_DEPARTMENTS:
@@ -207,8 +208,23 @@ def set_employee_branch_manager(employee_id: int, branch_manager: bool) -> bool:
     return changed
 
 
+_SOCIAL_KPI_ROLES = [
+    "Performance · Team Leader",
+    "Performance · Senior",
+    "Performance · Mid-Level",
+    "Performance · Junior",
+    "Creative AI · Team Leader",
+    "Creative AI · Member",
+    "Growth · Team Leader",
+    "Growth · Senior",
+    "Growth · Mid-Level",
+    "Growth · Junior",
+]
+
 JOB_ROLES_BY_DEPARTMENT = {
     "web": ["Front End", "Back End", "Account Manager"],
+    "social": list(_SOCIAL_KPI_ROLES),
+    "social media": list(_SOCIAL_KPI_ROLES),
 }
 
 
@@ -289,8 +305,16 @@ def _ensure_payroll_adjustments_table(conn) -> None:
     )
 
 
-KPI_CRITERIA_KEYS = ("attendance", "work_hours", "deadlines", "quality", "problem_solving")
-
+KPI_CRITERIA_KEYS = (
+    "attendance",
+    "work_hours",
+    "deadlines",
+    "quality",
+    "problem_solving",
+    "criterion_6",
+)
+KPI_STATUS_PENDING = "pending"
+KPI_STATUS_APPROVED = "approved"
 
 KPI_ROLE_CRITERIA_FROM_CYCLE = "2026-09-26"
 
@@ -345,8 +369,41 @@ def _ensure_kpi_evaluations_table(conn) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(kpi_evaluations)")}
     if "criteria_set" not in columns:
         # Empty = the original general criteria; otherwise the job role whose criteria
-        # the five score columns hold, in order.
+        # the score columns hold, in order.
         conn.execute("ALTER TABLE kpi_evaluations ADD COLUMN criteria_set TEXT NOT NULL DEFAULT ''")
+    if "criterion_6" not in columns:
+        conn.execute("ALTER TABLE kpi_evaluations ADD COLUMN criterion_6 REAL NOT NULL DEFAULT 0")
+    if "status" not in columns:
+        conn.execute(
+            "ALTER TABLE kpi_evaluations ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'"
+        )
+    if "approved_by" not in columns:
+        conn.execute("ALTER TABLE kpi_evaluations ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''")
+    if "approved_at" not in columns:
+        conn.execute("ALTER TABLE kpi_evaluations ADD COLUMN approved_at TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_kpi_scores_to_five_point(conn) -> None:
+    """One-time: convert old 0–20 scores to 1–5 (divide by 4) and keep them approved."""
+    marked = conn.execute(
+        "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('kpi_five_point_migrated', ?)",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+    )
+    if not marked.rowcount:
+        return
+    for key in KPI_CRITERIA_KEYS:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(kpi_evaluations)")}
+        if key not in columns:
+            continue
+        conn.execute(
+            f"""
+            UPDATE kpi_evaluations
+            SET {key} = CASE
+                WHEN {key} > 5 THEN ROUND(MIN(5.0, {key} / 4.0), 2)
+                ELSE {key}
+            END
+            """
+        )
 
 
 def get_setting(key: str, default: str = "") -> str:
@@ -2175,6 +2232,10 @@ def employees_for_payroll_adjustments(cycle_start: str) -> list:
 
 
 def _kpi_row_to_dict(row) -> dict:
+    keys = row.keys()
+    scores = {}
+    for key in KPI_CRITERIA_KEYS:
+        scores[key] = float(row[key] or 0) if key in keys else 0.0
     return {
         "cycle_start": row["cycle_start"],
         "device": normalize_device(row["device"] or ""),
@@ -2182,8 +2243,11 @@ def _kpi_row_to_dict(row) -> dict:
         "name": row["name"] or "",
         "department": row["department"] or "",
         "team": row["team"] or "",
-        "scores": {key: float(row[key] or 0) for key in KPI_CRITERIA_KEYS},
+        "scores": scores,
         "criteria_set": row["criteria_set"] or "",
+        "status": (row["status"] if "status" in keys and row["status"] else KPI_STATUS_APPROVED),
+        "approved_by": (row["approved_by"] if "approved_by" in keys else "") or "",
+        "approved_at": (row["approved_at"] if "approved_at" in keys else "") or "",
         "kpi_amount": float(row["kpi_amount"] or 0),
         "updated_by": row["updated_by"] or "",
         "updated_at": row["updated_at"] or "",
@@ -2230,7 +2294,8 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
 
     Items with ``scores`` set to None delete that cycle's evaluation. ``kpi_amount``
     is also stored on the employee as the default for later cycles; pass None to keep
-    the current amount. Re-saving unchanged scores keeps the original evaluator.
+    the current amount. ``status`` should be pending or approved; changing scores from an
+    approved row without an explicit approved status resets approval metadata.
     """
     cycle = str(cycle_start or "").strip()[:10]
     if not cycle:
@@ -2271,25 +2336,48 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
                         "DELETE FROM kpi_evaluations WHERE cycle_start = ? AND device = ? AND fingerprint = ?",
                         (cycle, device, fingerprint),
                     )
+                    saved += 1
                     continue
-                values = [min(100.0, max(0.0, float(scores.get(key) or 0))) for key in KPI_CRITERIA_KEYS]
+                values = [min(5.0, max(0.0, float(scores.get(key) or 0))) for key in KPI_CRITERIA_KEYS]
                 criteria_set = str(item.get("criteria_set") or "").strip()
+                status = str(item.get("status") or KPI_STATUS_PENDING).strip().lower()
+                if status not in (KPI_STATUS_PENDING, KPI_STATUS_APPROVED):
+                    status = KPI_STATUS_PENDING
                 evaluator = (updated_by or "").strip()
                 evaluated_at = now
-                if (
+                existing_values = None
+                if existing is not None:
+                    existing_values = [
+                        float(existing[key] or 0) if key in existing.keys() else 0.0
+                        for key in KPI_CRITERIA_KEYS
+                    ]
+                scores_unchanged = (
                     existing is not None
-                    and [float(existing[key] or 0) for key in KPI_CRITERIA_KEYS] == values
+                    and existing_values == values
                     and (existing["criteria_set"] or "") == criteria_set
-                ):
+                )
+                if scores_unchanged:
                     evaluator = existing["updated_by"] or evaluator
                     evaluated_at = existing["updated_at"] or now
+                if status == KPI_STATUS_APPROVED:
+                    approved_by = str(item.get("approved_by") or updated_by or "").strip()
+                    approved_at = str(item.get("approved_at") or now).strip()
+                    if (
+                        scores_unchanged
+                        and (existing["status"] if existing and "status" in existing.keys() else "") == KPI_STATUS_APPROVED
+                    ):
+                        approved_by = (existing["approved_by"] if "approved_by" in existing.keys() else "") or approved_by
+                        approved_at = (existing["approved_at"] if "approved_at" in existing.keys() else "") or approved_at
+                else:
+                    approved_by = ""
+                    approved_at = ""
                 conn.execute(
                     f"""
                     INSERT INTO kpi_evaluations (
                         cycle_start, device, fingerprint, name, department, team, criteria_set,
                         {", ".join(KPI_CRITERIA_KEYS)},
-                        kpi_amount, updated_by, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, {", ".join("?" for _ in KPI_CRITERIA_KEYS)}, ?, ?, ?)
+                        kpi_amount, status, approved_by, approved_at, updated_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, {", ".join("?" for _ in KPI_CRITERIA_KEYS)}, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(cycle_start, device, fingerprint) DO UPDATE SET
                         name = excluded.name,
                         department = excluded.department,
@@ -2297,6 +2385,9 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
                         criteria_set = excluded.criteria_set,
                         {", ".join(f"{key} = excluded.{key}" for key in KPI_CRITERIA_KEYS)},
                         kpi_amount = excluded.kpi_amount,
+                        status = excluded.status,
+                        approved_by = excluded.approved_by,
+                        approved_at = excluded.approved_at,
                         updated_by = excluded.updated_by,
                         updated_at = excluded.updated_at
                     """,
@@ -2310,6 +2401,9 @@ def save_kpi_evaluations(cycle_start: str, items: list, updated_by: str = "") ->
                         criteria_set,
                         *values,
                         kpi_amount,
+                        status,
+                        approved_by,
+                        approved_at,
                         evaluator,
                         evaluated_at,
                     ),
