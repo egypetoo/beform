@@ -286,9 +286,6 @@
             </p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
-                {% if show_filters %}
-                    <a class="excel-link" href="{{ url_for('kpi_history_bulk') }}">Social history backfill (9 months)</a>
-                {% endif %}
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
             </div>
@@ -309,6 +306,11 @@
             <section class="field">
                 <label for="cycle">Payroll cycle (26th to 25th)</label>
                 <select id="cycle" name="cycle" onchange="this.form.submit()">
+                    {% if show_history_bulk or history_bulk %}
+                        <option value="{{ history_bulk_value }}" {{ 'selected' if history_bulk else '' }}>
+                            {{ history_bulk_label }}
+                        </option>
+                    {% endif %}
                     {% for cycle in cycles %}
                         <option value="{{ cycle.start }}" {{ 'selected' if cycle.start == cycle_start else '' }}>
                             {{ cycle.label }}
@@ -316,6 +318,12 @@
                     {% endfor %}
                 </select>
             </section>
+            {% if history_bulk %}
+                <p class="muted" style="margin:0 0 12px;">
+                    Aggregated Social history: enter scores once (1–{{ score_max }}). Saving copies them to all 9 cycles
+                    from 26 Dec 2025 to 25 Sep 2026. From the current monthly cycle, evaluate month by month as usual.
+                </p>
+            {% endif %}
             {% if show_filters %}
                 <section class="field">
                     <label for="dept">Department</label>
@@ -487,10 +495,16 @@
 
                 <div class="kpi-actions">
                     <button type="submit" onclick="document.getElementById('kpi-action').value='save'">
-                        {{ 'Save scores (pending approval)' if not can_approve else 'Save scores' }}
+                        {% if history_bulk %}
+                            {{ 'Save to 9 months (pending)' if not can_approve else 'Save scores to 9 months' }}
+                        {% else %}
+                            {{ 'Save scores (pending approval)' if not can_approve else 'Save scores' }}
+                        {% endif %}
                     </button>
                     {% if can_approve %}
-                        <button type="submit" class="btn-approve" onclick="document.getElementById('kpi-action').value='save_approve'">Save &amp; approve</button>
+                        <button type="submit" class="btn-approve" onclick="document.getElementById('kpi-action').value='save_approve'">
+                            {{ 'Save &amp; approve on 9 months' if history_bulk else 'Save &amp; approve' }}
+                        </button>
                         <button type="submit" class="btn-sm btn-approve" onclick="document.getElementById('kpi-action').value='approve'">Approve selected</button>
                     {% endif %}
                     <p class="muted">
