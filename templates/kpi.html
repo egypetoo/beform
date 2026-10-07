@@ -171,6 +171,9 @@
             margin-bottom: 14px;
         }
         .kpi-score-field {
+            display: flex;
+            flex-direction: column;
+            min-height: 148px;
             background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.2));
             border: 1px solid rgba(255,255,255,.1);
             border-radius: 12px;
@@ -188,7 +191,7 @@
             color: #f0f0f0;
             line-height: 1.35;
             margin-bottom: 2px;
-            min-height: 2.7em;
+            min-height: 3.3em;
         }
         .kpi-score-en {
             display: block;
@@ -199,7 +202,8 @@
         }
         .kpi-score-weight {
             display: inline-block;
-            margin: 6px 0 8px;
+            align-self: flex-start;
+            margin: 6px 0 0;
             font-size: 10px;
             font-weight: 700;
             letter-spacing: .02em;
@@ -211,6 +215,7 @@
         }
         .kpi-score-field input[type="number"] {
             max-width: none;
+            margin-top: auto;
         }
         .kpi-person-foot {
             display: flex;
