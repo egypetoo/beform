@@ -186,19 +186,12 @@
         }
         .kpi-score-title {
             display: block;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             color: #f0f0f0;
             line-height: 1.35;
             margin-bottom: 2px;
-            min-height: 3.3em;
-        }
-        .kpi-score-en {
-            display: block;
-            font-size: 11px;
-            font-weight: 400;
-            color: var(--muted);
-            margin-top: 2px;
+            min-height: 2.8em;
         }
         .kpi-score-weight {
             display: inline-block;
@@ -447,8 +440,7 @@
                                     {% for criterion in group.criteria %}
                                         <div class="kpi-score-field">
                                             <label class="kpi-score-title" for="{{ criterion.key }}__{{ i }}">
-                                                {{ criterion.ar }}
-                                                <span class="kpi-score-en">{{ criterion.en }}</span>
+                                                {{ criterion.en }}
                                             </label>
                                             <span class="kpi-score-weight">{{ '%g'|format(criterion.weight * 100) }}%</span>
                                             <input id="{{ criterion.key }}__{{ i }}" name="{{ criterion.key }}__{{ i }}" type="number"
