@@ -6,18 +6,245 @@
     <title>BE GROUP | KPI</title>
     {% include "_pwa_head.html" %}
     <style>
-        .kpi-table input[type="number"] { min-width: 64px; }
-        .kpi-total { font-weight: 700; white-space: nowrap; }
-        .kpi-full { color: #1f9d55; }
-        .kpi-criterion-en { display: block; font-size: 11px; font-weight: 400; opacity: .75; }
-        .kpi-criterion-weight { display: block; font-size: 11px; font-weight: 600; opacity: .85; margin-top: 2px; }
-        .kpi-group-title { margin: 22px 0 8px; }
+        .kpi-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 0 0 14px;
+        }
+        .kpi-stat {
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 10px;
+            padding: 8px 12px;
+            min-width: 110px;
+        }
+        .kpi-stat strong {
+            display: block;
+            font-size: 18px;
+            line-height: 1.2;
+            color: #fff;
+        }
+        .kpi-stat span {
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .kpi-help {
+            margin: 0 0 18px;
+            font-size: 13px;
+        }
+        .kpi-group {
+            margin: 0 0 22px;
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px;
+            background: rgba(255,255,255,.02);
+            overflow: hidden;
+        }
+        .kpi-group-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px 16px;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255,255,255,.08);
+            background: linear-gradient(180deg, rgba(255,140,0,.08), transparent);
+        }
+        .kpi-group-head h3 {
+            margin: 0;
+            font-size: 17px;
+            font-weight: 700;
+        }
+        .kpi-group-head .muted { font-size: 13px; }
+        .kpi-person {
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255,255,255,.06);
+        }
+        .kpi-person:last-child { border-bottom: 0; }
+        .kpi-person-top {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px 16px;
+            margin-bottom: 12px;
+        }
+        .kpi-person-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .kpi-person-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 10px;
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .kpi-person-meta .sep::before {
+            content: "·";
+            margin-right: 10px;
+            opacity: .5;
+        }
+        .kpi-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            padding: 3px 9px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .kpi-chip-pending {
+            background: rgba(212,160,23,.15);
+            color: #e2b84a;
+        }
+        .kpi-chip-approved {
+            background: rgba(31,157,85,.15);
+            color: #3dca78;
+        }
+        .kpi-chip-locked {
+            background: rgba(255,255,255,.06);
+            color: var(--muted);
+        }
+        .kpi-person-side {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+        }
+        .kpi-amount-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 120px;
+        }
+        .kpi-amount-field label,
+        .kpi-score-field label {
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .kpi-form input[type="number"] {
+            width: 100%;
+            min-width: 0;
+            max-width: 140px;
+            background: #141414;
+            color: #fff;
+            border: 1px solid rgba(255,255,255,.14);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 14px;
+        }
+        .kpi-form input[type="number"]:focus {
+            outline: none;
+            border-color: rgba(255,140,0,.7);
+            box-shadow: 0 0 0 2px rgba(255,140,0,.15);
+        }
+        .kpi-form input[type="number"][readonly] {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+        .kpi-scores {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .kpi-score-field {
+            background: rgba(0,0,0,.22);
+            border: 1px solid rgba(255,255,255,.06);
+            border-radius: 10px;
+            padding: 10px;
+        }
+        .kpi-score-title {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #eee;
+            line-height: 1.35;
+            margin-bottom: 2px;
+            min-height: 2.7em;
+        }
+        .kpi-score-en {
+            display: block;
+            font-size: 11px;
+            font-weight: 400;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+        .kpi-score-weight {
+            display: inline-block;
+            margin: 6px 0 8px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: .02em;
+            color: #ff9a3c;
+            background: rgba(255,140,0,.12);
+            border-radius: 999px;
+            padding: 2px 7px;
+        }
+        .kpi-score-field input[type="number"] {
+            max-width: none;
+        }
+        .kpi-person-foot {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 14px;
+            padding-top: 4px;
+        }
+        .kpi-metric {
+            min-width: 72px;
+        }
+        .kpi-metric small {
+            display: block;
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .kpi-metric strong {
+            font-size: 18px;
+            color: #fff;
+        }
+        .kpi-total.kpi-full,
+        .kpi-metric strong.kpi-full { color: #3dca78; }
+        .kpi-clear {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--muted);
+            margin-left: auto;
+        }
+        .kpi-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+            position: sticky;
+            bottom: 12px;
+            padding: 12px;
+            border-radius: 12px;
+            background: rgba(10,10,10,.92);
+            border: 1px solid rgba(255,255,255,.1);
+            backdrop-filter: blur(8px);
+            z-index: 5;
+        }
+        .kpi-actions .muted { width: 100%; margin: 0; }
         .kpi-missing-role p + p { margin-top: 6px; }
-        .kpi-status { display: inline-block; font-size: 11px; margin-top: 4px; }
-        .kpi-status-pending { color: #d4a017; }
-        .kpi-status-approved { color: #1f9d55; }
-        .kpi-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-        .kpi-readonly { opacity: .85; }
+        .kpi-approve-box {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+        @media (max-width: 700px) {
+            .kpi-scores { grid-template-columns: 1fr 1fr; }
+            .kpi-score-title { min-height: 0; }
+            .kpi-clear { margin-left: 0; width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -28,9 +255,8 @@
             <p class="eyebrow">{% if manager.role == 'team' %}{{ manager.department }} · {{ manager.team }}{% elif manager.department != 'ALL' %}{{ manager.department }}{% else %}All KPI departments{% endif %}</p>
             <h1>تقييم KPI الشهري</h1>
             <p class="subtitle">
-                Score each criterion from 1 to {{ score_max }}. Each criterion has a weight; overall % = sum(score × weight) ÷ {{ score_max }} × 100.
-                {{ full_payout_at }}% or more earns the full KPI.
-                Team leaders submit scores; the department manager must approve before the evaluation counts.
+                Rate each criterion from 1–{{ score_max }} (weighted). Overall % = sum(score × weight) ÷ {{ score_max }} × 100.
+                {{ full_payout_at }}%+ earns the full KPI. Team leaders submit; department manager approves.
             </p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
@@ -86,7 +312,7 @@
             {% endif %}
         </form>
 
-        <form class="form-shell users-shell" method="post" id="kpi-form">
+        <form class="form-shell users-shell kpi-form" method="post" id="kpi-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="cycle_start" value="{{ cycle_start }}">
             <input type="hidden" name="dept" value="{{ dept_filter }}">
@@ -94,18 +320,25 @@
             <input type="hidden" name="employee_count" value="{{ employees|length }}">
             <input type="hidden" name="kpi_action" id="kpi-action" value="save">
             <h2 class="section-title">Employees · {{ cycle_label }}</h2>
-            <p class="muted">
-                Submitted {{ totals.evaluated }} · Approved {{ totals.approved }} · Pending {{ totals.pending }} · {{ employees|length }} listed
+
+            <div class="kpi-stats">
+                <div class="kpi-stat"><strong>{{ employees|length }}</strong><span>Listed</span></div>
+                <div class="kpi-stat"><strong>{{ totals.evaluated }}</strong><span>Submitted</span></div>
+                <div class="kpi-stat"><strong>{{ totals.approved }}</strong><span>Approved</span></div>
+                <div class="kpi-stat"><strong>{{ totals.pending }}</strong><span>Pending</span></div>
                 {% if show_money %}
-                    · Total KPI amount {{ '{:,.2f}'.format(totals.kpi_amount) }}
-                    · Approved payout {{ '{:,.2f}'.format(totals.payout_amount) }}
+                    <div class="kpi-stat"><strong>{{ '{:,.0f}'.format(totals.kpi_amount) }}</strong><span>KPI amount</span></div>
+                    <div class="kpi-stat"><strong>{{ '{:,.0f}'.format(totals.payout_amount) }}</strong><span>Approved payout</span></div>
+                {% endif %}
+            </div>
+            <p class="muted kpi-help">
+                {% if show_money %}
+                    KPI amount is HR-only. Payout uses approved evaluations only. Use Clear to remove a submission.
+                {% else %}
+                    HR sets the KPI amount. Your save waits for manager approval. Use Clear to remove a submission.
                 {% endif %}
             </p>
-            {% if show_money %}
-                <p class="muted">KPI amount is HR-only. Payout uses approved evaluations only. Use Clear evaluation to remove a submission.</p>
-            {% else %}
-                <p class="muted">HR sets the KPI amount. Your save waits for manager approval. Use Clear evaluation to remove a submission.</p>
-            {% endif %}
+
             {% if missing_role %}
                 <div class="card errors kpi-missing-role">
                     <p>
@@ -121,95 +354,109 @@
                     </p>
                 </div>
             {% endif %}
+
             {% if employees %}
                 {% set counter = namespace(i=0) %}
                 {% for group in groups %}
-                    <h3 class="kpi-group-title">{{ group.label }} <span class="muted">({{ group.employees|length }})</span></h3>
-                    <div class="table-wrap">
-                        <table class="kpi-table">
-                            <thead>
-                                <tr>
-                                    {% if can_approve %}<th></th>{% endif %}
-                                    <th>Name</th>
-                                    {% if manager.role != 'team' %}<th>Team</th>{% endif %}
-                                    {% if show_money %}<th>KPI amount</th>{% endif %}
-                                    {% for criterion in group.criteria %}
-                                        <th>
-                                            {{ criterion.ar }}
-                                            <span class="kpi-criterion-en">{{ criterion.en }}</span>
-                                            <span class="kpi-criterion-weight">{{ '%g'|format(criterion.weight * 100) }}% · 1–{{ score_max }}</span>
-                                        </th>
-                                    {% endfor %}
-                                    <th>Total</th>
-                                    <th>KPI %</th>
-                                    {% if show_money %}<th>Payout</th>{% endif %}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for person in group.employees %}
-                                    {% set i = counter.i %}
-                                    {% set counter.i = counter.i + 1 %}
-                                    <tr data-kpi-row class="{{ '' if person.can_score else 'kpi-readonly' }}">
-                                        {% if can_approve %}
-                                            <td data-label="Approve">
-                                                {% if person.pending %}
-                                                    <input type="checkbox" name="approve_selected" value="{{ person.device }}|{{ person.fingerprint }}" checked>
-                                                {% elif person.approved %}
-                                                    <span class="muted">✓</span>
-                                                {% endif %}
-                                            </td>
+                    <section class="kpi-group">
+                        <div class="kpi-group-head">
+                            <h3>{{ group.label }}</h3>
+                            <span class="muted">{{ group.employees|length }} employee{{ 's' if group.employees|length != 1 else '' }} · {{ group.criteria|length }} criteria</span>
+                        </div>
+                        {% for person in group.employees %}
+                            {% set i = counter.i %}
+                            {% set counter.i = counter.i + 1 %}
+                            <article class="kpi-person {{ '' if person.can_score else 'kpi-readonly' }}" data-kpi-row>
+                                <div class="kpi-person-top">
+                                    <div>
+                                        <div class="kpi-person-name">{{ person.name }}</div>
+                                        <div class="kpi-person-meta">
+                                            {% if person.team and manager.role != 'team' %}
+                                                <span>{{ person.team }}</span>
+                                            {% endif %}
+                                            {% if person.job_role %}
+                                                <span class="{{ 'sep' if person.team and manager.role != 'team' else '' }}">{{ person.job_role }}</span>
+                                            {% endif %}
+                                        </div>
+                                        {% if person.role_changed %}
+                                            <p class="muted" style="margin:6px 0 0;font-size:12px;">Scored with {{ group.label }} criteria. Clear and save to re-evaluate as {{ person.job_role }}.</p>
                                         {% endif %}
-                                        <td data-label="Name">
-                                            {{ person.name }}
-                                            {% if person.job_role %}<span class="muted kpi-job-role">{{ person.job_role }}</span>{% endif %}
-                                            {% if person.approved %}
-                                                <span class="kpi-status kpi-status-approved">Approved{% if person.approved_by %} · {{ person.approved_by }}{% endif %}</span>
-                                            {% elif person.pending %}
-                                                <span class="kpi-status kpi-status-pending">Pending approval · {{ person.updated_by }}</span>
-                                            {% endif %}
-                                            {% if person.role_changed %}
-                                                <span class="muted kpi-job-role">Scored with {{ group.label }} criteria. Clear scores and save to re-evaluate as {{ person.job_role }}.</span>
-                                            {% endif %}
-                                            {% if not person.can_score %}
-                                                <span class="muted kpi-job-role">Team Leader roles are scored by the department manager.</span>
-                                            {% endif %}
-                                            {% if person.can_score and person.evaluated %}
-                                                <label class="muted kpi-job-role"><input type="checkbox" name="clear__{{ i }}" value="1"> Clear evaluation</label>
-                                            {% endif %}
-                                            <input type="hidden" name="device__{{ i }}" value="{{ person.device }}">
-                                            <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
-                                        </td>
-                                        {% if manager.role != 'team' %}<td data-label="Team">{{ person.team or '-' }}</td>{% endif %}
+                                        {% if not person.can_score %}
+                                            <p class="muted" style="margin:6px 0 0;font-size:12px;">Team Leader roles are scored by the department manager.</p>
+                                        {% endif %}
+                                    </div>
+                                    <div class="kpi-person-side">
+                                        {% if person.approved %}
+                                            <span class="kpi-chip kpi-chip-approved">Approved{% if person.approved_by %} · {{ person.approved_by }}{% endif %}</span>
+                                        {% elif person.pending %}
+                                            <span class="kpi-chip kpi-chip-pending">Pending · {{ person.updated_by }}</span>
+                                        {% endif %}
+                                        {% if can_approve and person.pending %}
+                                            <label class="kpi-approve-box">
+                                                <input type="checkbox" name="approve_selected" value="{{ person.device }}|{{ person.fingerprint }}" checked>
+                                                Approve
+                                            </label>
+                                        {% elif can_approve and person.approved %}
+                                            <span class="kpi-chip kpi-chip-locked">✓</span>
+                                        {% endif %}
                                         {% if show_money %}
-                                            <td data-label="KPI amount">
-                                                <input name="kpi_amount__{{ i }}" type="number" min="0" max="1000000" step="0.01"
+                                            <div class="kpi-amount-field">
+                                                <label for="kpi_amount__{{ i }}">KPI amount</label>
+                                                <input id="kpi_amount__{{ i }}" name="kpi_amount__{{ i }}" type="number" min="0" max="1000000" step="0.01"
                                                        value="{{ person.kpi_amount if person.kpi_amount else '' }}" placeholder="0" data-kpi-amount
                                                        {{ '' if person.can_score else 'readonly' }}>
-                                            </td>
+                                            </div>
                                         {% endif %}
-                                        {% for criterion in group.criteria %}
-                                            <td data-label="{{ criterion.ar }} · {{ criterion.en }}">
-                                                <input name="{{ criterion.key }}__{{ i }}" type="number" min="0" max="{{ score_max }}" step="0.5"
-                                                       value="{{ '%g'|format(person.scores[criterion.key]) if person.evaluated else '' }}"
-                                                       placeholder="1–{{ score_max }}" data-kpi-score data-weight="{{ criterion.weight }}"
-                                                       {{ '' if person.can_score else 'readonly' }}>
-                                            </td>
-                                        {% endfor %}
-                                        <td data-label="Total" class="kpi-total" data-kpi-total>{{ '%g'|format(person.result.total) ~ '%' if person.result else '—' }}</td>
-                                        <td data-label="KPI %" class="kpi-total" data-kpi-percent>
+                                    </div>
+                                </div>
+
+                                <div class="kpi-scores">
+                                    {% for criterion in group.criteria %}
+                                        <div class="kpi-score-field">
+                                            <label class="kpi-score-title" for="{{ criterion.key }}__{{ i }}">
+                                                {{ criterion.ar }}
+                                                <span class="kpi-score-en">{{ criterion.en }}</span>
+                                            </label>
+                                            <span class="kpi-score-weight">{{ '%g'|format(criterion.weight * 100) }}%</span>
+                                            <input id="{{ criterion.key }}__{{ i }}" name="{{ criterion.key }}__{{ i }}" type="number"
+                                                   min="0" max="{{ score_max }}" step="0.5"
+                                                   value="{{ '%g'|format(person.scores[criterion.key]) if person.evaluated else '' }}"
+                                                   placeholder="1–{{ score_max }}" data-kpi-score data-weight="{{ criterion.weight }}"
+                                                   {{ '' if person.can_score else 'readonly' }}>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+
+                                <div class="kpi-person-foot">
+                                    <div class="kpi-metric">
+                                        <small>Total</small>
+                                        <strong class="kpi-total" data-kpi-total>{{ '%g'|format(person.result.total) ~ '%' if person.result else '—' }}</strong>
+                                    </div>
+                                    <div class="kpi-metric">
+                                        <small>KPI %</small>
+                                        <strong data-kpi-percent>
                                             {% if person.payout_result %}{{ '%g'|format(person.payout_result.payout_percent) }}%
                                             {% elif person.result %}{{ '%g'|format(person.result.payout_percent) }}%*
                                             {% else %}—{% endif %}
-                                        </td>
-                                        {% if show_money %}
-                                            <td data-label="Payout" class="kpi-total" data-kpi-payout>{{ '{:,.2f}'.format(person.payout_result.payout_amount) if person.payout_result else '—' }}</td>
-                                        {% endif %}
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                                        </strong>
+                                    </div>
+                                    {% if show_money %}
+                                        <div class="kpi-metric">
+                                            <small>Payout</small>
+                                            <strong data-kpi-payout>{{ '{:,.2f}'.format(person.payout_result.payout_amount) if person.payout_result else '—' }}</strong>
+                                        </div>
+                                    {% endif %}
+                                    {% if person.can_score and person.evaluated %}
+                                        <label class="kpi-clear"><input type="checkbox" name="clear__{{ i }}" value="1"> Clear evaluation</label>
+                                    {% endif %}
+                                </div>
+                                <input type="hidden" name="device__{{ i }}" value="{{ person.device }}">
+                                <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
+                            </article>
+                        {% endfor %}
+                    </section>
                 {% endfor %}
+
                 <div class="kpi-actions">
                     <button type="submit" onclick="document.getElementById('kpi-action').value='save'">
                         {{ 'Save scores (pending approval)' if not can_approve else 'Save scores' }}
@@ -218,11 +465,11 @@
                         <button type="submit" class="btn-approve" onclick="document.getElementById('kpi-action').value='save_approve'">Save &amp; approve</button>
                         <button type="submit" class="btn-sm btn-approve" onclick="document.getElementById('kpi-action').value='approve'">Approve selected</button>
                     {% endif %}
+                    <p class="muted">
+                        <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
+                        — save first. Accounting payout uses approved rows only.
+                    </p>
                 </div>
-                <p class="muted">
-                    <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
-                    — save first. Accounting payout uses approved rows only.
-                </p>
             {% elif not missing_role %}
                 <p class="empty-state">No active employees in a KPI department for your account.</p>
             {% endif %}
@@ -261,6 +508,8 @@
                         totalCell.textContent = '—';
                         percentCell.textContent = '—';
                         if (payoutCell) payoutCell.textContent = '—';
+                        totalCell.classList.remove('kpi-full');
+                        percentCell.classList.remove('kpi-full');
                         return;
                     }
                     const weighted = scores.reduce((sum, input) => {
@@ -272,6 +521,7 @@
                     const percent = total >= fullAt ? 100 : total;
                     totalCell.textContent = format(total) + '%';
                     percentCell.textContent = format(percent) + '%';
+                    totalCell.classList.toggle('kpi-full', percent === 100);
                     percentCell.classList.toggle('kpi-full', percent === 100);
                     if (payoutCell && amountInput) {
                         const amount = parseFloat(amountInput.value) || 0;
