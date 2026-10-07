@@ -922,6 +922,14 @@ td.card-actions select[name="job_role"] {
     text-align: right;
 }
 
+.kpi-criteria-percent {
+    display: block;
+    margin-top: 2px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--orange);
+}
+
 .kpi-criteria-score {
     font-size: 18px;
     font-weight: 700;

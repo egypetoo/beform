@@ -222,10 +222,14 @@
                     <ul class="kpi-criteria" dir="rtl">
                         {% for criterion in kpi.criteria %}
                             {% set ratio = (criterion.score / kpi.max_score * 100) if kpi.max_score else 0 %}
+                            {% set contrib = (criterion.score * (criterion.weight or 0) / kpi.max_score * 100) if kpi.max_score else 0 %}
                             <li>
                                 <div class="kpi-criteria-row">
                                     <span class="kpi-criteria-label">{{ criterion.ar }}<small class="kpi-criteria-en" dir="ltr">{{ criterion.en }}</small></span>
-                                    <span class="kpi-criteria-score" dir="ltr">{{ '%g'|format(criterion.score) }}<small> / {{ kpi.max_score }}</small></span>
+                                    <span class="kpi-criteria-score" dir="ltr">
+                                        {{ '%g'|format(criterion.score) }}<small> / {{ kpi.max_score }}</small>
+                                        <strong class="kpi-criteria-percent">{{ '%g'|format(contrib) }}%</strong>
+                                    </span>
                                 </div>
                                 <div class="kpi-mini-bar"><span style="width: {{ [ratio, 100]|min }}%"></span></div>
                             </li>
