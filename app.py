@@ -298,6 +298,19 @@ def parse_money_amount(value) -> float:
 KPI_DEPARTMENTS = {"web", "social", "social media"}
 KPI_SCORE_MAX = 5
 KPI_FULL_PAYOUT_AT = 90
+# Backfill Social KPI overall % onto these payroll cycles (26th→25th), then use monthly entry.
+KPI_HISTORY_BULK_CYCLES = (
+    "2025-12-26",
+    "2026-01-26",
+    "2026-02-26",
+    "2026-03-26",
+    "2026-04-26",
+    "2026-05-26",
+    "2026-06-26",
+    "2026-07-26",
+    "2026-08-26",
+)
+KPI_HISTORY_BULK_DEPARTMENTS = {"social", "social media"}
 
 
 def _kpi_criteria_list(items: list) -> list:
@@ -492,6 +505,56 @@ def parse_kpi_score(value) -> float | None:
     if score < 0 or score > KPI_SCORE_MAX:
         raise ValueError(f"Each KPI score must be from 0 to {KPI_SCORE_MAX}.")
     return round(score, 2)
+
+
+def parse_kpi_percent(value) -> float | None:
+    text = str(value or "").strip().replace(",", ".").rstrip("%")
+    if not text:
+        return None
+    try:
+        percent = float(text)
+    except ValueError:
+        raise ValueError("KPI percent must be a number from 0 to 100.")
+    if percent < 0 or percent > 100:
+        raise ValueError("KPI percent must be from 0 to 100.")
+    return round(percent, 2)
+
+
+def scores_for_overall_percent(percent: float, criteria: list) -> dict:
+    """Build 1–5 criterion scores that reproduce ``percent`` with the sheet formula."""
+    score = round(float(percent) / 100.0 * float(KPI_SCORE_MAX), 2)
+    scores = {key: 0.0 for key in user_store.KPI_CRITERIA_KEYS}
+    for item in criteria:
+        scores[item["key"]] = score
+    return scores
+
+
+def social_kpi_history_employees() -> list:
+    rows = []
+    for employee in user_store.list_employees():
+        if not employee.get("active", True):
+            continue
+        department = employee.get("department") or ""
+        if " ".join(department.strip().lower().split()) not in KPI_HISTORY_BULK_DEPARTMENTS:
+            continue
+        fingerprint = user_store.normalize_fingerprint_id(employee.get("fingerprint"))
+        if not fingerprint:
+            continue
+        job_role = employee.get("job_role") or ""
+        rows.append({
+            "id": employee.get("id"),
+            "name": employee.get("name") or "",
+            "department": department,
+            "team": employee.get("team") or "",
+            "job_role": job_role,
+            "device": user_store.normalize_device(employee.get("device") or ""),
+            "fingerprint": fingerprint,
+            "kpi_amount": float(employee.get("kpi_amount") or 0),
+            "needs_role": not bool(job_role and job_role in KPI_CRITERIA_SETS),
+        })
+    rows.sort(key=lambda item: (item["team"].lower(), item["name"].lower()))
+    return rows
+
 
 
 def cycle_label_for(cycle_start: str) -> str:
@@ -4944,6 +5007,88 @@ def kpi_export():
         build_xlsx_workbook(sheets),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=kpi-{scope}-{cycle_start}.xlsx"},
+    )
+
+
+@app.route("/kpi/history-bulk", methods=["GET", "POST"])
+@login_required
+@hr_required
+def kpi_history_bulk():
+    """One-time Social KPI backfill: same overall % on all cycles from Dec 26 to Sep 25."""
+    manager = session.get("manager") or {}
+    employees = social_kpi_history_employees()
+    cycles = list(KPI_HISTORY_BULK_CYCLES)
+    cycle_labels = [cycle_label_for(start) for start in cycles]
+    actor = manager.get("name") or manager.get("username") or "HR"
+
+    if request.method == "POST":
+        if not csrf_is_valid():
+            flash("The form expired. Please refresh and try again.", "error")
+            return redirect(url_for("kpi_history_bulk"))
+        by_key = {f"{item['device']}|{item['fingerprint']}": item for item in employees}
+        count = max(0, int(request.form.get("employee_count") or 0))
+        errors = []
+        planned = []
+        for index in range(count):
+            device = request.form.get(f"device__{index}", "").strip()
+            fingerprint = request.form.get(f"fingerprint__{index}", "").strip()
+            person = by_key.get(f"{device}|{fingerprint}")
+            if not person:
+                continue
+            label = person["name"] or fingerprint
+            try:
+                percent = parse_kpi_percent(request.form.get(f"percent__{index}", ""))
+            except ValueError as exc:
+                errors.append(f"{label}: {exc}")
+                continue
+            if percent is None:
+                continue
+            if person["needs_role"]:
+                errors.append(f"{label}: set a job role first.")
+                continue
+            planned.append((person, percent))
+        if errors:
+            for error in errors[:10]:
+                flash(error, "error")
+            return redirect(url_for("kpi_history_bulk"))
+        if not planned:
+            flash("Enter at least one KPI percent.", "error")
+            return redirect(url_for("kpi_history_bulk"))
+
+        saved_rows = 0
+        for person, percent in planned:
+            criteria = kpi_criteria_for(person["job_role"])
+            scores = scores_for_overall_percent(percent, criteria)
+            items = [{
+                "device": person["device"],
+                "fingerprint": person["fingerprint"],
+                "name": person["name"],
+                "department": person["department"],
+                "team": person["team"],
+                "criteria_set": person["job_role"],
+                "kpi_amount": person["kpi_amount"],
+                "scores": scores,
+                "status": user_store.KPI_STATUS_APPROVED,
+                "approved_by": actor,
+            }]
+            for cycle_start in cycles:
+                saved_rows += user_store.save_kpi_evaluations(cycle_start, items, actor)
+        flash(
+            f"Saved approved KPI history for {len(planned)} employee"
+            f"{'s' if len(planned) != 1 else ''} × {len(cycles)} cycles "
+            f"({saved_rows} rows). Current cycle stays for normal monthly entry.",
+            "success",
+        )
+        return redirect(url_for("kpi_history_bulk"))
+
+    return render_template(
+        "kpi_history_bulk.html",
+        manager=manager,
+        employees=employees,
+        cycles=cycles,
+        cycle_labels=cycle_labels,
+        ready_count=sum(1 for item in employees if not item["needs_role"]),
+        missing_role_count=sum(1 for item in employees if item["needs_role"]),
     )
 
 

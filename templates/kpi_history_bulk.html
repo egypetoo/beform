@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>BE GROUP | KPI history backfill</title>
+    {% include "_pwa_head.html" %}
+    <style>
+        .hist-note { margin: 0 0 14px; font-size: 13px; }
+        .hist-cycles {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 0 0 18px;
+        }
+        .hist-cycles span {
+            font-size: 11px;
+            color: var(--muted);
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 999px;
+            padding: 3px 9px;
+            background: rgba(255,255,255,.03);
+        }
+        .hist-table input[type="number"] {
+            width: 100px;
+            background: #141414;
+            color: #fff;
+            border: 1px solid rgba(255,255,255,.14);
+            border-radius: 8px;
+            padding: 8px 10px;
+        }
+        .hist-table input[type="number"]:focus {
+            outline: none;
+            border-color: rgba(245,130,32,.7);
+        }
+        .hist-warn { color: #e2b84a; font-size: 12px; }
+        .hist-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    </style>
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page page-wide">
+        <header class="hero dash-hero">
+            {% include "_logo.html" %}
+            <p class="eyebrow">HR · Social Media</p>
+            <h1>KPI history backfill</h1>
+            <p class="subtitle">
+                Enter one overall KPI percent per Social employee. It will be saved as
+                <strong>approved</strong> on all {{ cycles|length }} payroll cycles from
+                26 Dec 2025 to 25 Sep 2026. From the current cycle onward, use normal monthly evaluation.
+            </p>
+            <div class="form-links">
+                <a class="excel-link" href="{{ url_for('kpi_admin') }}">Back to KPI</a>
+                <a class="excel-link" href="{{ url_for('employees_admin') }}">Employees / job roles</a>
+                <a class="excel-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
+                        <p>{{ message }}</p>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <section class="form-shell">
+            <h2 class="section-title">Cycles that will be filled</h2>
+            <div class="hist-cycles">
+                {% for label in cycle_labels %}
+                    <span>{{ label }}</span>
+                {% endfor %}
+            </div>
+            <p class="muted hist-note">
+                Ready {{ ready_count }} · Missing job role {{ missing_role_count }} · Total {{ employees|length }}.
+                Example: Mohamed Hosny at 61% stores scores that total 61% on every listed cycle.
+                Leave a percent empty to skip that employee. Re-saving overwrites those history cycles.
+            </p>
+
+            {% if employees %}
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="employee_count" value="{{ employees|length }}">
+                    <div class="table-wrap">
+                        <table class="hist-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Fingerprint</th>
+                                    <th>Team</th>
+                                    <th>Job role</th>
+                                    <th>Overall KPI %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for person in employees %}
+                                    {% set i = loop.index0 %}
+                                    <tr>
+                                        <td data-label="Name">
+                                            {{ person.name }}
+                                            <input type="hidden" name="device__{{ i }}" value="{{ person.device }}">
+                                            <input type="hidden" name="fingerprint__{{ i }}" value="{{ person.fingerprint }}">
+                                        </td>
+                                        <td data-label="Fingerprint">{{ person.fingerprint }}</td>
+                                        <td data-label="Team">{{ person.team or '—' }}</td>
+                                        <td data-label="Job role">
+                                            {% if person.needs_role %}
+                                                <span class="hist-warn">Set job role first</span>
+                                            {% else %}
+                                                {{ person.job_role }}
+                                            {% endif %}
+                                        </td>
+                                        <td data-label="Overall KPI %">
+                                            <input name="percent__{{ i }}" type="number" min="0" max="100" step="0.01"
+                                                   placeholder="e.g. 61" {{ 'disabled' if person.needs_role else '' }}>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="hist-actions">
+                        <button type="submit" onclick="return confirm('Save these percents on all {{ cycles|length }} history cycles as approved?');">
+                            Save history for filled employees
+                        </button>
+                    </div>
+                </form>
+            {% else %}
+                <p class="empty-state">No active Social / Social Media employees found.</p>
+            {% endif %}
+        </section>
+    </main>
+    {% include "_pwa_foot.html" %}
+</body>
+</html>

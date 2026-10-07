@@ -286,6 +286,9 @@
             </p>
             <div class="form-links">
                 <a class="excel-link" href="{{ url_for('kpi_export', **export_args) }}">{{ 'Export Excel for accounting' if show_money else 'Export Excel' }}</a>
+                {% if show_filters %}
+                    <a class="excel-link" href="{{ url_for('kpi_history_bulk') }}">Social history backfill (9 months)</a>
+                {% endif %}
                 <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
                 <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
             </div>
