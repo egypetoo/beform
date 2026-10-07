@@ -455,7 +455,7 @@
                                             </label>
                                             <span class="kpi-score-weight">{{ '%g'|format(criterion.weight * 100) }}%</span>
                                             <input id="{{ criterion.key }}__{{ i }}" name="{{ criterion.key }}__{{ i }}" type="number"
-                                                   min="0" max="{{ score_max }}" step="0.5"
+                                                   min="0" max="{{ score_max }}" step="0.01"
                                                    value="{{ '%g'|format(person.scores[criterion.key]) if person.evaluated else '' }}"
                                                    placeholder="1–{{ score_max }}" data-kpi-score data-weight="{{ criterion.weight }}"
                                                    {{ '' if person.can_score else 'readonly' }}>
