@@ -322,6 +322,7 @@ KPI_CRITERIA_KEYS = (
     "quality",
     "problem_solving",
     "criterion_6",
+    "criterion_7",
 )
 KPI_STATUS_PENDING = "pending"
 KPI_STATUS_APPROVED = "approved"
@@ -383,6 +384,8 @@ def _ensure_kpi_evaluations_table(conn) -> None:
         conn.execute("ALTER TABLE kpi_evaluations ADD COLUMN criteria_set TEXT NOT NULL DEFAULT ''")
     if "criterion_6" not in columns:
         conn.execute("ALTER TABLE kpi_evaluations ADD COLUMN criterion_6 REAL NOT NULL DEFAULT 0")
+    if "criterion_7" not in columns:
+        conn.execute("ALTER TABLE kpi_evaluations ADD COLUMN criterion_7 REAL NOT NULL DEFAULT 0")
     if "status" not in columns:
         conn.execute(
             "ALTER TABLE kpi_evaluations ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'"

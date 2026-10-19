@@ -321,7 +321,7 @@ def parse_money_amount(value) -> float:
     return round(amount, 2)
 
 
-KPI_DEPARTMENTS = {"web", "social", "social media"}
+KPI_DEPARTMENTS = {"web", "social", "social media", "seo & google", "seo", "google"}
 KPI_SCORE_MAX = 5
 KPI_FULL_PAYOUT_AT = 90
 # Backfill Social KPI scores onto these payroll cycles (26th→25th), then use monthly entry.
@@ -465,6 +465,82 @@ KPI_CRITERIA_SETS = {
         ("Retention & Renewal KPIs", "مؤشرات الاحتفاظ والتجديد", 0.25),
         ("Commitment & Discipline", "الالتزام والانضباط", 0.15),
         ("Knowledge of Work Tools (CRM / Reporting)", "معرفة أدوات العمل", 0.15),
+    ]),
+    "Google · Team Leader": _kpi_criteria_list([
+        ("Leadership, Team Management & Development", "قيادة وإدارة وتطوير الفريق", 0.20),
+        ("Account Strategy & Media Planning", "استراتيجية الحسابات وتخطيط الميديا", 0.15),
+        ("Team-wide Performance KPIs (ROAS / CPA / Conversions)", "مؤشرات أداء الفريق ككل", 0.25),
+        ("Team-wide Renewal Rate for the Period", "نسبة تجديد عملاء الفريق في الفترة", 0.20),
+        ("Budget Pacing, Policy & Account Health (MCC)", "إدارة الميزانيات وسلامة الحسابات", 0.10),
+        ("Commitment & Discipline", "الالتزام والانضباط", 0.10),
+    ]),
+    "Google · Senior": _kpi_criteria_list([
+        ("Campaign Execution & Management (Search / PMax / Shopping / Display / YouTube)", "تنفيذ وإدارة الحملات", 0.15),
+        ("Campaign KPI Achievement (CPA / ROAS / CTR / Conv. Rate)", "تحقيق مؤشرات أداء الحملات", 0.25),
+        ("Conversion Tracking & Measurement (GA4 / GTM / Enhanced Conversions)", "تتبع التحويلات والقياس", 0.10),
+        ("Data Analysis & Data-Driven Decisions", "تحليل البيانات واتخاذ القرار", 0.10),
+        ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.25),
+        ("Budget Pacing & Account Health", "إدارة الميزانية وسلامة الحساب", 0.10),
+        ("Communication & Mentoring", "التواصل وتوجيه الفريق", 0.05),
+    ]),
+    "Google · Mid-Level": _kpi_criteria_list([
+        ("Independent Campaign Execution", "تنفيذ الحملات باستقلالية", 0.20),
+        ("Achieving Assigned KPIs", "تحقيق المؤشرات المسندة", 0.20),
+        ("Search Terms & Negatives Management", "إدارة الكلمات والـ Search Terms والـ Negatives", 0.10),
+        ("Ad Copy & Assets Quality", "جودة الإعلانات والـ Assets", 0.10),
+        ("Tracking & Basic Analysis", "التتبع والتحليل الأساسي", 0.10),
+        ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.25),
+        ("Team Communication", "التواصل مع الفريق", 0.05),
+    ]),
+    "Google · Junior": _kpi_criteria_list([
+        ("Execution of Assigned Tasks", "إنجاز المهام المسندة", 0.30),
+        ("Learning Curve & Growth", "منحنى التعلم والتطور", 0.15),
+        ("Adherence to Core KPIs & Budget Pacing", "الالتزام بالمؤشرات الأساسية والميزانية", 0.15),
+        ("Google Ads Platform Knowledge (Basics) & Certifications", "معرفة منصة جوجل ادز والشهادات", 0.15),
+        ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.25),
+    ]),
+    "Google · Trainee": _kpi_criteria_list([
+        ("Task Completion & Accuracy", "إنجاز المهام ودقتها", 0.30),
+        ("Learning Speed & Certifications Progress", "سرعة التعلم والتقدم في الشهادات", 0.30),
+        ("Google Ads Fundamentals Understanding", "فهم أساسيات جوجل ادز", 0.20),
+        ("Attendance, Commitment & Attitude", "الحضور والالتزام والسلوك", 0.20),
+    ]),
+    "SEO · Team Leader": _kpi_criteria_list([
+        ("Leadership, Team Management & Development", "القيادة وإدارة وتطوير الفريق", 0.20),
+        ("SEO Strategy & Client Planning", "استراتيجية السيو وتخطيط العملاء", 0.15),
+        ("Team-wide SEO KPIs (Traffic / Rankings / Leads)", "مؤشرات أداء الفريق ككل", 0.20),
+        ("Team-wide Renewal Rate for the Period", "نسبة تجديد عملاء الفريق في الفترة", 0.25),
+        ("Quality Control & Client Reporting", "مراجعة الجودة وتقارير العملاء", 0.10),
+        ("Commitment & Discipline", "الالتزام والانضباط", 0.10),
+    ]),
+    "SEO · Senior": _kpi_criteria_list([
+        ("Technical SEO Audits & Implementation", "الأوديت التقني والتنفيذ", 0.20),
+        ("Client SEO KPIs Achievement (Organic Traffic / Rankings / Conversions)", "تحقيق مؤشرات السيو لعملائه", 0.25),
+        ("Content & On-Page Strategy", "استراتيجية المحتوى والـ On-Page", 0.10),
+        ("Data Analysis & Reporting (GSC / GA4)", "تحليل البيانات والتقارير", 0.10),
+        ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.20),
+        ("Mentoring Juniors & Communication", "توجيه الجونيورز والتواصل", 0.15),
+    ]),
+    "SEO · Mid-Level": _kpi_criteria_list([
+        ("Independent Execution of SEO Plans", "تنفيذ خطط السيو باستقلالية", 0.20),
+        ("Achieving Assigned Client KPIs", "تحقيق مؤشرات العملاء المسندة", 0.20),
+        ("Keyword Research & On-Page Optimization", "بحث الكلمات وتحسين الصفحات", 0.15),
+        ("Link Building & Off-Page Quality", "بناء الروابط وجودة الـ Off-Page", 0.10),
+        ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.25),
+        ("Reporting & Team Communication", "التقارير والتواصل مع الفريق", 0.10),
+    ]),
+    "SEO · Junior": _kpi_criteria_list([
+        ("Execution of Assigned Tasks", "تنفيذ المهام المسندة", 0.30),
+        ("Learning Curve & Growth", "منحنى التعلم والتطور", 0.15),
+        ("SEO Tools Proficiency", "إتقان أدوات السيو", 0.15),
+        ("On-Page & Content Optimization Basics", "أساسيات الـ On-Page وتحسين المحتوى", 0.15),
+        ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.25),
+    ]),
+    "SEO · Trainee": _kpi_criteria_list([
+        ("Task Completion & Accuracy", "إنجاز المهام ودقتها", 0.30),
+        ("Learning Speed & Training Progress", "سرعة التعلم والتقدم في خطة التدريب", 0.30),
+        ("SEO Fundamentals Understanding", "فهم أساسيات السيو", 0.20),
+        ("Attendance, Commitment & Attitude", "الحضور والالتزام والسلوك", 0.20),
     ]),
     "": KPI_CRITERIA,
 }
@@ -4655,7 +4731,9 @@ def kpi_employees_for(manager: dict, cycle_start: str) -> list:
         kpi_amount = evaluation["kpi_amount"] if evaluation else float(employee.get("kpi_amount") or 0)
         job_role = employee.get("job_role") or ""
         role_set = job_role if job_role in KPI_CRITERIA_SETS else ""
-        needs_role = bool(user_store.job_roles_for(department)) and not role_set
+        if job_role and not role_set and not evaluation:
+            continue
+        needs_role = bool(user_store.job_roles_for(department)) and not job_role
         # A saved evaluation keeps the criteria it was scored with, even if the role changed since.
         criteria_set = evaluation["criteria_set"] if evaluation else role_set
         criteria = kpi_criteria_for(criteria_set)
