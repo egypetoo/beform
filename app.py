@@ -225,6 +225,32 @@ def cycle_end_for(start: datetime) -> datetime:
     return datetime(year, month, 25)
 
 
+def _parse_request_day(value) -> datetime | None:
+    text = str(value or "").strip()[:10]
+    if len(text) < 10:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def request_is_refund(row: dict) -> bool:
+    """Request filed on/after the 1st for a payroll cycle that already closed on the 25th.
+
+    Example: submitted 3 Oct for dates inside 26 Aug–25 Sep (September close) is a refund.
+    Submissions before the 1st of the following month stay in the normal tabs.
+    """
+    submitted = _parse_request_day(row.get("Submitted At"))
+    covered = _parse_request_day(row.get("From Date")) or _parse_request_day(row.get("To Date"))
+    if not submitted or not covered:
+        return False
+    cycle_end = cycle_end_for(cycle_start_for(covered))
+    year, month = shift_month(cycle_end.year, cycle_end.month, 1)
+    refund_from = datetime(year, month, 1)
+    return submitted >= refund_from
+
+
 def payroll_cycles(count: int = 8) -> list:
     start = cycle_start_for(datetime.now())
     cycles = []
@@ -2783,6 +2809,8 @@ def remote_work_days_summary(rows: list, date_from: str = "", date_to: str = "")
 def dashboard():
     manager = session["manager"]
     status_filter = request.args.get("status", "Pending")
+    if status_filter not in {"Pending", "Approved", "Rejected", "Refund", "All"}:
+        status_filter = "Pending"
     search_query = request.args.get("q", "").strip()
     type_filter = request.args.get("type", "").strip()
     date_from = request.args.get("from", "").strip()
@@ -2862,8 +2890,12 @@ def dashboard():
         ]
     remote_summary = remote_work_days_summary(summary_rows, date_from, date_to)
 
-    if status_filter and status_filter != "All":
-        rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
+    if status_filter == "Refund":
+        rows = [row for row in rows if request_is_refund(row)]
+    else:
+        rows = [row for row in rows if not request_is_refund(row)]
+        if status_filter and status_filter != "All":
+            rows = [row for row in rows if (row.get("Status") or "Pending") == status_filter]
     if type_filter:
         rows = [row for row in rows if (row.get("Request Type") or "") == type_filter]
     if date_from or date_to:
@@ -2899,7 +2931,7 @@ def dashboard():
         date_from=date_from,
         date_to=date_to,
         request_types=request_types,
-        statuses=["Pending", "Approved", "Rejected", "All"],
+        statuses=["Pending", "Approved", "Rejected", "Refund", "All"],
     )
 
 

@@ -95,6 +95,11 @@
                        href="{{ url_for('dashboard', status=status, q=search_query, type=type_filter, dept=department_filter, team=team_filter, **{'from': date_from, 'to': date_to}) }}">{{ status }}</a>
                 {% endfor %}
             </div>
+            {% if status_filter == 'Refund' %}
+                <p class="muted" style="margin:0.4rem 0 0;">
+                    Requests submitted from the 1st of the month for a payroll cycle that already closed (26th–25th). Example: filed on 3 Oct for 26 Aug–25 Sep.
+                </p>
+            {% endif %}
 
             {% if remote_summary %}
                 <details class="leave-balance-card summary-toggle" style="margin: 1rem 0 1.25rem;">
