@@ -200,6 +200,8 @@ select,
 input[type="date"],
 input[type="time"] {
     color-scheme: dark;
+    min-width: 0;
+    max-width: 100%;
 }
 
 textarea {
@@ -209,8 +211,13 @@ textarea {
 
 .time-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 158px), 1fr));
     gap: 16px;
+    min-width: 0;
+}
+
+.time-grid > * {
+    min-width: 0;
 }
 
 button,
@@ -487,6 +494,16 @@ button:disabled {
 
     h1 {
         font-size: 22px;
+    }
+
+    .time-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    input[type="date"],
+    input[type="time"] {
+        padding-inline: 12px;
     }
 }
 
