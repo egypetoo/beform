@@ -145,6 +145,13 @@ label span {
     display: flex;
     justify-content: flex-start;
     min-height: 65px;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.turnstile-wrap .cf-turnstile,
+.turnstile-wrap iframe {
+    max-width: 100%;
 }
 
 select[data-locked="1"] {
@@ -211,13 +218,22 @@ textarea {
 
 .time-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 158px), 1fr));
-    gap: 16px;
+    grid-template-columns: 1fr;
+    gap: 12px;
     min-width: 0;
+    width: 100%;
 }
 
 .time-grid > * {
     min-width: 0;
+    width: 100%;
+}
+
+@media (min-width: 520px) {
+    .time-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+    }
 }
 
 button,
@@ -494,11 +510,6 @@ button:disabled {
 
     h1 {
         font-size: 22px;
-    }
-
-    .time-grid {
-        grid-template-columns: 1fr;
-        gap: 12px;
     }
 
     input[type="date"],
