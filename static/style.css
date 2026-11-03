@@ -1,4 +1,5 @@
-:root {
+:root,
+html[data-theme="dark"] {
     --bg: #070707;
     --card: #121212;
     --text: #f7f7f7;
@@ -8,6 +9,40 @@
     --danger: #ff6b6b;
     --border: rgba(255, 255, 255, 0.08);
     --input: #1a1a1a;
+    --hero-bg: #000000;
+    --panel: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+    --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    --glow-a: rgba(245, 130, 32, 0.22);
+    --glow-b: rgba(245, 130, 32, 0.08);
+    --placeholder: #7d7d7d;
+    --surface: #101010;
+    --surface-2: #141414;
+    --surface-3: #1c1c1c;
+    --chip-border: rgba(255, 255, 255, 0.14);
+    --scheme: dark;
+}
+
+html[data-theme="light"] {
+    --bg: #f4f1ec;
+    --card: #ffffff;
+    --text: #1a1a1a;
+    --muted: #5c5c5c;
+    --orange: #e36f12;
+    --orange-soft: #c45f0d;
+    --danger: #c62828;
+    --border: rgba(26, 26, 26, 0.12);
+    --input: #ffffff;
+    --hero-bg: #ffffff;
+    --panel: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.9));
+    --shadow: 0 16px 40px rgba(26, 26, 26, 0.08);
+    --glow-a: rgba(227, 111, 18, 0.16);
+    --glow-b: rgba(227, 111, 18, 0.08);
+    --placeholder: #8a8a8a;
+    --surface: #f7f4ef;
+    --surface-2: #ffffff;
+    --surface-3: #efeae3;
+    --chip-border: rgba(26, 26, 26, 0.14);
+    --scheme: light;
 }
 
 * {
@@ -26,6 +61,8 @@ body {
     font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
     background: var(--bg);
     color: var(--text);
+    color-scheme: var(--scheme);
+    transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .glow {
@@ -33,8 +70,8 @@ body {
     inset: 0;
     pointer-events: none;
     background:
-        radial-gradient(circle at 50% -10%, rgba(245, 130, 32, 0.22), transparent 42%),
-        radial-gradient(circle at 90% 90%, rgba(245, 130, 32, 0.08), transparent 30%);
+        radial-gradient(circle at 50% -10%, var(--glow-a), transparent 42%),
+        radial-gradient(circle at 90% 90%, var(--glow-b), transparent 30%);
 }
 
 .page {
@@ -51,19 +88,83 @@ body {
 .hero,
 .form-shell,
 .errors {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+    background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 24px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--shadow);
     max-width: 100%;
     box-sizing: border-box;
 }
 
 .hero {
+    position: relative;
     text-align: center;
     padding: 28px 24px 24px;
     margin-bottom: 18px;
-    background: #000;
+    background: var(--hero-bg);
+}
+
+.hero-brand,
+.brand-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 0 18px;
+    min-height: 56px;
+    padding: 0 52px;
+}
+
+.hero-brand .logo,
+.brand-row .logo {
+    margin: 0;
+    width: min(240px, 100%);
+}
+
+.theme-toggle {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    cursor: pointer;
+    font: inherit;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+    border-color: var(--orange);
+    color: var(--orange);
+    outline: none;
+}
+
+.theme-toggle__icon {
+    display: none;
+    width: 1em;
+    text-align: center;
+}
+
+html[data-theme="dark"] .theme-toggle__label-light,
+html[data-theme="light"] .theme-toggle__label-dark {
+    display: inline;
+}
+
+html[data-theme="dark"] .theme-toggle__label-dark,
+html[data-theme="light"] .theme-toggle__label-light {
+    display: none;
 }
 
 .logo {
@@ -193,7 +294,7 @@ textarea {
 
 input::placeholder,
 textarea::placeholder {
-    color: #7d7d7d;
+    color: var(--placeholder);
 }
 
 input:focus,
@@ -206,7 +307,7 @@ textarea:focus {
 select,
 input[type="date"],
 input[type="time"] {
-    color-scheme: dark;
+    color-scheme: var(--scheme);
     min-width: 0;
     max-width: 100%;
 }
@@ -422,7 +523,7 @@ button:disabled {
 
     tbody tr {
         display: block;
-        background: #141414;
+        background: var(--surface-2);
         border: 1px solid var(--border);
         border-radius: 16px;
         margin-bottom: 12px;
@@ -662,10 +763,10 @@ button.filter-chip {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #f7f7f7;
-    background: #1a1a1a;
+    color: var(--text);
+    background: var(--input);
     text-decoration: none;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--chip-border);
     border-radius: 999px;
     padding: 8px 16px;
     font-weight: 700;
@@ -677,7 +778,7 @@ button.filter-chip {
 a.filter-chip:hover,
 button.filter-chip:hover {
     border-color: var(--orange);
-    color: #fff;
+    color: var(--orange);
 }
 
 a.filter-chip.active,
@@ -718,7 +819,7 @@ button.filter-chip.active {
 }
 
 .leave-balance-grid > div {
-    background: #101010;
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 14px 12px;
@@ -873,7 +974,7 @@ td.card-actions select[name="job_role"] {
 
 .kpi-badge {
     border: 1px solid var(--border);
-    background: #101010;
+    background: var(--surface);
     color: var(--muted);
     border-radius: 999px;
     padding: 6px 12px;
@@ -891,7 +992,7 @@ td.card-actions select[name="job_role"] {
     position: relative;
     height: 10px;
     border-radius: 999px;
-    background: #1c1c1c;
+    background: var(--surface-3);
     overflow: visible;
 }
 
@@ -924,7 +1025,7 @@ td.card-actions select[name="job_role"] {
 }
 
 .kpi-criteria li {
-    background: #101010;
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 12px 14px;
@@ -974,7 +1075,7 @@ td.card-actions select[name="job_role"] {
 .kpi-mini-bar {
     height: 5px;
     border-radius: 999px;
-    background: #1c1c1c;
+    background: var(--surface-3);
     overflow: hidden;
 }
 
@@ -1007,7 +1108,7 @@ td.card-actions select[name="job_role"] {
 }
 
 .track-card {
-    background: #141414;
+    background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: 18px;
     padding: 16px 16px 10px;
@@ -1245,7 +1346,7 @@ th {
     }
 
     tbody tr {
-        background: #141414;
+        background: var(--surface-2);
         border: 1px solid var(--border);
         border-radius: 16px;
         margin-bottom: 12px;

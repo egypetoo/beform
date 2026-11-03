@@ -10,7 +10,7 @@
     <div class="glow"></div>
     <main class="page page-wide">
         <header class="hero dash-hero">
-            {% include "_logo.html" %}
+            {% include "_brand_row.html" %}
             <p class="eyebrow">{% if manager.role == 'team' %}{{ manager.department }} · {{ manager.team }}{% elif manager.department != 'ALL' %}{{ manager.department }}{% else %}All Departments{% endif %}</p>
             <h1>Request Dashboard</h1>
             <p class="subtitle">{{ manager.name }}</p>
