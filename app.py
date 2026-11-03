@@ -542,6 +542,20 @@ KPI_CRITERIA_SETS = {
         ("SEO Fundamentals Understanding", "فهم أساسيات السيو", 0.20),
         ("Attendance, Commitment & Attitude", "الحضور والالتزام والسلوك", 0.20),
     ]),
+    "SEO · WordPress": _kpi_criteria_list([
+        ("WordPress Site Delivery & Quality", "تسليم مواقع ووردبريس وجودتها", 0.25),
+        ("SEO Implementation on WordPress", "تنفيذ السيو على ووردبريس", 0.20),
+        ("Speed, Security & Maintenance", "السرعة والأمان والصيانة", 0.20),
+        ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.20),
+        ("Communication & Commitment", "التواصل والالتزام", 0.15),
+    ]),
+    "SEO · Account Manager": _kpi_criteria_list([
+        ("Requirement Accuracy", "دقة المتطلبات", 0.20),
+        ("Client Communication & Follow-up", "التواصل مع العملاء والمتابعة", 0.20),
+        ("SEO Plan Clarity for the Team", "وضوح خطة السيو للفريق", 0.15),
+        ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.25),
+        ("Reporting & Milestone Control", "التقارير ومتابعة المراحل", 0.20),
+    ]),
     "": KPI_CRITERIA,
 }
 

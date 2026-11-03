@@ -226,6 +226,9 @@ _SEO_GOOGLE_ROLES = [
     f"{track} · {level}"
     for track in ("SEO", "Google")
     for level in _SEO_GOOGLE_LEVELS
+] + [
+    "SEO · WordPress",
+    "SEO · Account Manager",
 ]
 
 JOB_ROLES_BY_DEPARTMENT = {
