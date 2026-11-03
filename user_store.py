@@ -224,11 +224,8 @@ _SOCIAL_KPI_ROLES = [
 _SEO_GOOGLE_LEVELS = ["Team Leader", "Senior", "Mid-Level", "Junior", "Trainee"]
 _SEO_GOOGLE_ROLES = [
     f"{track} · {level}"
-    for track in ("SEO", "Google")
+    for track in ("SEO", "Google", "WordPress", "Account Manager")
     for level in _SEO_GOOGLE_LEVELS
-] + [
-    "SEO · WordPress",
-    "SEO · Account Manager",
 ]
 
 JOB_ROLES_BY_DEPARTMENT = {
