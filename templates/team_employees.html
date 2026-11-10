@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>BE GROUP | My Team Employees</title>
+    {% include "_pwa_head.html" %}
+</head>
+<body>
+    <div class="glow"></div>
+    <main class="page page-wide">
+        <header class="hero dash-hero">
+            {% include "_brand_row.html" %}
+            <p class="eyebrow">{{ department }} · {{ team }}</p>
+            <h1>My Team Titles</h1>
+            <p class="subtitle">Change job titles for your team. HR must approve before the title is applied.</p>
+            <div class="form-links">
+                {% if can_manage_kpi %}
+                    <a class="excel-link" href="{{ url_for('kpi_admin') }}">KPI evaluation</a>
+                {% endif %}
+                <a class="excel-link" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+                <a class="excel-link" href="{{ url_for('logout') }}">Sign out</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="card {{ 'success-msg' if category == 'success' else 'errors' }}">
+                        <p>{{ message }}</p>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <section class="form-shell users-shell">
+            <h2 class="section-title">Team members</h2>
+            {% if employees %}
+                <p class="muted">{{ employees|length }} employee{{ 's' if employees|length != 1 else '' }} · change a title to send an HR approval request</p>
+                <div class="table-wrap">
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Fingerprint</th>
+                                <th>Device</th>
+                                <th>Job title</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for employee in employees %}
+                                <tr>
+                                    <td data-label="Name">{{ employee.name }}</td>
+                                    <td data-label="Fingerprint">{{ employee.fingerprint }}</td>
+                                    <td data-label="Device">{{ employee.device }}</td>
+                                    <td data-label="Job title">
+                                        {% if job_roles %}
+                                            {% if employee.id in pending_job_role_ids %}
+                                                <span class="muted">Pending HR approval…</span>
+                                                {% if employee.job_role %}<div class="muted">Current: {{ employee.job_role }}</div>{% endif %}
+                                            {% else %}
+                                                <form method="post" action="{{ url_for('team_employees_propose_job_role') }}">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                    <input type="hidden" name="employee_id" value="{{ employee.id }}">
+                                                    <select name="job_role" aria-label="Job role" onchange="this.form.submit()" style="min-width:200px">
+                                                        <option value="">Job role…</option>
+                                                        {% for role in job_roles %}
+                                                            <option value="{{ role }}" {% if employee.job_role == role %}selected{% endif %}>{{ role }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </form>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="muted">No roles for this department</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty-state">No employees on this team yet. Ask HR to add them first.</p>
+            {% endif %}
+        </section>
+
+        {% if my_change_requests %}
+            <section class="form-shell">
+                <h2 class="section-title">Recent requests</h2>
+                <div class="table-wrap">
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Type</th>
+                                <th>Person</th>
+                                <th>Details</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in my_change_requests %}
+                                <tr>
+                                    <td data-label="When">{{ item.requested_at }}</td>
+                                    <td data-label="Type">{{ 'Add employee' if item.change_type == 'create' else 'Job title' }}</td>
+                                    <td data-label="Person">{{ item.name }}</td>
+                                    <td data-label="Details">
+                                        {% if item.change_type == 'create' %}
+                                            {{ item.device }} · FP {{ item.fingerprint }}
+                                            {% if item.proposed_job_role %} · {{ item.proposed_job_role }}{% endif %}
+                                        {% else %}
+                                            {{ item.current_job_role or '—' }} → {{ item.proposed_job_role or 'none' }}
+                                        {% endif %}
+                                    </td>
+                                    <td data-label="Status">
+                                        {% if item.status == 'pending' %}
+                                            Pending
+                                        {% elif item.status == 'approved' %}
+                                            Approved
+                                        {% else %}
+                                            Rejected{% if item.rejection_reason %}: {{ item.rejection_reason }}{% endif %}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        {% endif %}
+    </main>
+</body>
+</html>

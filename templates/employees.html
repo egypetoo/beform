@@ -77,6 +77,61 @@
             <a class="excel-link" href="{{ url_for('employees_template') }}">Download template Excel</a>
         </form>
 
+        {% if pending_employee_changes %}
+            <section class="form-shell">
+                <h2 class="section-title">Pending team-leader title changes</h2>
+                <p class="muted">Team leaders proposed these job title changes. Approve to apply, or reject with a reason.</p>
+                <div class="table-wrap">
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>By</th>
+                                <th>Type</th>
+                                <th>Person</th>
+                                <th>Details</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in pending_employee_changes %}
+                                <tr>
+                                    <td data-label="When">{{ item.requested_at }}</td>
+                                    <td data-label="By">{{ item.requested_by }}</td>
+                                    <td data-label="Type">Job title</td>
+                                    <td data-label="Person">
+                                        <strong>{{ item.name }}</strong>
+                                        <div class="muted">{{ item.department }}{% if item.team %} · {{ item.team }}{% endif %}</div>
+                                    </td>
+                                    <td data-label="Details">
+                                        {% if item.change_type == 'create' %}
+                                            Device {{ item.device }} · FP {{ item.fingerprint }}
+                                            {% if item.proposed_job_role %}<div>{{ item.proposed_job_role }}</div>{% endif %}
+                                        {% else %}
+                                            {{ item.current_job_role or '—' }} → {{ item.proposed_job_role or 'none' }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="card-actions" data-label="Actions">
+                                        <form method="post" action="{{ url_for('employees_change_approve') }}">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="request_id" value="{{ item.id }}">
+                                            <button class="btn-sm btn-approve" type="submit">Approve</button>
+                                        </form>
+                                        <form method="post" action="{{ url_for('employees_change_reject') }}" class="reason-field" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="request_id" value="{{ item.id }}">
+                                            <input type="text" name="rejection_reason" required maxlength="200" placeholder="Rejection reason" aria-label="Rejection reason">
+                                            <button class="btn-sm btn-reject" type="submit">Reject</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        {% endif %}
+
         <form class="form-shell" method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="section-title">Add employee</h2>

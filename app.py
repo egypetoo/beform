@@ -635,6 +635,14 @@ def can_manage_kpi(manager: dict | None) -> bool:
     return is_hr(manager) or kpi_enabled_for(manager.get("department") or "")
 
 
+def can_propose_employee_changes(manager: dict | None) -> bool:
+    return bool(manager and manager_role(manager) == "team" and (manager.get("team") or "").strip())
+
+
+def can_approve_employee_changes(manager: dict | None) -> bool:
+    return bool(manager and is_hr(manager))
+
+
 def can_approve_kpi(manager: dict | None) -> bool:
     """Department managers and HR approve team-leader submissions."""
     if not manager or not can_manage_kpi(manager):
@@ -1475,6 +1483,7 @@ def inject_security():
         "lookup_ticket": ensure_lookup_ticket(),
         "is_hr": bool(manager and is_hr(manager)),
         "can_manage_kpi": can_manage_kpi(manager),
+        "can_propose_employee_changes": can_propose_employee_changes(manager),
         "payroll_adjustments_url": payroll_adjustments_url,
         "turnstile_site_key": turnstile_site_key() if configured else "",
         "turnstile_session_ok": turnstile_session_ok() if configured else True,
@@ -3900,6 +3909,11 @@ def employees_admin_context() -> dict:
             for item in departments
             if user_store.job_roles_for(item["label"])
         },
+        "pending_employee_changes": [
+            item
+            for item in user_store.list_pending_employee_change_requests()
+            if item.get("change_type") == user_store.EMPLOYEE_CHANGE_JOB_ROLE
+        ],
     }
 
 
@@ -4339,6 +4353,145 @@ def employees_job_role():
         return redirect(url_for("employees_admin"))
     user_store.set_employee_job_role(employee["id"], job_role)
     flash(f"{employee['name']}: job role set to {job_role or 'none'}.", "success")
+    return redirect(url_for("employees_admin"))
+
+
+def team_employees_context(manager: dict) -> dict:
+    department = (manager.get("department") or "").strip()
+    team = (manager.get("team") or "").strip()
+    employees = user_store.list_employees_for_team(department, team)
+    pending_ids = {
+        int(item["employee_id"])
+        for item in user_store.list_employee_change_requests_for_team(department, team)
+        if item["status"] == user_store.EMPLOYEE_CHANGE_PENDING
+        and item["change_type"] == user_store.EMPLOYEE_CHANGE_JOB_ROLE
+        and item.get("employee_id")
+    }
+    return {
+        "manager": manager,
+        "department": department,
+        "team": team,
+        "employees": employees,
+        "devices": user_store.list_devices(),
+        "job_roles": user_store.job_roles_for(department),
+        "pending_job_role_ids": pending_ids,
+        "my_change_requests": user_store.list_employee_change_requests_for_team(department, team),
+    }
+
+
+@app.route("/team-employees", methods=["GET"])
+@login_required
+def team_employees():
+    manager = session["manager"]
+    if not can_propose_employee_changes(manager):
+        flash("Only team leaders can propose title changes.", "error")
+        return redirect(url_for("dashboard"))
+    return render_template("team_employees.html", **team_employees_context(manager))
+
+
+@app.route("/team-employees/propose-job-role", methods=["POST"])
+@login_required
+def team_employees_propose_job_role():
+    manager = session["manager"]
+    if not can_propose_employee_changes(manager):
+        flash("Only team leaders can propose title changes.", "error")
+        return redirect(url_for("dashboard"))
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("team_employees"))
+
+    department = (manager.get("department") or "").strip()
+    team = (manager.get("team") or "").strip()
+    employee = user_store.find_employee_by_id(request.form.get("employee_id"))
+    if (
+        not employee
+        or not employee.get("active")
+        or (employee.get("department") or "").strip().lower() != department.lower()
+        or (employee.get("team") or "").strip().lower() != team.lower()
+    ):
+        flash("Choose an employee from your team.", "error")
+        return redirect(url_for("team_employees"))
+
+    allowed = user_store.job_roles_for(department)
+    job_role = request.form.get("job_role", "").strip()
+    if not allowed:
+        flash("This department has no job roles.", "error")
+        return redirect(url_for("team_employees"))
+    if job_role and job_role not in allowed:
+        flash("Choose a valid job role for this department.", "error")
+        return redirect(url_for("team_employees"))
+    if (employee.get("job_role") or "").strip() == job_role:
+        flash("No job role change to submit.", "error")
+        return redirect(url_for("team_employees"))
+    if user_store.has_pending_employee_job_role(employee["id"]):
+        flash("A pending title change already exists for this employee.", "error")
+        return redirect(url_for("team_employees"))
+
+    user_store.create_employee_change_request(
+        change_type=user_store.EMPLOYEE_CHANGE_JOB_ROLE,
+        requested_by=manager.get("username") or manager.get("name") or "",
+        name=employee["name"],
+        department=department,
+        fingerprint=employee.get("fingerprint") or "",
+        device=employee.get("device") or "",
+        team=team,
+        employee_id=employee["id"],
+        current_job_role=employee.get("job_role") or "",
+        proposed_job_role=job_role,
+    )
+    flash(f"Title change for {employee['name']} sent to HR for approval.", "success")
+    return redirect(url_for("team_employees"))
+
+
+@app.route("/employees/changes/approve", methods=["POST"])
+@hr_required
+def employees_change_approve():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    manager = session["manager"]
+    request_id = request.form.get("request_id")
+    item, error = user_store.approve_employee_change_request(
+        request_id,
+        manager.get("username") or manager.get("name") or "hr",
+        employee_department_maps()["label_set"],
+    )
+    if error:
+        flash(error, "error")
+    elif item:
+        invalidate_form_meta()
+        if item["change_type"] == user_store.EMPLOYEE_CHANGE_CREATE:
+            flash(f"Approved: added {item['name']}.", "success")
+        else:
+            flash(
+                f"Approved: {item['name']} title → {item['proposed_job_role'] or 'none'}.",
+                "success",
+            )
+    else:
+        flash("Request not found.", "error")
+    return redirect(url_for("employees_admin"))
+
+
+@app.route("/employees/changes/reject", methods=["POST"])
+@hr_required
+def employees_change_reject():
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("employees_admin"))
+    manager = session["manager"]
+    reason = request.form.get("rejection_reason", "").strip()
+    if not reason:
+        flash("Rejection reason is required.", "error")
+        return redirect(url_for("employees_admin"))
+    item = user_store.reject_employee_change_request(
+        request.form.get("request_id"),
+        manager.get("username") or manager.get("name") or "hr",
+        reason,
+    )
+    if item:
+        flash(f"Rejected change for {item['name']}.", "success")
+    else:
+        flash("Request not found or already reviewed.", "error")
     return redirect(url_for("employees_admin"))
 
 

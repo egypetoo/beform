@@ -135,6 +135,7 @@ def init_db() -> None:
         _ensure_employee_pin_columns(conn)
         _ensure_employee_branch_manager_column(conn)
         _ensure_employee_job_role_column(conn)
+        _ensure_employee_change_requests_table(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS app_settings (
@@ -262,6 +263,329 @@ def set_employee_job_role(employee_id: int, job_role: str) -> bool:
         finally:
             conn.close()
     return changed
+
+
+EMPLOYEE_CHANGE_CREATE = "create"
+EMPLOYEE_CHANGE_JOB_ROLE = "job_role"
+EMPLOYEE_CHANGE_PENDING = "pending"
+EMPLOYEE_CHANGE_APPROVED = "approved"
+EMPLOYEE_CHANGE_REJECTED = "rejected"
+
+
+def _ensure_employee_change_requests_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS employee_change_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            change_type TEXT NOT NULL,
+            employee_id INTEGER,
+            name TEXT NOT NULL DEFAULT '',
+            department TEXT NOT NULL DEFAULT '',
+            fingerprint TEXT NOT NULL DEFAULT '',
+            device TEXT NOT NULL DEFAULT '',
+            team TEXT NOT NULL DEFAULT '',
+            current_job_role TEXT NOT NULL DEFAULT '',
+            proposed_job_role TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            requested_by TEXT NOT NULL DEFAULT '',
+            requested_at TEXT NOT NULL,
+            reviewed_by TEXT NOT NULL DEFAULT '',
+            reviewed_at TEXT NOT NULL DEFAULT '',
+            rejection_reason TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_employee_change_status ON employee_change_requests(status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_employee_change_team ON employee_change_requests(department, team, status)"
+    )
+
+
+def _row_to_employee_change_request(row) -> dict:
+    return {
+        "id": row["id"],
+        "change_type": row["change_type"] or "",
+        "employee_id": row["employee_id"],
+        "name": row["name"] or "",
+        "department": row["department"] or "",
+        "fingerprint": row["fingerprint"] or "",
+        "device": row["device"] or "",
+        "team": row["team"] or "",
+        "current_job_role": row["current_job_role"] or "",
+        "proposed_job_role": row["proposed_job_role"] or "",
+        "status": row["status"] or EMPLOYEE_CHANGE_PENDING,
+        "requested_by": row["requested_by"] or "",
+        "requested_at": row["requested_at"] or "",
+        "reviewed_by": row["reviewed_by"] or "",
+        "reviewed_at": row["reviewed_at"] or "",
+        "rejection_reason": row["rejection_reason"] or "",
+    }
+
+
+def list_employees_for_team(department: str, team: str) -> list:
+    department = (department or "").strip().lower()
+    team = (team or "").strip().lower()
+    if not department or not team:
+        return []
+    return [
+        person
+        for person in list_employees()
+        if person.get("active", True)
+        and (person.get("department") or "").strip().lower() == department
+        and (person.get("team") or "").strip().lower() == team
+    ]
+
+
+def find_employee_change_request(request_id) -> dict | None:
+    try:
+        request_id = int(request_id)
+    except (TypeError, ValueError):
+        return None
+    init_db()
+    conn = db()
+    row = conn.execute(
+        "SELECT * FROM employee_change_requests WHERE id = ?",
+        (request_id,),
+    ).fetchone()
+    conn.close()
+    return _row_to_employee_change_request(row) if row else None
+
+
+def list_pending_employee_change_requests() -> list:
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        """
+        SELECT * FROM employee_change_requests
+        WHERE status = ?
+        ORDER BY requested_at ASC, id ASC
+        """,
+        (EMPLOYEE_CHANGE_PENDING,),
+    ).fetchall()
+    conn.close()
+    return [_row_to_employee_change_request(row) for row in rows]
+
+
+def list_employee_change_requests_for_team(department: str, team: str, limit: int = 40) -> list:
+    department = (department or "").strip()
+    team = (team or "").strip()
+    if not department or not team:
+        return []
+    init_db()
+    conn = db()
+    rows = conn.execute(
+        """
+        SELECT * FROM employee_change_requests
+        WHERE department = ? AND team = ?
+        ORDER BY requested_at DESC, id DESC
+        LIMIT ?
+        """,
+        (department, team, int(limit)),
+    ).fetchall()
+    conn.close()
+    return [_row_to_employee_change_request(row) for row in rows]
+
+
+def has_pending_employee_create(device: str, fingerprint: str) -> bool:
+    device = normalize_device(device)
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    if not device or not fingerprint:
+        return False
+    init_db()
+    conn = db()
+    row = conn.execute(
+        """
+        SELECT id FROM employee_change_requests
+        WHERE change_type = ? AND status = ? AND device = ? AND fingerprint = ?
+        LIMIT 1
+        """,
+        (EMPLOYEE_CHANGE_CREATE, EMPLOYEE_CHANGE_PENDING, device, fingerprint),
+    ).fetchone()
+    conn.close()
+    return bool(row)
+
+
+def has_pending_employee_job_role(employee_id: int) -> bool:
+    try:
+        employee_id = int(employee_id)
+    except (TypeError, ValueError):
+        return False
+    init_db()
+    conn = db()
+    row = conn.execute(
+        """
+        SELECT id FROM employee_change_requests
+        WHERE change_type = ? AND status = ? AND employee_id = ?
+        LIMIT 1
+        """,
+        (EMPLOYEE_CHANGE_JOB_ROLE, EMPLOYEE_CHANGE_PENDING, employee_id),
+    ).fetchone()
+    conn.close()
+    return bool(row)
+
+
+def create_employee_change_request(
+    *,
+    change_type: str,
+    requested_by: str,
+    name: str = "",
+    department: str = "",
+    fingerprint: str = "",
+    device: str = "",
+    team: str = "",
+    employee_id: int | None = None,
+    current_job_role: str = "",
+    proposed_job_role: str = "",
+) -> dict:
+    change_type = (change_type or "").strip()
+    if change_type not in (EMPLOYEE_CHANGE_CREATE, EMPLOYEE_CHANGE_JOB_ROLE):
+        raise ValueError("Invalid change type.")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    name = (name or "").strip()
+    department = (department or "").strip()
+    fingerprint = normalize_fingerprint_id(fingerprint)
+    device = normalize_device(device)
+    team = (team or "").strip()
+    proposed_job_role = (proposed_job_role or "").strip()
+    current_job_role = (current_job_role or "").strip()
+    init_db()
+    with DB_LOCK:
+        conn = db()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO employee_change_requests (
+                    change_type, employee_id, name, department, fingerprint, device, team,
+                    current_job_role, proposed_job_role, status, requested_by, requested_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    change_type,
+                    int(employee_id) if employee_id else None,
+                    name,
+                    department,
+                    fingerprint,
+                    device,
+                    team,
+                    current_job_role,
+                    proposed_job_role,
+                    EMPLOYEE_CHANGE_PENDING,
+                    (requested_by or "").strip(),
+                    now,
+                ),
+            )
+            conn.commit()
+            request_id = cursor.lastrowid
+        finally:
+            conn.close()
+    item = find_employee_change_request(request_id)
+    if not item:
+        raise RuntimeError("Failed to create employee change request.")
+    return item
+
+
+def reject_employee_change_request(request_id: int, reviewed_by: str, reason: str = "") -> dict | None:
+    item = find_employee_change_request(request_id)
+    if not item or item["status"] != EMPLOYEE_CHANGE_PENDING:
+        return None
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with DB_LOCK:
+        conn = db()
+        try:
+            conn.execute(
+                """
+                UPDATE employee_change_requests
+                SET status = ?, reviewed_by = ?, reviewed_at = ?, rejection_reason = ?
+                WHERE id = ? AND status = ?
+                """,
+                (
+                    EMPLOYEE_CHANGE_REJECTED,
+                    (reviewed_by or "").strip(),
+                    now,
+                    (reason or "").strip(),
+                    int(request_id),
+                    EMPLOYEE_CHANGE_PENDING,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return find_employee_change_request(request_id)
+
+
+def approve_employee_change_request(request_id: int, reviewed_by: str, departments: set) -> tuple[dict | None, str]:
+    """Apply a pending request. Returns (item, error_message)."""
+    item = find_employee_change_request(request_id)
+    if not item or item["status"] != EMPLOYEE_CHANGE_PENDING:
+        return None, "This request is no longer pending."
+
+    change_type = item["change_type"]
+    if change_type == EMPLOYEE_CHANGE_CREATE:
+        errors = validate_employee(
+            item["name"],
+            item["department"],
+            item["fingerprint"],
+            item["device"],
+            departments,
+            team=item["team"],
+        )
+        if errors:
+            return item, errors[0]
+        role = (item.get("proposed_job_role") or "").strip()
+        if role:
+            allowed = job_roles_for(item["department"])
+            if role not in allowed:
+                return item, "Proposed job role is not valid for this department."
+        try:
+            created = create_employee(
+                item["name"],
+                item["department"],
+                item["fingerprint"],
+                item["device"],
+                item["team"],
+            )
+        except ValueError as exc:
+            return item, str(exc)
+        if role:
+            set_employee_job_role(created["id"], role)
+    elif change_type == EMPLOYEE_CHANGE_JOB_ROLE:
+        employee = find_employee_by_id(item.get("employee_id"))
+        if not employee or not employee.get("active"):
+            return item, "Employee no longer exists."
+        role = (item.get("proposed_job_role") or "").strip()
+        allowed = job_roles_for(employee.get("department") or "")
+        if role and role not in allowed:
+            return item, "Proposed job role is not valid for this department."
+        if not allowed and role:
+            return item, "This department has no job roles."
+        set_employee_job_role(employee["id"], role)
+    else:
+        return item, "Unknown change type."
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with DB_LOCK:
+        conn = db()
+        try:
+            conn.execute(
+                """
+                UPDATE employee_change_requests
+                SET status = ?, reviewed_by = ?, reviewed_at = ?, rejection_reason = ''
+                WHERE id = ? AND status = ?
+                """,
+                (
+                    EMPLOYEE_CHANGE_APPROVED,
+                    (reviewed_by or "").strip(),
+                    now,
+                    int(request_id),
+                    EMPLOYEE_CHANGE_PENDING,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return find_employee_change_request(request_id), ""
 
 
 def normalize_normal_rules(value) -> bool:
