@@ -223,7 +223,7 @@ _SOCIAL_KPI_ROLES = [
 ]
 
 _SEO_GOOGLE_LEVELS = ["Team Leader", "Senior", "Mid-Level", "Junior", "Trainee"]
-_SEO_LEVELS = ["Team Leader", "Senior", "Specialist", "Mid-Level", "Junior", "Trainee"]
+_SEO_LEVELS = ["Team Leader", "Senior", "Mid-Level", "Specialist", "Junior", "Trainee"]
 _SEO_GOOGLE_ROLES = (
     [f"SEO · {level}" for level in _SEO_LEVELS]
     + [

@@ -521,14 +521,6 @@ KPI_CRITERIA_SETS = {
         ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.20),
         ("Mentoring Juniors & Communication", "توجيه الجونيورز والتواصل", 0.15),
     ]),
-    "SEO · Specialist": _kpi_criteria_list([
-        ("Technical SEO Audits & Implementation", "الأوديت التقني والتنفيذ", 0.20),
-        ("Keyword Research & On-Page Optimization", "بحث الكلمات وتحسين الصفحات", 0.20),
-        ("Organic SEO KPIs Achievement", "تحقيق مؤشرات السيو العضوي", 0.20),
-        ("Backlink Analysis & Quality Link Building", "تحليل الباك لينكس وبناء روابط عالية الجودة", 0.15),
-        ("Data Analysis & Reporting", "تحليل البيانات والتقارير", 0.10),
-        ("Ownership, Communication & Delivery", "الملكية والتواصل والتسليم", 0.15),
-    ]),
     "SEO · Mid-Level": _kpi_criteria_list([
         ("Independent Execution of SEO Plans", "تنفيذ خطط السيو باستقلالية", 0.20),
         ("Achieving Assigned Client KPIs", "تحقيق مؤشرات العملاء المسندة", 0.20),
@@ -536,6 +528,14 @@ KPI_CRITERIA_SETS = {
         ("Link Building & Off-Page Quality", "بناء الروابط وجودة الـ Off-Page", 0.10),
         ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.25),
         ("Reporting & Team Communication", "التقارير والتواصل مع الفريق", 0.10),
+    ]),
+    "SEO · Specialist": _kpi_criteria_list([
+        ("Technical SEO Audits & Implementation", "الأوديت التقني والتنفيذ", 0.20),
+        ("Keyword Research & On-Page Optimization", "بحث الكلمات وتحسين الصفحات", 0.20),
+        ("Organic SEO KPIs Achievement", "تحقيق مؤشرات السيو العضوي", 0.20),
+        ("Backlink Analysis & Quality Link Building", "تحليل الباك لينكس وبناء روابط عالية الجودة", 0.15),
+        ("Data Analysis & Reporting", "تحليل البيانات والتقارير", 0.10),
+        ("Ownership, Communication & Delivery", "الملكية والتواصل والتسليم", 0.15),
     ]),
     "SEO · Junior": _kpi_criteria_list([
         ("Execution of Assigned Tasks", "تنفيذ المهام المسندة", 0.30),
