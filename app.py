@@ -521,6 +521,14 @@ KPI_CRITERIA_SETS = {
         ("Renewal Rate for the Period", "نسبة التجديد في الفترة", 0.20),
         ("Mentoring Juniors & Communication", "توجيه الجونيورز والتواصل", 0.15),
     ]),
+    "SEO · Specialist": _kpi_criteria_list([
+        ("Technical SEO Audits & Implementation", "الأوديت التقني والتنفيذ", 0.20),
+        ("Keyword Research & On-Page Optimization", "بحث الكلمات وتحسين الصفحات", 0.20),
+        ("Organic SEO KPIs Achievement", "تحقيق مؤشرات السيو العضوي", 0.20),
+        ("Backlink Analysis & Quality Link Building", "تحليل الباك لينكس وبناء روابط عالية الجودة", 0.15),
+        ("Data Analysis & Reporting", "تحليل البيانات والتقارير", 0.10),
+        ("Ownership, Communication & Delivery", "الملكية والتواصل والتسليم", 0.15),
+    ]),
     "SEO · Mid-Level": _kpi_criteria_list([
         ("Independent Execution of SEO Plans", "تنفيذ خطط السيو باستقلالية", 0.20),
         ("Achieving Assigned Client KPIs", "تحقيق مؤشرات العملاء المسندة", 0.20),
@@ -4360,13 +4368,15 @@ def team_employees_context(manager: dict) -> dict:
     department = (manager.get("department") or "").strip()
     team = (manager.get("team") or "").strip()
     employees = user_store.list_employees_for_team(department, team)
-    pending_ids = {
-        int(item["employee_id"])
-        for item in user_store.list_employee_change_requests_for_team(department, team)
-        if item["status"] == user_store.EMPLOYEE_CHANGE_PENDING
-        and item["change_type"] == user_store.EMPLOYEE_CHANGE_JOB_ROLE
-        and item.get("employee_id")
-    }
+    team_requests = user_store.list_employee_change_requests_for_team(department, team)
+    pending_by_employee = {}
+    for item in team_requests:
+        if (
+            item["status"] == user_store.EMPLOYEE_CHANGE_PENDING
+            and item["change_type"] == user_store.EMPLOYEE_CHANGE_JOB_ROLE
+            and item.get("employee_id")
+        ):
+            pending_by_employee[int(item["employee_id"])] = item
     return {
         "manager": manager,
         "department": department,
@@ -4374,8 +4384,9 @@ def team_employees_context(manager: dict) -> dict:
         "employees": employees,
         "devices": user_store.list_devices(),
         "job_roles": user_store.job_roles_for(department),
-        "pending_job_role_ids": pending_ids,
-        "my_change_requests": user_store.list_employee_change_requests_for_team(department, team),
+        "pending_job_role_ids": set(pending_by_employee.keys()),
+        "pending_by_employee": pending_by_employee,
+        "my_change_requests": team_requests,
     }
 
 
@@ -4440,6 +4451,41 @@ def team_employees_propose_job_role():
         proposed_job_role=job_role,
     )
     flash(f"Title change for {employee['name']} sent to HR for approval.", "success")
+    return redirect(url_for("team_employees"))
+
+
+@app.route("/team-employees/cancel-job-role", methods=["POST"])
+@login_required
+def team_employees_cancel_job_role():
+    manager = session["manager"]
+    if not can_propose_employee_changes(manager):
+        flash("Only team leaders can cancel title requests.", "error")
+        return redirect(url_for("dashboard"))
+    if not csrf_is_valid():
+        flash("The form expired. Please refresh and try again.", "error")
+        return redirect(url_for("team_employees"))
+
+    department = (manager.get("department") or "").strip()
+    team = (manager.get("team") or "").strip()
+    item = user_store.find_employee_change_request(request.form.get("request_id"))
+    if (
+        not item
+        or item["status"] != user_store.EMPLOYEE_CHANGE_PENDING
+        or item["change_type"] != user_store.EMPLOYEE_CHANGE_JOB_ROLE
+        or (item.get("department") or "").strip().lower() != department.lower()
+        or (item.get("team") or "").strip().lower() != team.lower()
+    ):
+        flash("Pending title request not found.", "error")
+        return redirect(url_for("team_employees"))
+
+    cancelled = user_store.cancel_employee_change_request(
+        item["id"],
+        manager.get("username") or manager.get("name") or "",
+    )
+    if cancelled:
+        flash(f"Cancelled title request for {item['name']}. You can choose again.", "success")
+    else:
+        flash("Could not cancel this request.", "error")
     return redirect(url_for("team_employees"))
 
 

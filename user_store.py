@@ -223,11 +223,15 @@ _SOCIAL_KPI_ROLES = [
 ]
 
 _SEO_GOOGLE_LEVELS = ["Team Leader", "Senior", "Mid-Level", "Junior", "Trainee"]
-_SEO_GOOGLE_ROLES = [
-    f"{track} · {level}"
-    for track in ("SEO", "Google", "WordPress", "Account Manager")
-    for level in _SEO_GOOGLE_LEVELS
-]
+_SEO_LEVELS = ["Team Leader", "Senior", "Specialist", "Mid-Level", "Junior", "Trainee"]
+_SEO_GOOGLE_ROLES = (
+    [f"SEO · {level}" for level in _SEO_LEVELS]
+    + [
+        f"{track} · {level}"
+        for track in ("Google", "WordPress", "Account Manager")
+        for level in _SEO_GOOGLE_LEVELS
+    ]
+)
 
 JOB_ROLES_BY_DEPARTMENT = {
     "web": ["Front End", "Back End", "Account Manager"],
@@ -513,6 +517,15 @@ def reject_employee_change_request(request_id: int, reviewed_by: str, reason: st
         finally:
             conn.close()
     return find_employee_change_request(request_id)
+
+
+def cancel_employee_change_request(request_id: int, cancelled_by: str) -> dict | None:
+    """Team leader withdraws their own pending request so they can submit again."""
+    return reject_employee_change_request(
+        request_id,
+        cancelled_by,
+        "Cancelled by team leader",
+    )
 
 
 def approve_employee_change_request(request_id: int, reviewed_by: str, departments: set) -> tuple[dict | None, str]:

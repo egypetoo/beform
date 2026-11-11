@@ -36,7 +36,7 @@
         <section class="form-shell users-shell">
             <h2 class="section-title">Team members</h2>
             {% if employees %}
-                <p class="muted">{{ employees|length }} employee{{ 's' if employees|length != 1 else '' }} · change a title to send an HR approval request</p>
+                <p class="muted">{{ employees|length }} employee{{ 's' if employees|length != 1 else '' }} · choose a title, confirm, then send to HR. You can cancel a pending request and pick again.</p>
                 <div class="table-wrap">
                     <table class="users-table">
                         <thead>
@@ -55,19 +55,30 @@
                                     <td data-label="Device">{{ employee.device }}</td>
                                     <td data-label="Job title">
                                         {% if job_roles %}
-                                            {% if employee.id in pending_job_role_ids %}
-                                                <span class="muted">Pending HR approval…</span>
+                                            {% set pending = pending_by_employee.get(employee.id) %}
+                                            {% if pending %}
+                                                <div class="muted">Pending: <strong>{{ pending.proposed_job_role or 'none' }}</strong></div>
                                                 {% if employee.job_role %}<div class="muted">Current: {{ employee.job_role }}</div>{% endif %}
+                                                <form method="post" action="{{ url_for('team_employees_cancel_job_role') }}" style="margin-top:8px;"
+                                                      onsubmit="return confirm('Cancel this title request for {{ employee.name }}?');">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                    <input type="hidden" name="request_id" value="{{ pending.id }}">
+                                                    <button class="btn-sm btn-reject" type="submit">Cancel &amp; choose again</button>
+                                                </form>
                                             {% else %}
-                                                <form method="post" action="{{ url_for('team_employees_propose_job_role') }}">
+                                                <form method="post" action="{{ url_for('team_employees_propose_job_role') }}" class="title-request-form"
+                                                      style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"
+                                                      data-name="{{ employee.name }}"
+                                                      data-current="{{ employee.job_role or '' }}">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                                     <input type="hidden" name="employee_id" value="{{ employee.id }}">
-                                                    <select name="job_role" aria-label="Job role" onchange="this.form.submit()" style="min-width:200px">
+                                                    <select name="job_role" aria-label="Job role" style="min-width:200px">
                                                         <option value="">Job role…</option>
                                                         {% for role in job_roles %}
                                                             <option value="{{ role }}" {% if employee.job_role == role %}selected{% endif %}>{{ role }}</option>
                                                         {% endfor %}
                                                     </select>
+                                                    <button class="btn-sm btn-approve" type="submit">Request</button>
                                                 </form>
                                             {% endif %}
                                         {% else %}
@@ -115,10 +126,20 @@
                                     <td data-label="Status">
                                         {% if item.status == 'pending' %}
                                             Pending
+                                            <form method="post" action="{{ url_for('team_employees_cancel_job_role') }}" style="margin-top:6px;"
+                                                  onsubmit="return confirm('Cancel this title request?');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                <input type="hidden" name="request_id" value="{{ item.id }}">
+                                                <button class="btn-sm btn-reject" type="submit">Cancel</button>
+                                            </form>
                                         {% elif item.status == 'approved' %}
                                             Approved
                                         {% else %}
-                                            Rejected{% if item.rejection_reason %}: {{ item.rejection_reason }}{% endif %}
+                                            {% if item.rejection_reason == 'Cancelled by team leader' %}
+                                                Cancelled
+                                            {% else %}
+                                                Rejected{% if item.rejection_reason %}: {{ item.rejection_reason }}{% endif %}
+                                            {% endif %}
                                         {% endif %}
                                     </td>
                                 </tr>
@@ -129,5 +150,30 @@
             </section>
         {% endif %}
     </main>
+    <script>
+        document.querySelectorAll('.title-request-form').forEach(function (form) {
+            form.addEventListener('submit', function (event) {
+                var select = form.querySelector('select[name="job_role"]');
+                var role = (select && select.value || '').trim();
+                var current = (form.dataset.current || '').trim();
+                var name = form.dataset.name || 'this employee';
+                if (!role && !current) {
+                    event.preventDefault();
+                    alert('Choose a job title first.');
+                    return;
+                }
+                if (role === current) {
+                    event.preventDefault();
+                    alert('This is already the current title.');
+                    return;
+                }
+                var nextLabel = role || 'none';
+                var currentLabel = current || 'none';
+                if (!confirm('Send title change for ' + name + '?\n\n' + currentLabel + ' → ' + nextLabel + '\n\nHR must approve before it applies.')) {
+                    event.preventDefault();
+                }
+            });
+        });
+    </script>
 </body>
 </html>
