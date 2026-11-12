@@ -756,6 +756,30 @@ def cycle_label_for(cycle_start: str) -> str:
     return f"{start.strftime('%d %b')} – {cycle_end_for(start).strftime('%d %b %Y')}"
 
 
+def kpi_month_label_for(cycle_start: str) -> str:
+    """KPI-only display name: calendar month of the payroll cycle's closing day.
+
+    Storage keys stay as payroll cycle starts (26th) so existing evaluations
+    keep matching. Example: 2026-09-26 (26 Sep–25 Oct) → "October 2026".
+    """
+    try:
+        start = datetime.strptime(str(cycle_start or "")[:10], "%Y-%m-%d")
+    except ValueError:
+        return str(cycle_start or "")
+    return cycle_end_for(start).strftime("%B %Y")
+
+
+def kpi_cycles(count: int = 8) -> list:
+    """Same underlying payroll cycle keys as payroll_cycles, month labels for KPI UI."""
+    return [
+        {
+            **item,
+            "label": kpi_month_label_for(item["start"]),
+        }
+        for item in payroll_cycles(count)
+    ]
+
+
 def kpi_history_for_employee(employee: dict | None) -> list:
     if not employee or not kpi_enabled_for(employee.get("department") or ""):
         return []
@@ -770,7 +794,7 @@ def kpi_history_for_employee(employee: dict | None) -> list:
         criteria = kpi_criteria_for(item["criteria_set"])
         result = kpi_result(item["scores"], item["kpi_amount"], criteria)
         history.append({
-            "cycle_label": cycle_label_for(item["cycle_start"]),
+            "cycle_label": kpi_month_label_for(item["cycle_start"]),
             "total": result["total"],
             "payout_percent": result["payout_percent"],
             "criteria_set": item["criteria_set"],
@@ -5095,7 +5119,7 @@ def kpi_admin():
     if not can_manage_kpi(manager):
         flash("KPI evaluation is not enabled for your department yet.", "error")
         return redirect(url_for("dashboard"))
-    cycles = payroll_cycles()
+    cycles = kpi_cycles()
     cycle_starts = {item["start"] for item in cycles}
     cycle_param = (request.form.get("cycle_start") or request.args.get("cycle") or current_cycle_value()).strip()
     history_bulk = cycle_param == KPI_HISTORY_BULK_VALUE
@@ -5110,7 +5134,7 @@ def kpi_admin():
             cycle_start = current_cycle_value()
         eval_cycle = cycle_start
         target_cycles = [cycle_start]
-        cycle_label = cycle_label_for(cycle_start)
+        cycle_label = kpi_month_label_for(cycle_start)
     all_employees = kpi_employees_for(manager, eval_cycle)
     if history_bulk:
         all_employees = [
@@ -5397,7 +5421,7 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True,
         headers = [headers[index] for index in keep]
         rows = [[row[index] for index in keep] for row in rows]
     return {
-        "name": kpi_criteria_set_label(criteria_set) if criteria_set or employees else f"KPI {cycle_label_for(cycle_start)}",
+        "name": kpi_criteria_set_label(criteria_set) if criteria_set or employees else f"KPI {kpi_month_label_for(cycle_start)}",
         "headers": headers,
         "rows": rows,
         "numeric_columns": numeric_columns,
@@ -5418,7 +5442,7 @@ def kpi_export():
         export_name = "history-bulk"
     else:
         cycle_start = cycle_param[:10]
-        if cycle_start not in {item["start"] for item in payroll_cycles()}:
+        if cycle_start not in {item["start"] for item in kpi_cycles()}:
             cycle_start = current_cycle_value()
         export_name = cycle_start
     dept_filter, team_filter = kpi_request_filters(manager)

@@ -177,7 +177,7 @@
                 <div class="kpi-card-head">
                     <h2 class="section-title">KPI</h2>
                     {% if kpi_history|length > 1 %}
-                        <select class="kpi-cycle-select" id="kpi-cycle" aria-label="Payroll cycle">
+                        <select class="kpi-cycle-select" id="kpi-cycle" aria-label="KPI month">
                             {% for kpi in kpi_history %}
                                 <option value="{{ loop.index0 }}">{{ kpi.cycle_label }}</option>
                             {% endfor %}
