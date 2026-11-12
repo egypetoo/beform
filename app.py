@@ -5355,8 +5355,57 @@ def kpi_admin():
     )
 
 
-def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True, criteria_set: str = "") -> dict:
-    criteria = kpi_criteria_for(criteria_set)
+def kpi_export_people(employees: list) -> list:
+    """People ready for Excel export (must have a role / criteria set)."""
+    return [person for person in employees if not person.get("needs_role")]
+
+
+def kpi_employees_by_department(employees: list) -> list:
+    grouped = {}
+    for person in employees:
+        department = (person.get("department") or "").strip() or "Other"
+        grouped.setdefault(department, []).append(person)
+    return sorted(grouped.items(), key=lambda item: item[0].lower())
+
+
+def kpi_shared_criteria_set(employees: list) -> str | None:
+    sets = {(person.get("criteria_set") or "") for person in employees}
+    if len(sets) != 1:
+        return None
+    return next(iter(sets))
+
+
+def kpi_export_criteria(employees: list, criteria_set: str | None = None) -> list:
+    """Named criteria when everyone shares one set; otherwise generic score columns."""
+    shared = criteria_set if criteria_set is not None else kpi_shared_criteria_set(employees)
+    if shared is not None:
+        return kpi_criteria_for(shared)
+    used_keys = set()
+    for person in employees:
+        for item in kpi_criteria_for(person.get("criteria_set") or ""):
+            used_keys.add(item["key"])
+    if not used_keys:
+        used_keys = set(user_store.KPI_CRITERIA_KEYS)
+    return [
+        {
+            "key": key,
+            "ar": f"معيار {index}",
+            "en": f"Criterion {index}",
+            "weight": 0,
+        }
+        for index, key in enumerate(user_store.KPI_CRITERIA_KEYS, start=1)
+        if key in used_keys
+    ]
+
+
+def kpi_export_sheet(
+    employees: list,
+    cycle_start: str,
+    show_money: bool = True,
+    criteria_set: str | None = None,
+    sheet_name: str | None = None,
+) -> dict:
+    criteria = kpi_export_criteria(employees, criteria_set)
     headers = [
         "الاسم",
         "رقم البصمه",
@@ -5366,7 +5415,11 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True,
         "الوظيفة",
         "قيمة الـ KPI",
         *[
-            f"{item['ar']} / {item['en']} (من {KPI_SCORE_MAX} · {int(round(item['weight'] * 100))}%)"
+            (
+                f"{item['ar']} / {item['en']}"
+                if not item.get("weight")
+                else f"{item['ar']} / {item['en']} (من {KPI_SCORE_MAX} · {int(round(item['weight'] * 100))}%)"
+            )
             for item in criteria
         ],
         "إجمالي التقييم %",
@@ -5392,6 +5445,7 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True,
             status_label = "بانتظار الاعتماد"
         else:
             status_label = "لم يتم التقييم"
+        person_keys = {item["key"] for item in kpi_criteria_for(person.get("criteria_set") or "")}
         rows.append([
             person["name"],
             person["fingerprint"],
@@ -5400,7 +5454,10 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True,
             person["team"],
             person["job_role"],
             person["kpi_amount"],
-            *[person["scores"].get(item["key"], "") if result else "" for item in criteria],
+            *[
+                person["scores"].get(item["key"], "") if result and item["key"] in person_keys else ""
+                for item in criteria
+            ],
             result["total"] if result else "",
             payout["payout_percent"] if payout else "",
             payout["payout_amount"] if payout else "",
@@ -5420,8 +5477,14 @@ def kpi_export_sheet(employees: list, cycle_start: str, show_money: bool = True,
         numeric_columns = {keep.index(index) for index in numeric_columns if index in keep}
         headers = [headers[index] for index in keep]
         rows = [[row[index] for index in keep] for row in rows]
+    if sheet_name:
+        name = sheet_name
+    elif criteria_set:
+        name = kpi_criteria_set_label(criteria_set)
+    else:
+        name = f"KPI {kpi_month_label_for(cycle_start)}"
     return {
-        "name": kpi_criteria_set_label(criteria_set) if criteria_set or employees else f"KPI {kpi_month_label_for(cycle_start)}",
+        "name": str(name)[:31],
         "headers": headers,
         "rows": rows,
         "numeric_columns": numeric_columns,
@@ -5452,13 +5515,34 @@ def kpi_export():
             person for person in employees
             if " ".join(person["department"].strip().lower().split()) in KPI_HISTORY_BULK_DEPARTMENTS
         ]
-    groups = kpi_groups(kpi_filtered(employees, dept_filter, team_filter))
+    people = kpi_export_people(kpi_filtered(employees, dept_filter, team_filter))
+    show_money = is_hr(manager)
+    used_sheet_names = set()
+
+    def _unique_sheet_name(label: str) -> str:
+        base = re.sub(r'[\\/*?:\[\]]', "-", str(label or "Sheet")).strip() or "Sheet"
+        base = base[:31]
+        name = base
+        index = 2
+        while name.lower() in used_sheet_names:
+            suffix = f" ({index})"
+            name = f"{base[: max(1, 31 - len(suffix))]}{suffix}"
+            index += 1
+        used_sheet_names.add(name.lower())
+        return name
+
     sheets = [
-        kpi_export_sheet(group["employees"], cycle_start, show_money=is_hr(manager), criteria_set=group["criteria_set"])
-        for group in groups
-    ] or [kpi_export_sheet([], cycle_start, show_money=is_hr(manager))]
-    if history_bulk and sheets:
-        sheets[0]["name"] = "History bulk"
+        kpi_export_sheet(people, cycle_start, show_money=show_money, sheet_name=_unique_sheet_name("All")),
+    ]
+    for department, members in kpi_employees_by_department(people):
+        sheets.append(
+            kpi_export_sheet(
+                members,
+                cycle_start,
+                show_money=show_money,
+                sheet_name=_unique_sheet_name(department),
+            )
+        )
     if is_hr(manager):
         scope = "-".join(
             part for part in (
